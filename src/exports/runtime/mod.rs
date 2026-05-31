@@ -5,6 +5,7 @@ use {
         marker::format::MarkerType,
         notify_quit,
         settings::state::BootstrapState,
+        Interruption,
     },
     ::log::info,
     anyhow::Context,
@@ -19,7 +20,7 @@ use {
         path::{Path, PathBuf},
         ptr::{self, NonNull},
         sync::{
-            atomic::{AtomicBool, AtomicI32, AtomicPtr, Ordering},
+            atomic::{AtomicI32, AtomicPtr, AtomicU8, Ordering},
             LazyLock,
             Mutex,
             Once,
@@ -356,12 +357,37 @@ pub fn is_ingame() -> RuntimeResult<bool> {
     Err(RT_UNAVAILABLE)
 }
 
-static EXIT: AtomicBool = AtomicBool::new(false);
-pub fn is_shutdown() -> bool {
-    EXIT.load(Ordering::Relaxed)
+static EXIT: AtomicU8 = AtomicU8::new(Interruption::NONE);
+pub fn is_shutdown() -> Option<Interruption> {
+    let reason = EXIT.load(Ordering::Relaxed);
+    unsafe { Interruption::from_repr_unchecked(reason) }
 }
-pub fn notify_shutdown() {
-    EXIT.store(true, Ordering::Relaxed);
+/// in case we're reloaded without having been removed from the process
+///
+/// (various dependencies and subsystems don't like this yet, but it's nice to have dreams)
+pub fn reset_shutdown() {
+    EXIT.store(Interruption::NONE, Ordering::Relaxed);
+}
+pub fn notify_shutdown(reason: Interruption) -> Interruption {
+    if let Interruption::GameQuit | Interruption::Abort = reason {
+        // higher-prio reasons can override it sure why not
+        let _prev = EXIT.swap(reason.into(), Ordering::Relaxed);
+        #[cfg(debug_assertions)]
+        if _prev == Interruption::Abort.repr() {
+            ::log::error!("oh no, we just clobbered ABORT");
+        }
+        return reason
+    }
+    let res = EXIT.compare_exchange(
+        Interruption::NONE,
+        reason.into(),
+        Ordering::Relaxed,
+        Ordering::Relaxed,
+    );
+    match res {
+        Ok(..) => reason,
+        Err(prior) => unsafe { Interruption::with_repr_unchecked(prior) },
+    }
 }
 
 pub fn rtapi() -> RuntimeResult<Option<RealTimeApi>> {

@@ -14,6 +14,8 @@ use {
         settings::{state::AddonHostName, ProgressBarSettings},
         timer::{PhaseState, TextAlert, TimerFile},
         Controller,
+        Interruption,
+        InterruptionSignal,
         RENDER_SENDER,
         TEXTURES,
     },
@@ -91,7 +93,7 @@ pub enum RenderEvent {
     InitiateQuit,
     /// Determine primary render host (due to recent load or unload)
     RefreshHost,
-    Quit,
+    Quit(Interruption),
     #[cfg(any(feature = "markers", feature = "space"))]
     UiMapOpen(taimi_meta::ui::MapOpen),
     /// The buffer we were using has disappeared
@@ -99,6 +101,13 @@ pub enum RenderEvent {
     UiDepthReleased(),
     #[cfg(feature = "goggles")]
     UiDepthAcquired(),
+}
+impl RenderEvent {
+    pub const INITIATE_QUIT_REASON: Interruption = match () {
+        #[cfg(todo)]
+        () => Interruption::Shutdown,
+        () => Interruption::Unspecified,
+    };
 }
 
 #[derive(Display, Default, Clone, Debug, Deserialize, Serialize, EnumIter, PartialEq)]
@@ -251,8 +260,11 @@ impl RenderState {
                         Self::select_host();
                     },
                     InitiateQuit => {
+                        #[cfg(feature = "extension-arcdps")]
+                        Controller::arc_spawn_early_exit();
+
                         crate::TEXTURES.quit();
-                        Controller::try_send(ControllerEvent::UnloadAll);
+                        Controller::send_exit(RenderEvent::INITIATE_QUIT_REASON);
                         let _ = crate::SPACE_SENDER.write().map(|mut s| s.take());
                         if let Ok(mut sender) = crate::RENDER_SENDER.try_write() {
                             sender.take();
@@ -261,7 +273,12 @@ impl RenderState {
                         crate::TEXTURES.cleanup(true);
                         return false
                     },
-                    Quit => {
+                    Quit(Interruption::Abort) => {
+                        log::debug!("render skipping shutdown due to abort");
+                        self.shutdown_background();
+                        return false
+                    },
+                    Quit(_reason) => {
                         self.quit();
                         return false;
                     },
@@ -496,6 +513,10 @@ impl RenderState {
         }
     }
     pub fn cleanup_background(mut self) {
+        self.shutdown_background();
+    }
+    fn shutdown_background(&mut self) {
+        self.receiver.close();
         #[cfg(feature = "space")]
         if let Some(Ok(engine)) = self.engine.take() {
             engine.cleanup_background();
@@ -530,16 +551,17 @@ impl RenderState {
     }
 
     fn shutdown(&mut self) {
-        // Drain remaining queue for relevant events
-        while let Ok(e) = self.receiver.try_recv() {
-            match e {
-                RenderEvent::Quit | RenderEvent::InitiateQuit => {
-                    self.quit();
-                    break
-                },
-                // discard and ignore anything else
-                _ => (),
-            }
+        match Interruption::try_drain_signals(&mut self.receiver) {
+            Some(Interruption::Abort) => {
+                log::debug!("render skipping shutdown due to abort");
+                self.shutdown_background();
+            },
+            #[cfg(todo)]
+            Some(Interruption::GameQuit) => self.shutdown_background(),
+            Some(..) => {
+                self.quit();
+            },
+            None => (),
         }
     }
 
@@ -705,6 +727,16 @@ impl RenderState {
 
 thread_local! {
     static IS_RENDER_THREAD: Cell<bool> = Cell::new(false);
+}
+
+impl InterruptionSignal for RenderEvent {
+    fn interrupted(&self) -> Option<Interruption> {
+        match self {
+            &Self::Quit(reason) => Some(reason),
+            Self::InitiateQuit => Some(RenderEvent::INITIATE_QUIT_REASON),
+            _ => None,
+        }
+    }
 }
 
 pub struct Alignment {}

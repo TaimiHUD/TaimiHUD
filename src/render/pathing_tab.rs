@@ -1,6 +1,10 @@
 use {
     crate::{
-        controller::pathing::{PathingController, PathingEvent},
+        controller::{
+            api::ApiController,
+            pathing::{PathingController, PathingEnables, PathingEvent},
+            Controller,
+        },
         fl,
         render::{machine::RenderMachine, RenderEvent, RenderState},
         settings::{
@@ -26,18 +30,29 @@ use {
     std::collections::HashMap,
     strum::VariantArray,
     taimi_pack::attributes::Festival,
+    taimi_sync::watched::Watched,
 };
 
 #[cfg(feature = "goggles")]
 use crate::space::engine::{Engine, SpaceEvent};
 
 pub struct PathingConfig {
-    katrender: bool,
+    enables: Watched<PathingEnables>,
 }
 
 impl PathingConfig {
     pub fn new() -> Self {
-        Self { katrender: false }
+        let mut state = Self { enables: Watched::EMPTY };
+        Controller::with_sender(|s| {
+            if let Some(p) = &s.pathing {
+                state.enables.restart_watching(&p.enables);
+            }
+        });
+        state
+    }
+
+    fn katrender(&self) -> bool {
+        self.enables.get().contains(PathingEnables::KATRENDER)
     }
 
     pub fn draw(
@@ -46,22 +61,19 @@ impl PathingConfig {
         machine: &mut RenderMachine,
         _state_errors: &mut HashMap<String, anyhow::Error>,
     ) {
-        if let Some(settings) = Settings::try_read() {
-            self.katrender = settings.enable_katrender;
-        };
-
+        let _ = self.enables.get_mut();
         ui.columns(2, "pathing_tab_start", true);
 
         self.draw_header(ui);
 
         let opts_primary = || {
             let available = Engine::is_available();
-            if !available && self.katrender {
+            if !available && self.katrender() {
                 Self::draw_space_error(ui, machine, None);
             }
 
             self.draw_pathing_opts(ui, machine);
-            if available && self.katrender {
+            if available && self.katrender() {
                 ui.separator();
                 let label = fl!("pathing-window");
                 if ui.button(&label) {
@@ -148,13 +160,14 @@ impl PathingConfig {
 
     fn draw_header(&mut self, ui: &Ui) {
         {
-            let _font = (!self.katrender).then(|| RenderState::push_font("big", ui));
-            if ui.checkbox(&fl!("pathing-config-enable"), &mut self.katrender) {
+            let _font = (!self.katrender()).then(|| RenderState::push_font("big", ui));
+            let enables = self.enables.borrow_mut();
+            if ui.checkbox_flags(&fl!("pathing-config-enable"), enables, PathingEnables::KATRENDER) {
                 PathingController::try_send(PathingEvent::ToggleKatRender);
             }
         }
 
-        if self.katrender {
+        if self.katrender() {
             ui.same_line();
             if ui.button(&fl!("render-unload")) {
                 let _disabled = Settings::write_with_blocking(|settings| {
@@ -440,11 +453,29 @@ impl PathingConfig {
             },
         }
 
+        let filters_tree = with_i18n!("pathing-config-filters", |label| TreeNode::new(&label)
+            .flags(TreeNodeFlags::FRAMED)
+            .opened(false, Condition::Once)
+            .tree_push_on_open(true)
+            .push(ui));
+        if let Some(_tree) = filters_tree {
+            let enables = self.enables.borrow_mut();
+            if with_i18n!("pathing-config-api-bypass", |label| ui.checkbox_flags(
+                &label,
+                enables,
+                PathingEnables::API_BYPASS
+            )) {
+                PathingEvent::ApiBypass(Some(enables.contains(PathingEnables::API_BYPASS))).try_send();
+            }
+            if ui.is_item_hovered() {
+                with_i18n!("pathing-config-api-bypass-notice", |msg| ui.tooltip_text(&msg));
+            }
+        }
         let _festivals = TreeNode::new(&fl!("pathing-config-festivals"))
             .flags(TreeNodeFlags::FRAMED)
             .opened(false, Condition::Once)
             .tree_push_on_open(true)
-            .build(ui, || self.draw_festival_opts(ui, machine));
+            .build(ui, || self.draw_festival_opts(ui));
 
         let advanced = || {
             ui.text_wrapped(&fl!("pathing-config-trail-notice"));
@@ -623,31 +654,28 @@ impl PathingConfig {
         Some(())
     }
 
-    fn draw_festival_opts(&mut self, ui: &Ui, machine: &mut RenderMachine) {
-        let change = Self::get_pathing(|s| {
-            let mut change = None;
-            for festival in Festival::all() {
-                let active = machine.festival_active(festival);
-                let selected = s.get_festival_preference(festival);
-                let name = crate::LANGUAGE_LOADER.get(festival.as_str());
-                let title = match active {
-                    true => fl!("pathing-config-festival-active", festival = name),
-                    false => name,
-                };
-                let selection = Selectable::new(title).selected(selected.unwrap_or(active));
-                if selection.build(ui) {
-                    change = Some((festival, match (selected, active) {
-                        (Some(selected), active) if active == !selected => None,
-                        (Some(selected), ..) => Some(!selected),
-                        (None, active) => Some(!active),
-                    }));
-                }
+    fn draw_festival_opts(&mut self, ui: &Ui) {
+        let Some(festivals) = ApiController::active_festivals() else { return };
+        let mut change = None;
+        for festival in Festival::all() {
+            let selected = festivals.get_preference(festival);
+            let active = festivals.active.get(festival);
+            let name = crate::LANGUAGE_LOADER.get(festival.as_str());
+            let title = match active {
+                true => fl!("pathing-config-festival-active", festival = name),
+                false => name,
+            };
+            let selection = Selectable::new(title).selected(selected.unwrap_or(active));
+            if selection.build(ui) {
+                change = Some((festival, match (selected, active) {
+                    (Some(selected), active) if active == !selected => None,
+                    (Some(selected), ..) => Some(!selected),
+                    (None, active) => Some(!active),
+                }));
             }
-            change
-        });
-        if let Some(Some((festival, change))) = change {
+        }
+        if let Some((festival, change)) = change {
             Self::set_pathing(|s| s.set_festival_preference(festival, change));
-            PathingController::try_send(PathingEvent::RequestDisabledPaths);
         }
     }
 

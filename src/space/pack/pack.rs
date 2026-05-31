@@ -4,7 +4,7 @@ use {
         trail::{ActiveTrail, TrailParams},
     },
     crate::{
-        controller::pathing::{PathingController, PathingEvent},
+        controller::pathing::{ExternalFilterState, FestivalFixup, PathingController, PathingEvent},
         exports::runtime::{
             self as rt,
             imgui::{self, Condition, StyleVar, TreeNode, Ui},
@@ -18,7 +18,7 @@ use {
         settings::state::ui::pathing::PathingFilterFlags as PathingFilterState,
         space::{
             dx11::{InstanceBufferData, RenderBackend},
-            pack::{FestivalFixup, MarkerAttributesExt, Pack},
+            pack::{MarkerAttributesExt, Pack},
             render_list::{MapFrustum, RenderEntity, RenderId, RenderList, RenderListBuilder},
             resources::Texture,
             DrawSpace,
@@ -42,7 +42,7 @@ use {
     taimi_d3d::dx11::{buffer::BufferOf, prelude::*},
     taimi_meta::ui::{LocalContext, MapContext},
     taimi_pack::{
-        attributes::{Festival, MarkerAttributes},
+        attributes::{Festival, FilterAttributes, MarkerAttributes},
         category::CategoryId,
         loader::{DirectoryLoader, PackLoaderContext, ZipLoader},
         Category,
@@ -322,10 +322,11 @@ impl ActivePack {
                                 if let Some(mut substate) = state.get_mut(idx) {
                                     if ui.checkbox("", &mut substate) {
                                         *recompute = true;
-                                        PathingController::try_send(PathingEvent::PathingStateUpdate(
+                                        PathingEvent::PathingStateUpdate(
                                             category.full_id.clone(),
                                             *substate,
-                                        ));
+                                        )
+                                        .try_send();
                                     }
                                 }
                             });
@@ -579,7 +580,7 @@ impl ActivePack {
         }
     }
 
-    pub fn disable_paths(&mut self, paths: &HashSet<String>, festivals: &BTreeSet<Festival>) {
+    pub fn disable_paths(&mut self, paths: &HashSet<String>, external: Option<&ExternalFilterState>) {
         for path in paths {
             if let Some(idx) = self.pack.categories.all_categories.get_index_of(&path[..]) {
                 if let Some(mut state) = self.user_category_state.get_mut(idx) {
@@ -587,10 +588,10 @@ impl ActivePack {
                 }
             }
         }
-        self.recompute_enabled(festivals);
+        self.recompute_enabled(external);
     }
 
-    pub fn recompute_enabled(&mut self, festivals: &BTreeSet<Festival>) {
+    pub fn recompute_enabled(&mut self, external: Option<&ExternalFilterState>) {
         let all = &self.pack.categories.all_categories;
         for root_category_id in &self.pack.categories.root_categories {
             if let Some(root) = all.get(root_category_id) {
@@ -603,21 +604,23 @@ impl ActivePack {
                 );
             }
         }
-        for (i, (_, category)) in self.pack.categories.all_categories.iter().enumerate() {
-            let f = category
-                .marker_attributes
-                .filters
-                .as_ref()
-                .and_then(|f| f.festivals);
-            if f.map(|f| !f.iter_festivals().any(|f| festivals.contains(&f)))
-                .unwrap_or(false)
-            {
-                self.enabled_categories.set(i, false)
+        if let Some((festivals, ..)) = external {
+            for (i, (_, category)) in self.pack.categories.all_categories.iter().enumerate() {
+                let f = category
+                    .marker_attributes
+                    .filters
+                    .as_ref()
+                    .and_then(|f| f.festivals);
+                if f.map(|f| !f.is_empty() && !f.intersects(*festivals))
+                    .unwrap_or(false)
+                {
+                    self.enabled_categories.set(i, false)
+                }
             }
         }
         // in response to update(...), moving update_filters down here where it should actually be
         // effective to save on useless loops
-        self.update_filters();
+        self.update_filters(external);
     }
 
     pub fn update(&mut self, render_list: &mut RenderList) {
@@ -840,7 +843,31 @@ impl ActivePack {
         Ok(())
     }
 
-    fn update_filters(&mut self) {
+    fn is_filtered(filters: &FilterAttributes, external: &ExternalFilterState) -> bool {
+        let (festivals, clears, achievements) = external;
+        if let Some(id) = filters.achievement_id {
+            let completed = filters
+                .achievement_bit
+                .and_then(|bit| achievements.is_bit_complete(id as _, bit as _))
+                .unwrap_or_else(|| achievements.is_complete(id as _));
+            if completed {
+                return true
+            }
+        }
+        if let Some(raids) = &filters.raids {
+            let completed = !raids.is_empty() && raids.iter().all(|r| clears.contains(r));
+            if completed {
+                return true
+            }
+        }
+        if let Some(f) = &filters.festivals {
+            if !f.is_empty() && !f.intersects(*festivals) {
+                return true
+            }
+        }
+        false
+    }
+    fn update_filters(&mut self, external: Option<&ExternalFilterState>) {
         for (_i, trail) in &mut self.active_trails {
             let enabled = self.enabled_categories.get(trail.category_idx).map(|b| *b);
             if enabled.is_none() {
@@ -851,6 +878,20 @@ impl ActivePack {
                 );
             }
             trail.filtered = !enabled.unwrap_or(true);
+            if trail.filtered {
+                continue
+            }
+            if let Some(external) = external {
+                let filters = self
+                    .pack
+                    .trails
+                    .get(trail.trail_idx)
+                    .and_then(|trail| trail.attributes.filters.as_ref());
+                let filtered = filters.map(|attrs| Self::is_filtered(attrs, external));
+                if let Some(true) = filtered {
+                    trail.filtered = true;
+                }
+            }
         }
         for (_i, poi) in &mut self.active_pois {
             let enabled = self.enabled_categories.get(poi.category_idx).map(|b| *b);
@@ -862,6 +903,20 @@ impl ActivePack {
                 );
             }
             poi.filtered = !enabled.unwrap_or(true);
+            if poi.filtered {
+                continue
+            }
+            if let Some(external) = external {
+                let filters = self
+                    .pack
+                    .pois
+                    .get(poi.poi_idx)
+                    .and_then(|poi| poi.attributes.filters.as_ref());
+                let filtered = filters.map(|attrs| Self::is_filtered(attrs, external));
+                if let Some(true) = filtered {
+                    poi.filtered = true;
+                }
+            }
         }
     }
 
@@ -909,7 +964,6 @@ pub struct PackCollection {
     pub trail_params: TrailParams,
 
     festival_categories: BTreeMap<&'static str, Festival>,
-    pub active_festivals: BTreeSet<Festival>,
 }
 
 impl PackCollection {
@@ -923,13 +977,13 @@ impl PackCollection {
             trail_params: TrailParams::default(),
             poi_common,
             festival_categories: FestivalFixup::festival_categories(),
-            active_festivals: Default::default(),
         })
     }
 
-    pub fn disable_paths(&mut self, disabled_paths: HashSet<String>) {
+    pub fn disable_paths(&mut self, disabled_paths: &HashSet<String>) {
+        let external = PathingController::external_filter_state();
         for (_pn, pack) in &mut self.loaded_packs {
-            pack.disable_paths(&disabled_paths, &self.active_festivals);
+            pack.disable_paths(&disabled_paths, external.as_ref());
         }
     }
 
@@ -1103,7 +1157,8 @@ impl PackCollection {
             pack.clear();
             pack.cleanup_textures();
         } else {
-            pack.recompute_enabled(&self.active_festivals);
+            let external = PathingController::external_filter_state();
+            pack.recompute_enabled(external.as_ref());
         }
         if inplace {
             self.render_list.entities_mut_end();

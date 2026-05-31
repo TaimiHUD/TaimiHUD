@@ -1,12 +1,14 @@
 [workspace]
 resolver = "3"
 members = [
+  "api/client",
   "pathing/pack",
   "pathing/meta",
   "rt/hoard",
   "rt/ffi",
   "rt/input",
   "rt/sync",
+  "space/d3d",
   "space/d3d",
 ]
 
@@ -57,8 +59,12 @@ statistics = [
 updates = [
   "dep:semver",
 ]
+api = [
+  "dep:taimi_api_client",
+]
 
 space = [
+  "api",
   "dep:itertools",
   "dep:tobj",
   "dep:bevy_ecs",
@@ -72,6 +78,7 @@ space = [
   "windows/Win32_Graphics_Direct3D_Fxc",
   "windows/Win32_Graphics_Hlsl",
   "texture-loader",
+  "paths",
   "goggles",
   "space-list",
   #"space-ecs",
@@ -106,7 +113,10 @@ markers = [
   "windows/Win32_Graphics_Gdi",
 ]
 markers-edit = [
-  "markers"
+  "markers",
+]
+
+paths = [
 ]
 
 meta-cache = [
@@ -286,11 +296,12 @@ ordered-float = { version = "5.0.0", features = [ "serde" ] }
 bvh = { version = "0.11.0", default-features = false, optional = true }
 nalgebra = { version = "0.33", default-features = false, features = [ "convert-mint" ], optional = true }
 semver = { version = "1", optional = true }
-uuid = "1"
+uuid = { version = "1", features = ["v3", "v4", "serde"] }
 regex = "1"
 croner = "3"
 bitvec = { workspace = true }
 
+taimi_api_client = { path = "./api/client", optional = true, features = ["reqwest"] }
 taimi_pack = { path = "./pathing/pack", optional = true }
 taimi_meta = { path = "./pathing/meta", optional = true, default-features = false, features = ["serde"] }
 taimi_d3d = { path = "./space/d3d", optional = true, default-features = false, features = ["dx11", "serde"] }
@@ -354,3 +365,6 @@ bitflags = "2"
 arcdps = { git = "https://github.com/arcnmx/arcdps-rs" }
 arcdps_codegen = { git = "https://github.com/arcnmx/arcdps-rs" }
 evtc = { git = "https://github.com/arcnmx/arcdps-rs" }
+
+[patch.crates-io]
+gw2lib-model = { git = "https://github.com/greaka/gw2lib" }

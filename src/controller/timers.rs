@@ -1,6 +1,6 @@
 use {
     crate::{
-        controller::{ControllerEvent, MapId, RtSender},
+        controller::{Controller, MapId, RtSender},
         exports::runtime::{
             self as rt,
             bindings::{TaimiControls, CONTROLS},
@@ -294,6 +294,19 @@ impl TimersController {
         }
     }
 
+    pub(crate) async fn handle_loading_screen(&mut self) {
+        // TODO: when RTAPI isn't present, this will count "cinematic" sequences
+        // (vistas or whenever arcdps auto-hides for example) as a loading screen
+        // could cause problems with multi-phase fights involving cutscenes?
+        self.reset().await;
+        /*
+        for timer in &mut self.current_timers {
+            timer.cleanup().await;
+        }
+        self.current_timers.clear();
+        */
+    }
+
     pub(crate) async fn handle_combat_event(&mut self, cbt: CombatState) {
         for machine in &mut self.current_timers {
             machine.set_combat_state(cbt);
@@ -319,11 +332,6 @@ impl TimersController {
     }
 
     pub fn try_send(e: TimersEvent) {
-        let sender = crate::CONTROLLER_SENDER.try_read();
-        let sender = sender.as_ref().map(|s| &**s);
-        let full_e = ControllerEvent::Timers(e);
-        if let Ok(Some(sender)) = sender {
-            let _ = sender.try_send(full_e);
-        }
+        Controller::with_sender(|sender| sender.timers_try_send(e));
     }
 }

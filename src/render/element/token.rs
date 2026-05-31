@@ -31,7 +31,6 @@ impl ApiTokenInput {
         self.update_preview(!token.is_empty())
     }
 
-    #[cfg(todo = "unused")]
     pub fn draw(&mut self, ui: &imgui::Ui, label_id: &str) -> Option<String> {
         let changed = self.draw_input(ui, label_id);
         self.draw_finish(ui, changed)

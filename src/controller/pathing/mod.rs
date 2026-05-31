@@ -1,7 +1,17 @@
 use {
     crate::{
-        controller::{Controller, ControllerEvent},
-        exports::runtime::bindings::{GameControl, GameControls, TaimiControls, CONTROLS},
+        controller::{
+            api::{AchievementState, RaidState},
+            Controller,
+        },
+        exports::runtime::bindings::{
+            ControlsReceiver,
+            GameControl,
+            GameControls,
+            TaimiControls,
+            TaimiReceiver,
+            CONTROLS,
+        },
         render::machine::RenderTaskPriority,
         settings::{Settings, SettingsLock, SourceKind},
         space::{
@@ -9,13 +19,15 @@ use {
             pack::{LoaderBox, UnloadedReason},
             Engine,
         },
+        Interruption,
+        InterruptionSignal,
     },
     anyhow::{anyhow, Context},
     futures::{FutureExt, StreamExt},
     std::{path::PathBuf, sync::Arc},
     strum_macros::Display,
     taimi_meta::ui::MapContext,
-    taimi_pack::{category::CategoryId, Pack},
+    taimi_pack::{attributes::Festivals, category::CategoryId, Pack},
     tokio::{
         fs::create_dir_all,
         select,
@@ -23,22 +35,87 @@ use {
     },
 };
 
+pub use self::{
+    festivals::FestivalFixup,
+    shared::{PathingEnables, PathingReceiver, PathingSender},
+};
+
+mod festivals;
+mod shared;
+
+pub type ExternalFilterState = (Festivals, Arc<RaidState>, Arc<AchievementState>);
+
 #[cfg(feature = "space")]
 #[derive(Debug, Clone, Display)]
 pub(crate) enum PathingEvent {
     VisibleToggle { context: Option<MapContext>, set: Option<bool> },
-    ReloadAll,
+    ReloadAll(bool),
     LoadAll,
     UnloadAll,
     RequestDisabledPaths,
     PathingStateUpdate(CategoryId, bool),
     ToggleKatRender,
+    ApiBypass(Option<bool>),
+    Exit(Interruption),
 }
 
-#[derive(Default, Debug)]
-pub(crate) struct PathingController {}
+pub(crate) struct PathingController {
+    rx: PathingReceiver,
+    controls: ControlsReceiver,
+    keybinds: TaimiReceiver,
+    settings: SettingsLock,
+}
 
 impl PathingController {
+    pub fn new(rx: PathingReceiver, settings: SettingsLock) -> Self {
+        Self {
+            rx,
+            controls: CONTROLS.subscribe_controls(),
+            keybinds: CONTROLS.subscribe_taimi(),
+            settings,
+        }
+    }
+
+    pub async fn run(&mut self) -> anyhow::Result<()> {
+        let mut enables = self.rx.enables.borrow().clone();
+        {
+            let settings = self.settings.read().await;
+            enables.set(PathingEnables::KATRENDER, settings.enable_katrender);
+        }
+        self.rx.enables.send_replace(enables);
+        let _interruption = loop {
+            select! {
+                e = self.rx.command.recv() => {
+                    let res = match e {
+                        None => break Interruption::Unspecified,
+                        Some(e) =>
+                            self.handle_event(e).await,
+                    };
+                    match res {
+                        Some(int) => break int,
+                        None => (),
+                    }
+                },
+                _ = self.rx.festivals.changed() => {
+                    self.provide_disabled_paths().await;
+                },
+                controls = self.controls.wait() => match controls {
+                    Err(e) => log::error!("Control bindings error! {e:#}"),
+                    Ok((&controls_state, controls_changed)) => {
+                        self.handle_presses(controls_state, controls_changed).await;
+                    },
+                },
+                keybinds = self.keybinds.wait() => match keybinds {
+                    Err(e) => log::error!("Keybind receive error! {e:#}"),
+                    Ok((binds_state, binds_changed)) => {
+                        self.handle_keybinds(binds_state, binds_changed).await;
+                    },
+                },
+            }
+        };
+        Ok(())
+    }
+
     async fn pathing_state_update(&mut self, path: CategoryId, state: bool) {
         let mut settings_lock = Settings::async_write()
             .await
@@ -48,9 +125,12 @@ impl PathingController {
         drop(settings_lock);
     }
 
-    pub(crate) async fn reload_all(&self, settings: SettingsLock) {
+    pub(crate) async fn reload_all(&self, remove: bool) {
+        if !remove {
+            log::debug!("TODO: pack refresh rather than reload");
+        }
         self.unload_all().await;
-        let res = Self::load_all_inner(settings)
+        let res = Self::load_all_inner(self.settings.clone())
             .await
             .context("Reloading all paths");
         if let Err(e) = res {
@@ -58,8 +138,10 @@ impl PathingController {
         }
     }
 
-    async fn load_all(&self, settings: SettingsLock) {
-        let res = Self::load_all_inner(settings).await.context("Loading all paths");
+    async fn load_all(&self) {
+        let res = Self::load_all_inner(self.settings.clone())
+            .await
+            .context("Loading all paths");
         if let Err(e) = res {
             log::error!("{e}");
         }
@@ -162,12 +244,23 @@ impl PathingController {
         Ok(())
     }
 
-    async fn toggle_katrender(&mut self) {
+    async fn toggle_katrender(&self) {
         let mut settings_lock = Settings::async_write()
             .await
             .expect("Settings unitialized, impossible");
         settings_lock.toggle_katrender();
+        let katrender = settings_lock.enable_katrender;
         drop(settings_lock);
+        self.rx
+            .enables
+            .send_modify(|en| en.set(PathingEnables::KATRENDER, katrender));
+    }
+
+    fn toggle_api_bypass(&self, set: Option<bool>) {
+        self.rx.enables.send_modify(|en| match set {
+            Some(set) => en.set(PathingEnables::API_BYPASS, set),
+            None => en.toggle(PathingEnables::API_BYPASS),
+        });
     }
 
     fn pathing_load_taco(path: PathBuf) -> anyhow::Result<(Pack, LoaderBox)> {
@@ -242,10 +335,11 @@ impl PathingController {
         }
     }
 
-    async fn provide_disabled_paths(&self, settings: SettingsLock) {
-        let settings_lock = settings.read().await;
-        let disabled_paths = settings_lock.disabled_paths.clone();
-        drop(settings_lock);
+    async fn provide_disabled_paths(&self) {
+        let disabled_paths = {
+            let settings_lock = self.settings.read().await;
+            settings_lock.disabled_paths.clone()
+        };
 
         let context = "Providing disabled paths to engine";
         let res = Controller::run_render(RenderTaskPriority::Normal, move |state| -> anyhow::Result<()> {
@@ -253,7 +347,7 @@ impl PathingController {
                 Some(res) => res.as_mut().map_err(|e| anyhow!("{e:#}")),
                 None => return Ok(()),
             }?;
-            engine.disable_paths(&state.machine, disabled_paths);
+            engine.disable_paths(&disabled_paths);
             Ok(())
         })
         .await;
@@ -263,17 +357,20 @@ impl PathingController {
         }
     }
 
-    pub(crate) async fn handle_event(&mut self, event: PathingEvent, settings: &SettingsLock) {
+    pub(crate) async fn handle_event(&mut self, event: PathingEvent) -> Option<Interruption> {
         use PathingEvent::*;
         match event {
-            ReloadAll => self.reload_all(settings.clone()).await,
-            LoadAll => self.load_all(settings.clone()).await,
+            Exit(interruption) => return Some(interruption),
+            ReloadAll(remove) => self.reload_all(remove).await,
+            LoadAll => self.load_all().await,
             UnloadAll => self.unload_all().await,
-            RequestDisabledPaths => self.provide_disabled_paths(settings.clone()).await,
+            RequestDisabledPaths => self.provide_disabled_paths().await,
             PathingStateUpdate(p, s) => self.pathing_state_update(p, s).await,
             ToggleKatRender => self.toggle_katrender().await,
+            ApiBypass(set) => self.toggle_api_bypass(set),
             VisibleToggle { context, set } => self.set_visible(context, set).await,
         }
+        None
     }
 
     pub(crate) async fn set_visible(&mut self, context: Option<MapContext>, set: Option<bool>) {
@@ -321,7 +418,7 @@ impl PathingController {
         Engine::try_send(SpaceEvent::SettingsDirty);
     }
 
-    pub(crate) async fn handle_keybinds(&mut self, state: TaimiControls, changed: TaimiControls) {
+    async fn handle_keybinds(&mut self, state: TaimiControls, changed: TaimiControls) {
         let pressed = state & changed;
         if pressed.intersects(TaimiControls::PATHING_SPACE) {
             CONTROLS.notify_handled(TaimiControls::PATHING_SPACE);
@@ -348,26 +445,48 @@ impl PathingController {
         log::trace!("TODO: player interaction");
     }
 
-    #[inline]
-    pub fn try_send(e: PathingEvent) {
-        Controller::try_send(e.into())
+    pub fn external_filter_state() -> Option<ExternalFilterState> {
+        Controller::with_sender(|s| {
+            let bypass = s
+                .pathing
+                .as_ref()
+                .map(|p| p.enables.borrow().clone())
+                .unwrap_or_default()
+                .contains(PathingEnables::API_BYPASS);
+            s.api.as_ref().map(|a| {
+                let festivals = a.festivals.borrow().get();
+                let (clears, achievements) = match bypass {
+                    true => Default::default(),
+                    false => (a.raids.borrow().clone(), a.achievements.borrow().clone()),
+                };
+                (festivals, clears, achievements)
+            })
+        })
+        .flatten()
     }
-}
 
-impl From<PathingEvent> for ControllerEvent {
-    fn from(e: PathingEvent) -> Self {
-        ControllerEvent::Pathing(e)
+    #[inline]
+    pub fn try_send(e: PathingEvent) -> bool {
+        Controller::with_sender(|s| s.pathing_try_send(e)).unwrap_or(false)
     }
 }
 
 impl PathingEvent {
     #[inline]
     pub fn try_send(self) {
-        PathingController::try_send(self);
+        let _ = PathingController::try_send(self);
     }
 
     pub const VISIBLE_TOGGLE_SPACE: Self = Self::VisibleToggle { context: None, set: None };
     pub const fn visible_toggle(context: MapContext) -> Self {
         Self::VisibleToggle { context: Some(context), set: None }
+    }
+}
+impl InterruptionSignal for PathingEvent {
+    fn interrupted(&self) -> Option<Interruption> {
+        match self {
+            &Self::Exit(reason) => Some(reason),
+            _ => None,
+        }
     }
 }

@@ -40,6 +40,7 @@ use {
             markers::{MarkersController, MarkersEvent},
             Controller,
             ControllerEvent,
+            ControllerSender,
         },
         exports::runtime as rt,
         render::{machine::RenderMachine, RenderEvent, RenderState},
@@ -75,7 +76,7 @@ use {
         thread::{self, JoinHandle},
         time::Duration,
     },
-    tokio::sync::mpsc::{channel, Sender},
+    tokio::sync::mpsc,
     unic_langid_impl::LanguageIdentifier,
 };
 
@@ -269,15 +270,14 @@ pub mod built_info {
 }
 
 static TEXTURES: LazyLock<rt::TextureLoader> = LazyLock::new(|| rt::TextureLoader::new());
-static CONTROLLER_SENDER: RwLock<Option<Sender<ControllerEvent>>> = RwLock::new(None);
-#[cfg(feature = "extension-nexus")]
+static CONTROLLER_SENDER: RwLock<ControllerSender> = RwLock::new(ControllerSender::EMPTY);
 static QUICK_ACCESS_STATE: LazyLock<watch::Sender<TaimiControls>> =
     LazyLock::new(|| watch::Sender::new(TaimiControls::empty()));
-static RENDER_SENDER: RwLock<Option<Sender<RenderEvent>>> = RwLock::new(None);
+static RENDER_SENDER: RwLock<Option<mpsc::Sender<RenderEvent>>> = RwLock::new(None);
 static ACCOUNT_NAME_CELL: OnceLock<String> = OnceLock::new();
 
 #[cfg(feature = "space")]
-static SPACE_SENDER: RwLock<Option<Sender<SpaceEvent>>> = RwLock::new(None);
+static SPACE_SENDER: RwLock<Option<mpsc::Sender<SpaceEvent>>> = RwLock::new(None);
 
 static CONTROLLER_THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 
@@ -429,6 +429,14 @@ pub(crate) fn pre_uninit_for(host: AddonHostName) -> bool {
     other_hosts.all(|other| !other.is_active())
 }
 pub(crate) fn post_uninit_for(host: AddonHostName) {
+    match rt::is_shutdown() {
+        Some(Interruption::GameQuit | Interruption::Abort) => {
+            // too much cleanup on exit is a bad idea unfortunately
+            // (partly because nexus unload is unsynchronized+racy, therefore urgent)
+            return
+        },
+        _ => (),
+    }
     let mut pending_cleanup = false;
     let other_hosts = AddonHostName::HOST_PRIORITY
         .iter()
@@ -501,6 +509,7 @@ fn init() -> Result<(), &'static str> {
     }
 
     // Set up the thread
+    rt::reset_shutdown();
     let addon_dir = &*ADDON_DIR;
 
     if let Err(e) = rt::reload_language() {
@@ -522,8 +531,8 @@ fn init() -> Result<(), &'static str> {
         }
     }
 
-    let (controller_sender, controller_receiver) = channel::<ControllerEvent>(64);
-    let (render_sender, render_receiver) = channel::<RenderEvent>(48);
+    let (controller_sender, controller_receiver) = ControllerSender::new();
+    let (render_sender, render_receiver) = mpsc::channel::<RenderEvent>(48);
 
     let mut render_state = RENDER_STATE.lock().unwrap();
 
@@ -534,7 +543,7 @@ fn init() -> Result<(), &'static str> {
 
     // muh queues
     *CONTROLLER_THREAD.lock().unwrap() = Some(controller_handler);
-    *CONTROLLER_SENDER.write().unwrap() = Some(controller_sender);
+    *CONTROLLER_SENDER.write().unwrap() = controller_sender;
 
     *render_state = Some(RenderState::new(render_receiver));
     *RENDER_SENDER.write().unwrap() = Some(render_sender);
@@ -625,11 +634,13 @@ fn load_nexus() {
     COMBAT_LOCAL.subscribe(combat_callback).revert_on_unload();
 
     // MumbleLink Identity
-    #[cfg(feature = "markers")]
+    #[cfg(any(feature = "markers", feature = "space"))]
     MUMBLE_IDENTITY_UPDATED
         .subscribe(event_consume!(<MumbleIdentityUpdate> |mumble_identity| {
-            if let Some(mumble_identity) = mumble_identity {
-                MarkersController::receive_mumble_identity(mumble_identity);
+            if let Some(update) = mumble_identity.cloned() {
+                Controller::with_sender(|s| if let Some(tx) = s.mumble_identity.as_ref() {
+                    tx.send_replace(Some(update));
+                });
             }
         }))
         .revert_on_unload();
@@ -895,14 +906,14 @@ fn process_textures() {
             use {
                 anyhow::{anyhow, Context},
                 rt::textures::{Texture, TextureResponse},
-                tokio::sync::mpsc::error::TryRecvError,
             };
             let mut device = None;
 
             loop {
                 let response = match responses.try_recv() {
-                    Err(TryRecvError::Empty) => break,
-                    Err(TryRecvError::Disconnected) => Err(anyhow!("texture loader shut down?")),
+                    Err(mpsc::error::TryRecvError::Empty) => break,
+                    Err(mpsc::error::TryRecvError::Disconnected) =>
+                        Err(anyhow!("texture loader shut down?")),
                     Ok(response) => Ok(response),
                 }?;
                 match response {
@@ -974,15 +985,9 @@ fn notify_quit() {
     // if !RenderState::is_running() { return }
 
     log::info!("Preparing for game exit");
-    rt::notify_shutdown();
+    let int = rt::notify_shutdown(Interruption::GameQuit);
 
-    let mut controller_sender = CONTROLLER_SENDER.write().unwrap();
-    let controller_quit = controller_sender
-        .as_ref()
-        .map(|sender| sender.try_send(ControllerEvent::Quit));
-    if let Some(Ok(())) = controller_quit {
-        *controller_sender = None;
-    }
+    Controller::send_exit(int);
 
     TEXTURES.quit();
 
@@ -1004,7 +1009,7 @@ fn notify_quit() {
         let render_sender = RENDER_SENDER.write().unwrap().take();
         if let Some(sender) = render_sender {
             // this seems futile and unlikely to reach the other side but we can try anyway
-            let _ = sender.try_send(RenderEvent::Quit);
+            let _ = sender.try_send(RenderEvent::Quit(int));
         }
     }
 
@@ -1014,6 +1019,116 @@ fn notify_quit() {
             .wait_for_shutdown()
             .context("failed to shut down texture loader");
         rt::log::error_ok(textures_shutdown);
+    }
+}
+
+#[derive(Debug, Default, Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
+#[repr(u8)]
+pub enum Interruption {
+    /// We don't have much time!
+    GameQuit = 1,
+    /// Addon unload or exit requested
+    Shutdown,
+    /// Individualized unload message intended for a specific component,
+    /// take time to cleanly shutdown
+    Temporary,
+    /// idk quit asap
+    Abort,
+    /// Likely due to channel drop or associated component shutdown
+    #[default]
+    Unspecified,
+}
+
+impl Interruption {
+    pub const NONE: u8 = 0;
+    pub const UNSPECIFIED: u8 = Self::Unspecified.repr();
+    pub const REPR_MIN: u8 = Self::GameQuit.repr();
+    pub const REPR_MAX: u8 = Self::UNSPECIFIED;
+
+    pub const fn from_bool(value: bool) -> Option<Self> {
+        match value {
+            true => Some(Interruption::Unspecified),
+            false => None,
+        }
+    }
+    pub const fn from_repr(value: u8) -> Option<Self> {
+        match value {
+            Self::NONE | Self::REPR_MIN..=Self::REPR_MAX => unsafe { Self::from_repr_unchecked(value) },
+            _ => None,
+        }
+    }
+
+    pub const unsafe fn with_repr_unchecked(value: u8) -> Self {
+        mem::transmute(value)
+    }
+    pub const unsafe fn from_repr_unchecked(value: u8) -> Option<Self> {
+        mem::transmute(value)
+    }
+    pub const fn repr(self) -> u8 {
+        self as _
+    }
+
+    pub fn is_urgent(&self) -> bool {
+        matches!(self, Interruption::Abort | Interruption::GameQuit)
+    }
+
+    /// Drain remaining queue for termination signal, then close the channel -
+    /// discard and ignore everything
+    ///
+    /// consider a timeout when using this...
+    pub async fn drain_signals_async<I: InterruptionSignal>(
+        rx: &mut mpsc::Receiver<I>,
+    ) -> Option<Interruption> {
+        while let Some(e) = rx.recv().await {
+            if let Some(reason) = e.interrupted() {
+                rx.close();
+                return Some(reason)
+            }
+            // discard and ignore everything else
+        }
+        None
+    }
+
+    /// non-async variant of [Self::drain_signals_async]
+    pub fn try_drain_signals<I: InterruptionSignal>(rx: &mut mpsc::Receiver<I>) -> Option<Interruption> {
+        let mut int = None;
+        while let Ok(e) = rx.try_recv() {
+            int = e.interrupted();
+            if int.is_some() {
+                break
+            }
+        }
+        rx.close();
+        int
+    }
+}
+
+impl From<Interruption> for u8 {
+    fn from(value: Interruption) -> Self {
+        value.repr()
+    }
+}
+pub trait InterruptionSignal {
+    fn interrupted(&self) -> Option<Interruption>;
+}
+impl InterruptionSignal for Interruption {
+    fn interrupted(&self) -> Option<Interruption> {
+        Some(*self)
+    }
+}
+impl InterruptionSignal for u8 {
+    fn interrupted(&self) -> Option<Interruption> {
+        Interruption::from_repr(*self)
+    }
+}
+impl InterruptionSignal for bool {
+    fn interrupted(&self) -> Option<Interruption> {
+        Interruption::from_bool(*self)
+    }
+}
+impl InterruptionSignal for Option<()> {
+    fn interrupted(&self) -> Option<Interruption> {
+        self.map(|()| Interruption::Unspecified)
     }
 }
 
@@ -1034,6 +1149,7 @@ fn unload() {
     BootstrapState::try_write_with(|s| s.try_update_latest_host(None));
 
     log::info!("Unloading addon");
+    let reason = rt::notify_shutdown(Interruption::Shutdown);
 
     TEXTURES.quit();
 
@@ -1043,11 +1159,7 @@ fn unload() {
     }
 
     let controller_handle = CONTROLLER_THREAD.lock().unwrap().take();
-    let controller_quit = CONTROLLER_SENDER
-        .write()
-        .unwrap()
-        .take()
-        .map(|sender| sender.try_send(ControllerEvent::Quit));
+    let controller_quit = Controller::send_exit(reason);
 
     let confirm_render_unload = {
         #[cfg(feature = "space")]
@@ -1064,13 +1176,13 @@ fn unload() {
             },
             _ => render_sender
                 .as_ref()
-                .map(|sender| sender.try_send(RenderEvent::Quit)),
+                .map(|sender| sender.try_send(RenderEvent::Quit(reason))),
         };
         let _ = render_sender.take();
 
         log::logger().flush();
         match render_quit {
-            _ if rt::is_shutdown() || render_state.is_none() => {
+            _ if matches!(reason, Interruption::GameQuit) || render_state.is_none() => {
                 // it's already gone, nothing more to do here
                 false
             },
@@ -1109,7 +1221,13 @@ fn unload() {
     }
 
     match controller_quit {
-        Some(Ok(())) | None => match controller_handle {
+        Interruption::Unspecified => log::warn!("Failed to signal controller quit"),
+        Interruption::Abort => (),
+        #[cfg(feature = "extension-nexus")]
+        Interruption::GameQuit if rt::nexus_available() => {
+            log::info!("not bothering to wait for controller");
+        },
+        _ => match controller_handle {
             Some(handle) => {
                 log::info!("Waiting for controller shutdown...");
                 log::logger().flush();
@@ -1120,9 +1238,6 @@ fn unload() {
             None => {
                 log::warn!("Controller unavailable?");
             },
-        },
-        Some(Err(..)) => {
-            log::warn!("Failed to signal controller quit");
         },
     }
 

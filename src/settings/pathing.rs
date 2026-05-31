@@ -1,11 +1,15 @@
+#[cfg(feature = "space")]
+use {
+    crate::controller::Controller,
+    taimi_meta::ui::MapContext,
+    taimi_pack::attributes::{Festival, Festivals},
+};
 use {
     crate::settings::Settings,
     serde::{Deserialize, Serialize},
     std::{collections::BTreeMap, fmt, sync::Arc},
     strum::{IntoStaticStr, VariantArray},
 };
-#[cfg(feature = "space")]
-use {taimi_meta::ui::MapContext, taimi_pack::attributes::Festival};
 
 #[derive(Deserialize, Serialize, Default, Debug, Clone)]
 pub struct PathingSettings {
@@ -19,16 +23,26 @@ impl PathingSettings {
     #[cfg(feature = "space")]
     pub async fn pathing_state_update(settings: &mut Settings, path: String, state: bool) {
         if settings.disabled_paths.contains(&path) && state {
-            settings.disabled_paths.remove(&path);
+            settings.disabled_paths_mut().remove(&path);
         } else if !state {
-            settings.disabled_paths.insert(path);
+            settings.disabled_paths_mut().insert(path);
         }
-        let _ = settings.save().await;
     }
 
     #[cfg(feature = "space")]
     pub fn get_festival_preference(&self, festival: Festival) -> Option<FestivalPreference> {
         self.festival_filter.get(festival.as_str()).copied()
+    }
+    #[cfg(feature = "space")]
+    pub fn festival_preferences(&self) -> (Festivals, Festivals) {
+        Festival::ALL
+            .iter()
+            .map(|&f| match self.get_festival_preference(f) {
+                None => (Default::default(), Default::default()),
+                Some(true) => (Festivals::for_festival(f), Festivals::empty()),
+                Some(false) => (Festivals::empty(), Festivals::for_festival(f)),
+            })
+            .unzip()
     }
     #[cfg(feature = "space")]
     pub fn set_festival_preference(&mut self, festival: Festival, pref: Option<FestivalPreference>) {
@@ -41,6 +55,15 @@ impl PathingSettings {
                 festival_filter.insert(festival.into(), pref);
             },
         }
+        Controller::with_sender(|s| {
+            if let Some(a) = &s.api {
+                a.festivals.send_if_modified(|festivals| {
+                    let prev = festivals.get();
+                    festivals.set_preference(festival, pref);
+                    prev != festivals.get()
+                });
+            }
+        });
     }
     #[cfg(feature = "space")]
     pub fn festival_filter_mut(&mut self) -> &mut BTreeMap<String, FestivalPreference> {

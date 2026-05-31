@@ -1,7 +1,7 @@
 use {
     super::PathingWindowState,
     crate::{
-        controller::pathing::PathingEvent,
+        controller::pathing::{PathingController, PathingEvent},
         space::{engine::Engine, pack::ActivePack},
         with_i18n,
     },
@@ -98,7 +98,8 @@ impl PathingWindowState {
                         *b ^= true;
                     }
                 }
-                pack.recompute_enabled(&engine.packs.active_festivals);
+                let external = PathingController::external_filter_state();
+                pack.recompute_enabled(external.as_ref());
             }
         }
     }

@@ -1,10 +1,14 @@
+#![allow(irrefutable_let_patterns)]
+
 use {
+    self::api::{ApiController, ApiMessage, ApiReceiver, ApiSender},
     crate::{
         exports::runtime::{
             self as rt,
-            bindings::{ControlsReceiver, TaimiControls, TaimiReceiver, CONTROLS},
+            bindings::{TaimiControls, TaimiReceiver, CONTROLS},
         },
-        render::machine::MumblelinkTick,
+        log_join_error,
+        render::{machine::MumblelinkTick, RenderEvent, RenderState},
         settings::{
             state::{BootstrapState, SaveState},
             DeserializedSource,
@@ -16,7 +20,8 @@ use {
             SourcesFile,
         },
         timer::{CombatState, Position},
-        RenderEvent,
+        Interruption,
+        InterruptionSignal,
         SETTINGS,
         SOURCES,
     },
@@ -24,20 +29,24 @@ use {
     arcdps::{evtc::event::Event as arcEvent, AgentOwned},
     glam::f32::Vec3,
     relative_path::RelativePathBuf,
-    std::{ffi::OsStr, path::PathBuf, sync::Arc, time::SystemTime},
+    std::{ffi::OsStr, future::Future, mem, path::PathBuf, sync::Arc, time::SystemTime},
     strum_macros::Display,
-    taimi_meta::ui::gameplay::{GameplayState, GameplayTransition},
+    taimi_meta::ui::gameplay::GameplayState,
     taimi_sync::watched,
     tokio::{
         select,
         sync::{
-            mpsc::{Receiver, Sender},
+            mpsc::{self, Receiver, Sender},
             watch,
             Mutex,
         },
+        task::JoinSet,
         time::{interval, timeout, Duration},
     },
 };
+
+#[cfg(any(feature = "markers", feature = "space"))]
+use crate::render::machine::MumbleIdentityUpdate;
 
 mod generic;
 
@@ -57,8 +66,9 @@ use markers::{MarkersController, MarkersEvent};
 pub(crate) mod pathing;
 
 #[cfg(feature = "space")]
-use pathing::{PathingController, PathingEvent};
+use pathing::{PathingController, PathingEvent, PathingReceiver, PathingSender};
 
+pub(crate) mod api;
 pub(crate) mod runtime;
 
 pub(crate) type MapId = Option<u32>;
@@ -67,6 +77,7 @@ pub(crate) type RtSender = Sender<RenderEvent>;
 #[derive(Debug)]
 pub struct Controller {
     receiver: Receiver<ControllerEvent>,
+    gameplay_rx: watch::Receiver<GameplayState>,
     pub agent: Option<AgentOwned>,
     pub previous_combat_state: bool,
     pub rt_sender: RtSender,
@@ -84,12 +95,10 @@ pub struct Controller {
     state_save: watch::Receiver<SaveState>,
     state_save_throttle: watched::WatchThrottleDelay,
     save_interval: tokio::time::Interval,
-    controls: ControlsReceiver,
     keybinds: TaimiReceiver,
 
     timers: TimersController,
     markers: MarkersController,
-    pathing: PathingController,
 }
 
 impl Controller {
@@ -99,11 +108,13 @@ impl Controller {
 
     pub fn new(
         receiver: Receiver<ControllerEvent>,
+        gameplay_rx: watch::Receiver<GameplayState>,
         rt_sender: Sender<RenderEvent>,
         settings: SettingsLock,
     ) -> Self {
         Self {
             receiver,
+            gameplay_rx,
             previous_combat_state: Default::default(),
             rt_sender,
             settings,
@@ -120,17 +131,15 @@ impl Controller {
             player_position: Default::default(),
             alert_sem: Default::default(),
             save_interval: interval(Duration::from_secs(60 * 10)),
-            controls: CONTROLS.subscribe_controls(),
             keybinds: CONTROLS.subscribe_taimi(),
 
             timers: Default::default(),
             markers: Default::default(),
-            pathing: Default::default(),
         }
     }
 
     pub fn load(
-        receiver: Receiver<ControllerEvent>,
+        mut receiver: ControllerReceiver,
         rt_sender: Sender<crate::RenderEvent>,
         addon_dir: PathBuf,
     ) {
@@ -142,31 +151,84 @@ impl Controller {
             },
         };
         let evt_loop = async move {
-            let settings = Settings::load_access(&addon_dir.clone()).await;
-            let mut state = Self::new(receiver, rt_sender, settings);
-            state.run().await;
+            let critical_failure = || {
+                #[cfg(debug_assertions)]
+                log::error!("controller broken");
+            };
+            let mut controllers = JoinSet::new();
+            {
+                let settings = Settings::load_access(&addon_dir.clone()).await;
+                let Some(gameplay) = receiver.gameplay.take() else {
+                    critical_failure();
+                    return
+                };
+                #[cfg(any(feature = "markers", feature = "space"))]
+                let Some(mumble_identity) = receiver.mumble_identity.take() else {
+                    critical_failure();
+                    return
+                };
+                #[cfg(feature = "space")]
+                if let Some(rx) = receiver.pathing.take() {
+                    let mut pathing = PathingController::new(rx, settings.clone());
+                    controllers.spawn(async move {
+                        let res = pathing.run().await.context("Pathing control loop");
+                        let _ = rt::log::error_ok(res);
+                    });
+                };
+                if let Some(rx) = receiver.api.take() {
+                    let mut api = ApiController::new(rx, settings.clone());
+                    controllers.spawn(async move {
+                        let res = api.run().await.context("API control loop");
+                        let _ = rt::log::error_ok(res);
+                    });
+                };
+                if let Some(receiver) = receiver.generic.take() {
+                    let mut state = Self::new(receiver, gameplay, rt_sender, settings);
+                    #[cfg(feature = "markers")]
+                    {
+                        state.markers.mumble_identity_rx = Some(mumble_identity);
+                    }
+                    controllers.spawn(async move { state.run().await });
+                } else {
+                    critical_failure();
+                };
+            }
+            while let Some(res) = controllers.join_next().await {
+                if let Err(e) = res {
+                    log_join_error("controller", e);
+                }
+            }
         };
         rt.block_on(evt_loop);
         Self::shutdown(rt);
     }
 
     pub async fn late_init(&mut self) {
+        let settings = self.settings.read().await;
         #[cfg(feature = "extension-nexus")]
-        if rt::nexus_available() {
+        let qa = if rt::nexus_available() {
             let mut qa_state = TaimiControls::empty();
-            let (qa_icons, qa_style) = {
-                let settings = self.settings.read().await;
-                crate::QUICK_ACCESS_STATE.send_if_modified(|state| {
-                    let pathing = settings.pathing();
-                    state.set(TaimiControls::PATHING_SPACE, pathing.space.visible_space());
-                    state.set(TaimiControls::PATHING_MAP, pathing.space.visible_worldmap());
-                    state.set(TaimiControls::PATHING_MINIMAP, pathing.space.visible_minimap());
-                    qa_state = *state;
-                    // no need to notify, this is used for initial state after all!
-                    false
-                });
-                (settings.quick_access_visible, settings.quick_access_style)
-            };
+            crate::QUICK_ACCESS_STATE.send_if_modified(|state| {
+                let pathing = settings.pathing();
+                state.set(TaimiControls::PATHING_SPACE, pathing.space.visible_space());
+                state.set(TaimiControls::PATHING_MAP, pathing.space.visible_worldmap());
+                state.set(TaimiControls::PATHING_MINIMAP, pathing.space.visible_minimap());
+                qa_state = *state;
+                // no need to notify, this is used for initial state after all!
+                false
+            });
+            Some((
+                settings.quick_access_visible,
+                settings.quick_access_style,
+                qa_state,
+            ))
+        } else {
+            None
+        };
+        drop(settings);
+
+        #[cfg(feature = "extension-nexus")]
+        if let Some((qa_icons, qa_style, qa_state)) = qa {
             crate::exports::nexus::quick_access_init(qa_icons, qa_style, qa_state);
         }
     }
@@ -218,27 +280,39 @@ impl Controller {
         state.render_inherit();
         state.late_init().await;
 
-        loop {
+        let interruption = loop {
             let state_quick_access = match () {
                 #[cfg(feature = "extension-nexus")]
                 _ => state.state_quick_access.changed(),
                 #[cfg(not(feature = "extension-nexus"))]
                 _ => futures::future::pending::<Result<(), ()>>(),
             };
+            let mumble_identity_rx = match () {
+                #[cfg(feature = "markers")]
+                () => state.markers.mumble_identity_rx.as_mut().unwrap().changed(),
+                #[cfg(not(feature = "markers"))]
+                () => futures::future::pending::<()>(),
+            };
             select! {
                 evt = state.receiver.recv() => match evt {
-                    Some(evt) => {
-                        match state.handle_event(evt).await {
-                            Ok(true) => (),
-                            Ok(false) => break,
-                            Err(error) => {
-                                log::error!("Error! {}", error)
-                            }
+                    Some(evt) => match state.handle_event(evt).await {
+                        Ok(None) => (),
+                        Ok(Some(int)) => break int,
+                        Err(error) => {
+                            log::error!("Error! {}", error)
                         }
                     },
                     None => {
-                        break
+                        break Interruption::Unspecified
                     },
+                },
+                Ok(()) = state.gameplay_rx.changed() => {
+                    let gameplay = *state.gameplay_rx.borrow_and_update();
+                    state.handle_map_event(gameplay).await;
+                    if gameplay.gameplay_map().is_some() {
+                        // force immediate state update
+                        let _ = rt::log::error_ok(state.mumblelink_tick().await);
+                    }
                 },
                 _ = state.save_interval.tick() => {
                     state.commit_settings().await;
@@ -261,21 +335,22 @@ impl Controller {
                         log::error!("{e:#}");
                     }
                 },
-                controls = state.controls.wait() => match controls {
-                    Err(e) => log::error!("Control bindings error! {e:#}"),
-                    Ok((&controls_state, controls_changed)) => {
-                        #[cfg(feature = "space")]
-                        state.pathing.handle_presses(controls_state, controls_changed).await;
-                    },
-                },
                 keybinds = state.keybinds.wait() => match keybinds {
                     Err(e) => log::error!("Keybind receive error! {e:#}"),
                     Ok((binds_state, binds_changed)) => {
                         state.handle_keybinds(binds_state, binds_changed).await;
                     },
                 },
+                _ = mumble_identity_rx => {
+                    #[cfg(feature = "markers")]
+                    {
+                        state.markers.handle_mumble_identity();
+                    }
+                },
             }
-        }
+        };
+
+        state.handle_exit(interruption).await;
     }
 
     async fn handle_keybinds(&mut self, state: TaimiControls, changed: TaimiControls) {
@@ -316,8 +391,6 @@ impl Controller {
                 }
             }
         }
-        #[cfg(feature = "space")]
-        self.pathing.handle_keybinds(state, changed).await;
     }
 
     /*async fn load_markers_file(&mut self) -> anyhow::Result<()> {
@@ -434,14 +507,18 @@ impl Controller {
         Ok(())
     }
 
-    async fn handle_map_event(&mut self, gameplay: GameplayState, _trans: GameplayTransition) {
-        let new_map_id = match gameplay.gameplay_map() {
-            None => {
-                log::debug!("TODO: clear timers on loading screen? {_trans:?}");
-                //self.map_id = None;
+    async fn handle_map_event(&mut self, gameplay: GameplayState) {
+        let new_map_id = match gameplay {
+            GameplayState::Intermission { next_map_id, .. }
+                if next_map_id.map(|id| id.get()) != self.map_id && self.map_id.is_some() =>
+            {
+                self.map_id = None;
+                #[cfg(feature = "timers")]
+                self.timers.handle_loading_screen().await;
                 return
             },
-            Some(map_id) => map_id.get(),
+            GameplayState::Gameplay { map_id: Some(map_id), .. } => map_id.get(),
+            _ => return,
         };
         if Some(new_map_id) != self.map_id {
             log::debug!("Map changed from {:?} to {}", self.map_id, new_map_id);
@@ -581,27 +658,29 @@ impl Controller {
         self.save_settings_internal(settings).await
     }
 
-    async fn commit_state_bootstrap(state: watch::Ref<'_, BootstrapState>) -> anyhow::Result<()> {
+    fn commit_state_bootstrap(
+        state: watch::Ref<'_, BootstrapState>,
+    ) -> impl Future<Output = anyhow::Result<()>> + Send {
         let save = match state {
-            state if !state.has_changed() => return Ok(()),
-            state => {
-                let save = state.start_save()?;
-                drop(state);
-                save
-            },
+            state if !state.has_changed() => Ok(None),
+            state => state.start_save().map(Some),
         };
-        BootstrapState::save_to(&save).await.context("Saving boot state")
+        async move {
+            let Some(save) = save? else { return Ok(()) };
+            BootstrapState::save_to(&save).await.context("Saving boot state")
+        }
     }
-    async fn commit_state_save(state: watch::Ref<'_, SaveState>) -> anyhow::Result<()> {
+    fn commit_state_save(
+        state: watch::Ref<'_, SaveState>,
+    ) -> impl Future<Output = anyhow::Result<()>> + Send {
         let save = match state {
-            state if !state.has_changed() => return Ok(()),
-            state => {
-                let save = state.start_save()?;
-                drop(state);
-                save
-            },
+            state if !state.has_changed() => Ok(None),
+            state => state.start_save().map(Some),
         };
-        SaveState::save_to(&save).await.context("Saving save state")
+        async move {
+            let Some(save) = save? else { return Ok(()) };
+            SaveState::save_to(&save).await.context("Saving save state")
+        }
     }
 
     async fn reload_data(&mut self) {
@@ -612,7 +691,7 @@ impl Controller {
         #[cfg(feature = "markers")]
         self.markers.reload(self.rt_sender.clone()).await;
         #[cfg(feature = "space")]
-        self.pathing.reload_all(self.settings.clone()).await;
+        PathingEvent::ReloadAll(true).try_send();
     }
 
     pub fn with_datasource<R, F: FnOnce(&DeserializedSource) -> Option<R>>(
@@ -659,7 +738,11 @@ impl Controller {
         match kind {
             SourceKind::Timers => TimersController::try_send(TimersEvent::ReloadTimers),
             SourceKind::Markers => MarkersController::try_send(MarkersEvent::ReloadMarkers),
-            SourceKind::Pathing => PathingController::try_send(PathingEvent::ReloadAll),
+            SourceKind::Pathing => {
+                // TODO: if new pack, ReloadAll(false)
+                // TODO: if existing pack, ReloadPack(path) instead
+                PathingEvent::ReloadAll(true).try_send();
+            },
             _ => (),
         }
     }
@@ -727,7 +810,7 @@ impl Controller {
         }
     }
 
-    async fn handle_event(&mut self, event: ControllerEvent) -> anyhow::Result<bool> {
+    async fn handle_event(&mut self, event: ControllerEvent) -> anyhow::Result<Option<Interruption>> {
         use ControllerEvent::*;
         match &event {
             // omit the worst spam offenders
@@ -742,8 +825,6 @@ impl Controller {
             Timers(..) => (),
             #[cfg(feature = "markers")]
             Markers(..) => (),
-            #[cfg(feature = "space")]
-            Pathing(..) => (),
             event => log::debug!("Controller received event: {}", event),
         }
 
@@ -755,8 +836,6 @@ impl Controller {
                     .await,
             #[cfg(feature = "markers")]
             Markers(evt) => self.markers.handle_event(evt, &self.rt_sender).await?,
-            #[cfg(feature = "space")]
-            Pathing(evt) => self.pathing.handle_event(evt, &self.settings).await,
 
             ReloadData => self.reload_data().await,
             SaveSettings => self.save_settings().await,
@@ -777,74 +856,94 @@ impl Controller {
                 false => (),
                 _ => self.mumblelink_tick().await?,
             },
-            GameplayStatus { gameplay, trans } => {
-                self.handle_map_event(gameplay, trans).await;
-                if gameplay.gameplay_map().is_some() {
-                    // force immediate state update
-                    self.mumblelink_tick().await?;
-                }
-            },
-            Quit => {
-                if let Err(e) = self.save_on_quit().await {
-                    log::error!("{e:#}");
-                }
-                return Ok(false)
-            },
-            UnloadAll => {
-                if let Err(e) = self.save_on_quit().await {
-                    log::error!("{e:#}");
-                }
-                #[cfg(feature = "extension-arcdps")]
-                {
-                    use {crate::exports::arcdps as exports, std::thread};
-                    let avail = exports::available();
-                    let arc_cleanup = match avail {
-                        #[cfg(feature = "extension-nexus")]
-                        false if exports::loaded() && !rt::nexus_available() => true,
-                        avail => avail,
-                    };
-                    if arc_cleanup {
-                        thread::spawn(move || {
-                            if avail {
-                                // wait a tiny bit to give render thread cleanup a chance
-                                thread::sleep(Duration::from_millis(84));
-                            }
-                            // TODO: synchronize with controller shutdown in case it takes a while...
-                            let res = unsafe { exports::ExitHandle::try_exit() }
-                                .and_then(|exit| exit.ok_or("unloaded/unaware?"));
-                            match res {
-                                Err(e) => log::error!("Failed to leave arcdps: {e}"),
-                                Ok(exit) => {
-                                    log::info!("goodbye arc");
-                                    exit.free_blocking();
-                                },
-                            }
-                        });
-                    }
-                }
-                return Ok(false)
-            },
+            Quit(reason) => return Ok(Some(reason)),
             // I forget why we needed this, but I think it's a holdover from the buttplug one o:
             //_ => (),
         }
-        Ok(true)
+        Ok(None)
+    }
+
+    pub async fn handle_exit(&mut self, reason: Interruption) {
+        if let Interruption::Abort = reason {
+            log::debug!("controller skipping shutdown due to abort");
+            return
+        }
+        match reason {
+            // no need if we're exiting for good or will be right back...
+            Interruption::GameQuit | Interruption::Temporary => (),
+            // otherwise unloading for typical reasons and should perform clean-up
+            _ => {},
+        }
+        let _ = rt::log::error_ok(self.save_on_quit().await);
+    }
+
+    #[cfg(feature = "extension-arcdps")]
+    pub fn arc_spawn_early_exit() {
+        use {crate::exports::arcdps as exports, std::thread};
+
+        let avail = exports::available();
+        let arc_cleanup = match avail {
+            #[cfg(feature = "extension-nexus")]
+            false if exports::loaded() && !rt::nexus_available() => true,
+            avail => avail,
+        };
+        if arc_cleanup {
+            thread::spawn(move || {
+                if avail {
+                    // wait a tiny bit to give render thread cleanup a chance
+                    thread::sleep(Duration::from_millis(84));
+                }
+                // TODO: synchronize with controller shutdown in case it takes a while...
+                let res = unsafe { exports::ExitHandle::try_exit() }
+                    .and_then(|exit| exit.ok_or("unloaded/unaware?"));
+                match res {
+                    Err(e) => log::error!("Failed to leave arcdps: {e}"),
+                    Ok(exit) => {
+                        log::info!("goodbye arc");
+                        exit.free_blocking();
+                    },
+                }
+            });
+        }
     }
 
     #[cfg(todo = "unused")]
-    pub fn sender() -> Option<Sender<ControllerEvent>> {
-        crate::CONTROLLER_SENDER
-            .try_read()
-            .as_ref()
-            .ok()
-            .and_then(|s| (*s).clone())
+    pub fn try_exit(reason: Interruption) -> Option<Interruption> {
+        let mut sender = crate::CONTROLLER_SENDER.try_write().ok()?;
+        if let Some(reason) = sender.shutdown {
+            return Some(reason)
+        }
+        match sender.exit(reason) {
+            Some(true) => {
+                RenderState::try_send(RenderEvent::Quit(reason));
+                Some(reason)
+            },
+            _ => sender.shutdown,
+        }
+    }
+    pub fn send_exit(reason: Interruption) -> Interruption {
+        let mut sender = match crate::CONTROLLER_SENDER.write() {
+            Ok(s) => s,
+            // if this is poisoned that's very bad news
+            Err(..) => return Interruption::Abort,
+        };
+        match sender.exit(reason) {
+            Some(true) => {
+                RenderState::try_send(RenderEvent::Quit(reason));
+                reason
+            },
+            _ => sender.shutdown.unwrap_or(Interruption::Unspecified),
+        }
+    }
+
+    pub fn with_sender<R, F: FnOnce(&ControllerSender) -> R>(f: F) -> Option<R> {
+        let sender = crate::CONTROLLER_SENDER.try_read().ok()?;
+
+        Some(f(&*sender))
     }
 
     pub fn try_send(e: ControllerEvent) {
-        let sender = crate::CONTROLLER_SENDER.try_read();
-        let sender = sender.as_ref().map(|s| &**s);
-        if let Ok(Some(sender)) = sender {
-            let _ = sender.try_send(e);
-        }
+        Self::with_sender(|sender| sender.generic_try_send(e));
     }
 }
 
@@ -870,10 +969,6 @@ enum GenericEvent {
     ReloadData,
     SaveSettings,
     UiTick(MumblelinkTick),
-    GameplayStatus {
-        gameplay: GameplayState,
-        trans: GameplayTransition,
-    },
     CheckUpdateSources,
     Quit,
     /// Like quit but will also request addon release
@@ -889,8 +984,6 @@ pub enum ControllerEvent {
     Timers(TimersEvent),
     #[cfg(feature = "markers")]
     Markers(MarkersEvent),
-    #[cfg(feature = "space")]
-    Pathing(PathingEvent),
 
     // TODO: remove as porting happens - Generic
     WindowState(String, Option<bool>),
@@ -922,14 +1015,171 @@ pub enum ControllerEvent {
     ReloadData,
     SaveSettings,
     UiTick(MumblelinkTick),
-    GameplayStatus {
-        gameplay: GameplayState,
-        trans: GameplayTransition,
-    },
     CheckUpdateSources,
     CheckAddonUpdate(bool),
-    Quit,
-    /// Like quit but will also request addon release
-    /// (if possible)
-    UnloadAll,
+    Quit(Interruption),
+}
+
+impl ControllerEvent {
+    pub fn try_send(self) {
+        Controller::try_send(self)
+    }
+}
+
+impl InterruptionSignal for ControllerEvent {
+    fn interrupted(&self) -> Option<Interruption> {
+        match self {
+            &Self::Quit(reason) => Some(reason),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ControllerSender {
+    pub shutdown: Option<Interruption>,
+    pub gameplay: Option<watch::Sender<GameplayState>>,
+    #[cfg(any(feature = "markers", feature = "space"))]
+    pub mumble_identity: Option<watch::Sender<Option<MumbleIdentityUpdate>>>,
+    pub generic: Option<Sender<ControllerEvent>>,
+    pub api: Option<ApiSender>,
+    #[cfg(feature = "space")]
+    pub pathing: Option<PathingSender>,
+}
+
+impl ControllerSender {
+    pub const EMPTY: Self = Self {
+        shutdown: None,
+        gameplay: None,
+        #[cfg(any(feature = "markers", feature = "space"))]
+        mumble_identity: None,
+        generic: None,
+        api: None,
+        #[cfg(feature = "space")]
+        pathing: None,
+    };
+
+    pub fn new() -> (Self, ControllerReceiver) {
+        let (generic, generic_rx) = mpsc::channel(64);
+        let gameplay = watch::Sender::new(GameplayState::INITIAL);
+        let (api, api_rx) = ApiSender::new(&gameplay);
+        #[cfg(any(feature = "markers", feature = "space"))]
+        let (mumble_identity_tx, mumble_identity_rx) = watch::channel(None);
+        #[cfg(feature = "paths")]
+        let (pathing, pathing_rx) =
+            PathingSender::new(gameplay.subscribe(), mumble_identity_rx.clone(), &api.festivals);
+
+        let receiver = ControllerReceiver {
+            gameplay: Some(gameplay.subscribe()),
+            #[cfg(any(feature = "markers", feature = "space"))]
+            mumble_identity: Some(mumble_identity_rx),
+            generic: Some(generic_rx),
+            api: Some(api_rx),
+            #[cfg(feature = "space")]
+            pathing: Some(pathing_rx),
+        };
+        let sender = Self {
+            shutdown: None,
+            gameplay: Some(gameplay),
+            #[cfg(any(feature = "markers", feature = "space"))]
+            mumble_identity: Some(mumble_identity_tx),
+            generic: Some(generic),
+            api: Some(api),
+            #[cfg(feature = "space")]
+            pathing: Some(pathing),
+        };
+
+        (sender, receiver)
+    }
+
+    pub fn exit(&mut self, reason: Interruption) -> Option<bool> {
+        #[cfg(feature = "space")]
+        if let Some(sender) = self.pathing.take() {
+            let _ = sender.command.try_send(PathingEvent::Exit(reason));
+        }
+        if let Some(sender) = self.api.take() {
+            let _ = sender.command.try_send(ApiMessage::Exit(reason));
+        }
+        let reason = rt::notify_shutdown(reason);
+        let sent = self
+            .generic
+            .as_ref()?
+            .try_send(ControllerEvent::Quit(reason))
+            .is_ok();
+        if self.shutdown.is_none() {
+            self.shutdown = Some(
+                sent.then_some(reason)
+                    .unwrap_or_else(|| rt::is_shutdown().unwrap_or(Interruption::Unspecified)),
+            );
+        }
+        match (reason, sent) {
+            (Interruption::GameQuit, false) => return Some(false),
+            _ => (),
+        }
+        let generic = self.generic.take();
+        let sent = match generic {
+            Some(generic) if !sent && !reason.is_urgent() =>
+                generic.blocking_send(ControllerEvent::Quit(reason)).is_ok(),
+            _ => sent,
+        };
+        Some(sent)
+    }
+
+    pub fn take(&mut self) -> Self {
+        mem::replace(self, Self::EMPTY)
+    }
+
+    pub fn generic_try_send(&self, message: ControllerEvent) -> bool {
+        self.generic
+            .as_ref()
+            .and_then(move |sender| sender.try_send(message).ok())
+            .is_some()
+    }
+    pub fn api_try_send(&self, message: ApiMessage) -> bool {
+        self.api
+            .as_ref()
+            .and_then(move |api| api.command.try_send(message).ok())
+            .is_some()
+    }
+
+    #[cfg(feature = "timers")]
+    pub fn timers_try_send(&self, message: TimersEvent) -> bool {
+        self.generic
+            .as_ref()
+            .and_then(move |sender| sender.try_send(ControllerEvent::Timers(message)).ok())
+            .is_some()
+    }
+
+    #[cfg(feature = "markers")]
+    pub fn markers_try_send(&self, message: MarkersEvent) -> bool {
+        self.generic
+            .as_ref()
+            .and_then(move |sender| sender.try_send(ControllerEvent::Markers(message)).ok())
+            .is_some()
+    }
+
+    #[cfg(feature = "space")]
+    pub fn pathing_try_send(&self, message: PathingEvent) -> bool {
+        self.pathing
+            .as_ref()
+            .and_then(move |pathing| pathing.command.try_send(message).ok())
+            .is_some()
+    }
+    #[cfg(feature = "space")]
+    pub fn pathing_blocking_send(&self, message: PathingEvent) -> bool {
+        self.pathing
+            .as_ref()
+            .and_then(move |pathing| pathing.command.blocking_send(message).ok())
+            .is_some()
+    }
+}
+
+pub struct ControllerReceiver {
+    pub gameplay: Option<watch::Receiver<GameplayState>>,
+    #[cfg(any(feature = "markers", feature = "space"))]
+    pub mumble_identity: Option<watch::Receiver<Option<MumbleIdentityUpdate>>>,
+    pub generic: Option<Receiver<ControllerEvent>>,
+    pub api: Option<ApiReceiver>,
+    #[cfg(feature = "space")]
+    pub pathing: Option<PathingReceiver>,
 }

@@ -1,3 +1,5 @@
+#[cfg(any(feature = "markers", feature = "space"))]
+pub use nexus::event::MumbleIdentityUpdate;
 use {
     crate::{
         controller::{timers::TimersController, Controller, ControllerEvent},
@@ -81,9 +83,13 @@ impl RenderMachine {
                 _ => None,
             };
 
-            #[cfg(feature = "markers")]
-            if let (true, Some(update)) = (self.identity_users.contains(RenderUsers::MARKERS), update) {
-                MarkersController::receive_mumble_identity(update)
+            #[cfg(any(feature = "markers", feature = "space"))]
+            if let Some(update) = update.cloned() {
+                Controller::with_sender(|s| {
+                    if let Some(tx) = s.mumble_identity.as_ref() {
+                        tx.send_replace(Some(update));
+                    }
+                });
             }
 
             update
