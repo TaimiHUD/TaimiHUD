@@ -2,12 +2,17 @@ use {
     super::TimerWindowState,
     crate::{
         controller::timers::{ProgressBarStyleChange, TimersController, TimersEvent},
-        exports::runtime::{self as rt, bindings},
+        exports::runtime::{
+            self as rt,
+            bindings,
+            imgui::{ComboBox, Condition, MouseButton, Selectable, Slider, TreeNode, TreeNodeFlags, Ui},
+        },
         fl,
         render::{
             element::{keys::KeyBindSelection, language::LanguageSelection, token::ApiTokenInput},
             machine::RenderMachine,
             RenderEvent,
+            RenderState,
             TextFont,
         },
         settings::{
@@ -23,8 +28,6 @@ use {
         MarkersEvent,
     },
     anyhow::Context,
-    nexus::imgui::{ComboBox, Condition, Selectable, Slider, TreeNode, TreeNodeFlags, Ui},
-    std::borrow::Cow,
     strum::IntoEnumIterator,
     tokio::sync::watch,
 };
@@ -91,17 +94,7 @@ impl ConfigTabState {
         ui.dummy([4.0, 4.0]);
 
         if ui.button(&fl!("quit")) {
-            // XXX: this will wipe all of render state, rather than just katrender
-            let mut render_sender = crate::RENDER_SENDER.write().unwrap();
-            let render_quit = render_sender
-                .as_ref()
-                .map(|sender| sender.try_send(RenderEvent::Quit));
-            if let Some(Ok(())) = render_quit {
-                let _ = render_sender.take();
-                let _ = crate::SPACE_SENDER.write().unwrap().take();
-                crate::TEXTURES.quit();
-            }
-            Controller::try_send(ControllerEvent::UnloadAll);
+            RenderState::try_send(RenderEvent::InitiateQuit);
         }
         ui.same_line();
         if ui.button(&fl!("save")) {
@@ -402,6 +395,8 @@ pub struct ConfigUpdateState {
     remote_version_release: Option<ResolvedVersion>,
     gh_api_token: ApiTokenInput,
     changed: watch::Receiver<BootstrapState>,
+    channel_buffer: String,
+    version_buffer: String,
 }
 
 #[cfg(feature = "updates")]
@@ -414,6 +409,8 @@ impl ConfigUpdateState {
             remote_version_release: Default::default(),
             gh_api_token: ApiTokenInput::new(),
             changed: BootstrapState::get().subscribe(),
+            channel_buffer: String::new(),
+            version_buffer: String::new(),
         };
         state.sync_state();
         state
@@ -425,6 +422,8 @@ impl ConfigUpdateState {
         self.host_preference = state.update_host_preference().clone();
         //self.preference = state.update_preference().clone();
         self.remote_version = state.update_remote_version.clone();
+        self.channel_buffer.clone_from(&state.update_override_channel);
+        self.version_buffer.clone_from(&state.update_override_version);
         self.gh_api_token.update_preview(state.gh_api_token.is_some());
         self.remote_version_release = self
             .remote_version
@@ -450,54 +449,84 @@ impl ConfigUpdateState {
         if auto_update {
             new_pref = UpdatePreference::OPTIONS.get(index).cloned();
         }
-        if let Some(channel) = rt::update::crate_channel() {
+
+        if let Some(channel) = rt::update::crate_channel_build() {
             ui.text(&fl!("source-arg", source = channel));
             ui.same_line();
             ui.dummy([4.0, 0.0]);
             ui.same_line();
         }
+
         if with_i18n!("check-for-updates", |msg| ui.button(msg)) {
             Controller::try_send(ControllerEvent::CheckAddonUpdate(false));
         }
         let up_to_date = if let Some(latest) = self.remote_version_release.as_ref() {
-            latest.is_update()
+            !latest.is_update(true)
         } else if let Some(latest) = &self.remote_version {
             rt::CRATE_VERSION == latest || crate::built_info::git_tag_name() == Some(latest)
         } else {
             false
         };
         #[cfg(feature = "extension-nexus")]
-        if !crate::built_info::IS_TAGGED_RELEASE && !up_to_date && rt::nexus_available() {
-            ui.same_line();
-            if with_i18n!("update", |msg| ui.button(msg)) {
-                Controller::try_send(ControllerEvent::CheckAddonUpdate(true));
-            }
+        match crate::exports::nexus::is_nexus_updater() {
+            false if crate::exports::nexus::loaded() => {
+                ui.same_line();
+                let label = match up_to_date || self.remote_version_release.is_some() {
+                    true => "update",
+                    false => "attempt-update",
+                };
+                if with_i18n!(label, |msg| ui.button(msg)) {
+                    Controller::try_send(ControllerEvent::CheckAddonUpdate(true));
+                }
+            },
+            nexus_updater if !up_to_date => {
+                ui.same_line();
+                with_i18n!("update", |label| ui.text_disabled(&label));
+                if ui.is_item_hovered() {
+                    let msg = match nexus_updater {
+                        true => "update-nexus-provider-notice",
+                        false => "update-nexus-notice",
+                    };
+                    with_i18n!(msg, |msg| ui.tooltip_text(&msg));
+                }
+            },
+            _ => (),
         }
         let blanket_auth = self.preference.blanket_authorization();
         let mut authorized = blanket_auth.unwrap_or(false);
         let auth_toggled = if let Some(latest) = &self.remote_version {
             ui.same_line();
             let up_to_date = if let Some(latest) = self.remote_version_release.as_ref() {
-                latest.is_update()
+                !latest.is_update(true)
             } else if let Some(latest) = &self.remote_version {
                 rt::CRATE_VERSION == latest || crate::built_info::git_tag_name() == Some(latest)
             } else {
                 false
             };
 
+            let channel_overridden = !self.channel_buffer.is_empty();
+            let latest_version = match &self.remote_version_release {
+                Some(release) => release.to_string(),
+                _ => latest.clone(),
+            };
             if up_to_date {
+                ui.text(&latest_version);
+                ui.same_line();
+                if latest != &latest_version {
+                    ui.text(&format!("({latest})"));
+                    ui.same_line();
+                }
                 with_i18n!("update-not-required", |msg| ui.text(msg));
+                if channel_overridden && ui.is_item_hovered() {
+                    ui.tooltip_text("really want this update? override version to 0.0.1 or something old");
+                }
                 false
             } else {
-                let latest_version = match &self.remote_version_release {
-                    Some(release) => release.to_string(),
-                    _ => latest.clone(),
-                };
                 ui.text(fl!("update-available", version = latest_version));
-                if blanket_auth.is_none() {
+                if blanket_auth.is_none() || channel_overridden {
                     authorized = self.preference.authorizes_version(latest).unwrap_or(false);
                     ui.same_line();
-                    with_i18n!("update", |msg| ui.checkbox(msg, &mut authorized))
+                    with_i18n!("update-allow", |msg| ui.checkbox(msg, &mut authorized))
                 } else {
                     false
                 }
@@ -505,6 +534,83 @@ impl ConfigUpdateState {
         } else {
             false
         };
+        let advanced_node = with_i18n!("config-advanced", |label| TreeNode::new(&label)
+            .flags(TreeNodeFlags::FRAMED)
+            .opened(false, Condition::Once)
+            .tree_push_on_open(true)
+            .push(ui));
+        if let Some(_node) = advanced_node {
+            let gh_api_token = {
+                let changed = self.gh_api_token.draw_input(ui, "gh-api-token");
+                if !changed && ui.is_item_hovered() {
+                    with_i18n!("gh-api-token-notice", |msg| ui.tooltip_text(&msg));
+                }
+                self.gh_api_token.draw_finish(ui, changed)
+            };
+            if let Some(token) = gh_api_token {
+                BootstrapState::write_with(|state| {
+                    state.gh_api_token = match token.is_empty() {
+                        false => Some(token),
+                        true => None,
+                    };
+                });
+            }
+            ui.separator();
+            let mut channel_override = ui
+                .input_text("channel override", &mut self.channel_buffer)
+                .auto_select_all(true)
+                .enter_returns_true(true)
+                .hint(rt::update::crate_channel_build().unwrap_or(rt::update::CHANNEL_RELEASE_NAME))
+                .build();
+            let channel_reset = ui.is_item_clicked_with_button(MouseButton::Right);
+            if !channel_override && ui.is_item_hovered() {
+                ui.tooltip_text("be careful!");
+            }
+
+            let version_override = ui
+                .input_text("version override", &mut self.version_buffer)
+                .auto_select_all(true)
+                .enter_returns_true(true)
+                .hint(&rt::update::addon_version_build())
+                .build();
+            let version_reset = ui.is_item_clicked_with_button(MouseButton::Right);
+            if !version_override && ui.is_item_hovered() {
+                ui.tooltip_text("be careful!");
+            }
+            if !self.channel_buffer.is_empty() {
+                if with_i18n!("update-revert-mainline", |label| ui.button(&label)) {
+                    self.channel_buffer.clear();
+                    self.channel_buffer.push_str(rt::update::CHANNEL_RELEASE_NAME);
+                    channel_override = true;
+                }
+                #[cfg(feature = "extension-nexus")]
+                if ui.is_item_hovered() {
+                    with_i18n!("update-revert-mainline-notice-nexus", |msg| ui.tooltip_text(&msg));
+                }
+            }
+            if channel_reset {
+                self.channel_buffer.clear();
+            }
+            if channel_override || channel_reset {
+                rt::update::override_channel(self.channel_buffer.clone());
+                if channel_override
+                    && blanket_auth == Some(true)
+                    && self.channel_buffer != rt::update::CHANNEL_RELEASE_NAME
+                {
+                    new_pref = new_pref.or(Some(UpdatePreference::ASK));
+                }
+            }
+            if version_reset {
+                self.version_buffer.clear();
+            }
+            if version_override || version_reset {
+                let res = rt::log::error_ok(rt::update::try_override_version(&self.version_buffer));
+                if res.is_none() {
+                    self.version_buffer.clear();
+                    self.changed.mark_changed();
+                }
+            }
+        }
         if auth_toggled || new_pref.is_some() {
             BootstrapState::write_with(|state| {
                 let pref = match new_pref {
@@ -516,22 +622,6 @@ impl ConfigUpdateState {
                 if let Some(latest) = auth_toggled.then_some(self.remote_version.as_ref()).flatten() {
                     pref.authorize_update(latest.clone(), authorized);
                 }
-            });
-        }
-
-        let gh_api_token = {
-            let changed = self.gh_api_token.draw_input(ui, "gh-api-token");
-            if !changed && ui.is_item_hovered() {
-                with_i18n!("gh-api-token-notice", |msg| ui.tooltip_text(&msg));
-            }
-            self.gh_api_token.draw_finish(ui, changed)
-        };
-        if let Some(token) = gh_api_token {
-            BootstrapState::write_with(|state| {
-                state.gh_api_token = match token.is_empty() {
-                    false => Some(token),
-                    true => None,
-                };
             });
         }
     }

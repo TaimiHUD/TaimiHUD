@@ -1,3 +1,5 @@
+#[cfg(feature = "extension-nexus")]
+use nexus::addon::AddonVersion as NexusVersion;
 #[cfg(feature = "updates")]
 use semver::Version;
 use {
@@ -17,7 +19,14 @@ use {
     },
     anyhow::{anyhow, Context},
     futures::future::TryFutureExt,
-    std::{fmt, future::Future, sync::LazyLock, time::Duration},
+    std::{
+        borrow::Cow,
+        fmt,
+        future::Future,
+        sync::{LazyLock, RwLock},
+        time::Duration,
+    },
+    taimi_hoard::str_opt,
     tokio::{runtime, time::timeout},
     url::Url,
 };
@@ -25,8 +34,10 @@ use {
 pub const GIT_REF_BRANCH_PREFIX: &'static str = "refs/heads/";
 pub const GIT_REF_TAG_PREFIX: &'static str = "refs/tags/";
 pub const GIT_REF_RELEASE_PREFIX: &'static str = "refs/tags/v";
+pub const CHANNEL_DL_PREFIX: &'static str = "chan/";
 pub const CHANNEL_DEBUG: &'static str = "debug";
 pub const CHANNEL_PRERELEASE: &'static str = "rc";
+pub const CHANNEL_RELEASE_NAME: &'static str = "release";
 pub const DLL_NAME: &'static str = "TaimiHUD.dll";
 
 pub struct ResolvedVersion {
@@ -35,8 +46,44 @@ pub struct ResolvedVersion {
     pub version: Option<Version>,
 }
 
-#[cfg(feature = "updates")]
-pub static CRATE_SEMVER: LazyLock<Version> = LazyLock::new(|| {
+pub fn addon_version<'a>() -> Cow<'a, str> {
+    let version = BootstrapState::read_with(|s| str_opt(s.update_override_version.clone())).map(Cow::Owned);
+    version.unwrap_or_else(addon_version_build)
+}
+pub fn addon_version_build<'a>() -> Cow<'a, str> {
+    match option_env!("ADDON_VERSION") {
+        Some(v) => Cow::Borrowed(v),
+        #[cfg(feature = "updates")]
+        None => Cow::Owned(CRATE_SEMVER.to_string()),
+        #[cfg(not(feature = "updates"))]
+        None => Cow::Borrowed(rt::CRATE_VERSION),
+    }
+}
+
+/// NOTE: called from within [BootstrapState] mutex, must not use `addon_version`!
+#[cfg(taimi_has = "url-update-base")]
+#[allow(dead_code)]
+pub fn format_direct_url(channel: Option<&str>, version: Option<&str>) -> String {
+    let channel = match channel.map(Cow::Borrowed) {
+        #[cfg(taimi_has = "url-update-direct")]
+        None if version.is_none() => return env!("ADDON_URL_UPDATE_DIRECT").into(),
+        Some(c) => Some(c),
+        None => crate_channel(),
+    }
+    .unwrap_or(Cow::Borrowed(CHANNEL_RELEASE_NAME));
+    let update_base = env!("ADDON_URL_UPDATE_BASE");
+    let version = version.map(Cow::Borrowed).unwrap_or_else(addon_version_build);
+    let package = env!("CARGO_PKG_NAME");
+    let ext = match () {
+        #[cfg(windows)]
+        _ => ".dll",
+    };
+    format!("{update_base}/{channel}/{package}{ext}?v={version}")
+}
+
+type VersionParts = (u64, u64, u64, &'static str, &'static str);
+#[cfg(taimi_has = "version")]
+pub static CRATE_SEMVER_PARTS: LazyLock<VersionParts> = LazyLock::new(|| {
     let (major, minor, patch, pre, build) = (
         option_env!("ADDON_VERSION_MAJOR").unwrap_or(env!("CARGO_PKG_VERSION_MAJOR")),
         option_env!("ADDON_VERSION_MINOR").unwrap_or(env!("CARGO_PKG_VERSION_MINOR")),
@@ -44,16 +91,74 @@ pub static CRATE_SEMVER: LazyLock<Version> = LazyLock::new(|| {
         option_env!("ADDON_VERSION_PRE").unwrap_or(env!("CARGO_PKG_VERSION_PRE")),
         option_env!("ADDON_VERSION_BUILD").unwrap_or(""),
     );
-    let mut version = Version::new(
+    (
         major.parse().unwrap_or_default(),
         minor.parse().unwrap_or_default(),
         patch.parse().unwrap_or_default(),
+        pre,
+        build,
+    )
+});
+#[cfg(all(taimi_has = "version", feature = "extension-nexus"))]
+pub static CRATE_ADDONAPI_VERSION: LazyLock<NexusVersion> = LazyLock::new(|| {
+    let (major, minor, build, rev) = (
+        option_env!("ADDONAPI_VERSION_MAJOR").unwrap_or(env!("CARGO_PKG_VERSION_MAJOR")),
+        option_env!("ADDONAPI_VERSION_MINOR").unwrap_or(env!("CARGO_PKG_VERSION_MINOR")),
+        option_env!("ADDONAPI_VERSION_BUILD").unwrap_or(env!("CARGO_PKG_VERSION_PATCH")),
+        option_env!("ADDONAPI_VERSION_REVISION").unwrap_or("0"),
     );
+    NexusVersion {
+        major: major.parse().unwrap_or_default(),
+        minor: minor.parse().unwrap_or_default(),
+        build: build.parse().unwrap_or_default(),
+        revision: rev.parse().unwrap_or_default(),
+    }
+});
+
+#[cfg(feature = "updates")]
+pub static CRATE_SEMVER: LazyLock<Version> = LazyLock::new(|| {
+    let (major, minor, patch, pre, build) = *CRATE_SEMVER_PARTS;
+    let mut version = Version::new(major, minor, patch);
     version.pre = semver::Prerelease::new(pre).unwrap_or_default();
     version.build = semver::BuildMetadata::new(build).unwrap_or_default();
     version
 });
-pub fn crate_channel() -> Option<&'static str> {
+#[cfg(feature = "updates")]
+pub fn crate_semver<'a>() -> Cow<'a, Version> {
+    let version = OVERRIDE_VERSION.read().ok().map(|c| c.clone());
+    let v = match version {
+        None => None,
+        Some(ref v) if v.major == 0 && v.minor == 0 && v.patch == 0 => None,
+        Some(v) => Some(Cow::Owned(v)),
+    };
+    v.unwrap_or(Cow::Borrowed(&CRATE_SEMVER))
+}
+#[cfg(feature = "updates")]
+fn parse_channel_override(channel: &String) -> Option<Cow<'_, str>> {
+    match &channel[..] {
+        CHANNEL_RELEASE_NAME | CHANNEL_DL_PREFIX => None,
+        c if c.starts_with(CHANNEL_DL_PREFIX) => c.strip_prefix(CHANNEL_DL_PREFIX).map(Cow::Borrowed),
+        c => Some(
+            c.strip_prefix(CHANNEL_DL_PREFIX)
+                .map(Cow::Borrowed)
+                .unwrap_or_else(|| Cow::Owned(channel.clone())),
+        ),
+    }
+}
+pub fn crate_channel<'a>() -> Option<Cow<'a, str>> {
+    #[cfg(feature = "updates")]
+    {
+        let channel = OVERRIDE_CHANNEL
+            .write()
+            .ok()
+            .and_then(|c| str_opt(&*c).map(|c| parse_channel_override(c).map(Cow::into_owned)));
+        if let Some(channel) = channel {
+            return channel.map(Cow::Owned)
+        }
+    }
+    crate_channel_build().map(Cow::Borrowed)
+}
+pub fn crate_channel_build() -> Option<&'static str> {
     #[allow(unreachable_patterns)]
     match option_env!("ADDON_VERSION_CHANNEL") {
         #[cfg(debug_assertions)]
@@ -66,9 +171,66 @@ pub fn crate_channel() -> Option<&'static str> {
         None => Some("dev"),
     }
 }
+#[cfg(feature = "updates")]
+static OVERRIDE_VERSION: RwLock<Version> = RwLock::new(Version::new(0, 0, 0));
+#[cfg(feature = "updates")]
+static OVERRIDE_CHANNEL: RwLock<String> = RwLock::new(String::new());
+#[cfg(feature = "updates")]
+pub fn try_override_version(version: &str) -> anyhow::Result<()> {
+    let version = match str_opt(version) {
+        Some(version) => Some(ResolvedVersion::parse_version_id(version)?),
+        None => None,
+    };
+    Ok(override_version(version))
+}
+#[cfg(feature = "updates")]
+pub fn override_version(version: Option<Version>) {
+    BootstrapState::write_with(|s| {
+        s.update_override_version = version.as_ref().map(ToString::to_string).unwrap_or_default();
+    });
+    let version = version.unwrap_or(Version::new(0, 0, 0));
+    if let Ok(mut o) = OVERRIDE_VERSION.write() {
+        *o = version;
+    }
+}
+pub fn override_channel(channel: String) {
+    if let Ok(mut o) = OVERRIDE_CHANNEL.write() {
+        *o = channel.clone();
+    }
+    BootstrapState::write_with(|s| {
+        s.update_override_channel = channel;
+    });
+}
+/// for use by [BootstrapState] to synchronize config on launch
+/// (avoiding deadlocks related to update operations is important)
+#[cfg(feature = "updates")]
+pub(crate) fn report_overrides(channel: &String, version: &String) -> anyhow::Result<()> {
+    let mut res = Ok(());
+    if let Some(channel) = str_opt(channel) {
+        if let Ok(mut o) = OVERRIDE_CHANNEL.write() {
+            *o = channel.clone();
+        }
+    }
+    if let Some(version) = str_opt(version) {
+        match ResolvedVersion::parse_version_id(version) {
+            Ok(version) =>
+                if let Ok(mut o) = OVERRIDE_VERSION.write() {
+                    *o = version;
+                },
+            Err(e) => res = Err(e),
+        }
+    }
 
-pub static GH_REPO_SRC: LazyLock<GitHubSource> =
-    LazyLock::new(|| GitHubSource::new_empty("TaimiHUD".into(), "TaimiHUD".into()));
+    res.context("parsing update overrides")
+}
+
+#[cfg(taimi_has = "url-github")]
+pub static GH_REPO_SRC: LazyLock<GitHubSource> = LazyLock::new(|| {
+    GitHubSource::new_empty(
+        env!("ADDON_URL_GITHUB_OWNER").into(),
+        env!("ADDON_URL_GITHUB_REPO").into(),
+    )
+});
 
 impl ResolvedVersion {
     pub fn with_gh_release(release: GitHubLatestRelease) -> anyhow::Result<Self> {
@@ -108,6 +270,7 @@ impl ResolvedVersion {
 
         let check = async move {
             let channel = crate_channel();
+            let channel = channel.as_ref().map(|s| &s[..]);
             let latest_release = match channel {
                 Some(..) => Ok(None),
                 None => match src.get_release(None).await {
@@ -218,21 +381,39 @@ impl ResolvedVersion {
         }
     }
 
-    pub fn is_update(&self) -> bool {
+    pub fn is_update(&self, quiet: bool) -> bool {
+        let (override_channel, override_version) = BootstrapState::read_with(|s| {
+            (
+                s.update_override_channel.clone(),
+                s.update_override_version.clone(),
+            )
+        });
         let version_matches = match self {
             #[cfg(feature = "updates")]
-            Self { version: Some(v), .. } if v.cmp_precedence(&CRATE_SEMVER).is_eq() => true,
+            Self { version: Some(v), .. } if v.cmp_precedence(&crate_semver()).is_eq() => true,
             #[cfg(feature = "updates")]
-            Self { version: Some(v), .. } if v.cmp_precedence(&CRATE_SEMVER).is_lt() => {
-                log::info!("Ignoring outdated update {self}");
+            Self { version: Some(v), .. } if v.cmp_precedence(&crate_semver()).is_lt() => {
+                if !quiet {
+                    log::info!("Ignoring outdated update {self} vs {}", crate_semver());
+                }
                 return false
             },
-            _ if Some(&self.release.tag_name[..]) == built_info::git_tag_name() => true,
-            _ if self.version_tag().ok() == Some(rt::CRATE_VERSION) => true,
+            _ if override_version.is_empty()
+                && Some(&self.release.tag_name[..]) == built_info::git_tag_name() =>
+                true,
+            _ if override_version.is_empty() && self.version_tag().ok() == Some(rt::CRATE_VERSION) => true,
+            _ if self
+                .version_tag()
+                .ok()
+                .map(|tag| tag == addon_version())
+                .unwrap_or(false) =>
+                true,
             _ => false,
         };
         if version_matches {
-            log::info!("Up-to-date with latest version {self}!");
+            if !quiet {
+                log::info!("Up-to-date with latest version {self}!");
+            }
             return false
         }
         let is_dev_build = match built_info::git_release() {
@@ -241,10 +422,14 @@ impl ResolvedVersion {
             _ => true,
         };
         if self.release.prerelease && crate_channel().is_none() {
-            log::info!("Skipping update to pre-release");
+            if !quiet {
+                log::info!("Skipping update to pre-release");
+            }
             return false
-        } else if is_dev_build {
-            log::info!("Refusing to update development build");
+        } else if is_dev_build && override_channel.is_empty() {
+            if !quiet {
+                log::info!("Refusing to update development build");
+            }
             return false
         }
         true
@@ -305,26 +490,56 @@ impl ResolvedVersion {
     }
 
     /// nexus tags require the 0.0.0.0 version scheme
-    fn gloss_over_nexus_version(v: &str) -> &str {
-        if v.as_bytes().iter().filter(|&&c| c == b'.').count() == 3 {
-            v.strip_suffix(".0")
-        } else {
-            None
+    fn gloss_over_nexus_version(v: &str) -> (&str, Option<i16>) {
+        let mut rev = None;
+        for (i, seg) in v.split('.').enumerate() {
+            match i {
+                2 if seg.as_bytes().contains(&b'-') => (),
+                0..=2 => continue,
+                3 => match seg.parse::<u16>() {
+                    Ok(b) => {
+                        let offset = unsafe { seg.as_ptr().offset_from(v.as_ptr()) - 1 } as usize;
+                        rev = Some((offset, b as i16));
+                        continue
+                    },
+                    Err(..) => (),
+                },
+                _ => (),
+            }
+            // not a plain next tag if it reaches this point...
+            rev = None;
+            break
         }
-        .unwrap_or(v)
+        match rev {
+            None => (v, None),
+            Some((offset, rev)) => (unsafe { v.get_unchecked(..offset) }, Some(rev)),
+        }
     }
 
     fn parse_version(v: &str) -> Result<Version, semver::Error> {
-        let v = Self::gloss_over_nexus_version(v);
+        let (v, rev) = Self::gloss_over_nexus_version(v);
         let mut v: Version = v.parse()?;
-        if let Some(rc) = v.patch.checked_sub(900) {
-            v.minor += 1;
-            if v.pre.is_empty() {
-                v.patch = 0;
+        match rev {
+            None | Some(0) =>
+                if let Some(rc) = v.patch.checked_sub(900) {
+                    v.minor += 1;
+                    if v.pre.is_empty() {
+                        v.patch = 0;
+                        v.pre = semver::Prerelease::new(&format!("{CHANNEL_PRERELEASE}.{rc}"))
+                            .unwrap_or_default()
+                    } else {
+                        v.patch = rc;
+                    }
+                },
+            Some(rev @ 900..=999) => {
+                v.patch += 1;
+                let rc = rev - 900;
                 v.pre = semver::Prerelease::new(&format!("{CHANNEL_PRERELEASE}.{rc}")).unwrap_or_default()
-            } else {
-                v.patch = rc;
-            }
+            },
+            Some(_rev) => {
+                // TODO: there's some meaning here...
+                v.pre = semver::Prerelease::new("aaa").unwrap_or_default()
+            },
         }
         Ok(v)
     }
@@ -372,7 +587,7 @@ impl Updater {
 
         #[cfg(feature = "updates")]
         if let Ok(version) = pref.parse::<Version>() {
-            if CRATE_SEMVER.cmp_precedence(&version).is_eq() {
+            if crate_semver().cmp_precedence(&version).is_eq() {
                 return true
             }
         }
@@ -383,7 +598,7 @@ impl Updater {
     /// returns [`release.is_authorized()`](ResolvedVersion::is_authorized)
     pub fn notify_latest(release: &ResolvedVersion) -> anyhow::Result<bool> {
         log::info!("Latest version is {}", release);
-        if !release.is_update() {
+        if !release.is_update(false) {
             return Ok(false)
         }
         if release.release.assets_for(SourceKind::Addon).next().is_none() {

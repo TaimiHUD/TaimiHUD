@@ -11,7 +11,7 @@ use {
             PrimaryWindowState,
             TimerWindowState,
         },
-        settings::ProgressBarSettings,
+        settings::{state::AddonHostName, ProgressBarSettings},
         timer::{PhaseState, TextAlert, TimerFile},
         Controller,
         RENDER_SENDER,
@@ -38,7 +38,12 @@ use {
         collections::HashMap,
         fmt::Display,
         path::{Path, PathBuf},
-        sync::{Arc, MutexGuard},
+        ptr,
+        sync::{
+            atomic::{AtomicPtr, Ordering},
+            Arc,
+            MutexGuard,
+        },
     },
     strum_macros::{Display, EnumIter},
     tokio::sync::mpsc::{Receiver, Sender},
@@ -79,6 +84,13 @@ pub enum RenderEvent {
     ProgressBarUpdate(ProgressBarSettings),
     Reload,
     ReloadAll,
+    /// user pressed "quit" button, which should initiate shutdown as much as
+    /// possible
+    ///
+    /// this will request an unload from arcdps
+    InitiateQuit,
+    /// Determine primary render host (due to recent load or unload)
+    RefreshHost,
     Quit,
     #[cfg(any(feature = "markers", feature = "space"))]
     UiMapOpen(taimi_meta::ui::MapOpen),
@@ -231,7 +243,24 @@ impl RenderState {
                     UiDepthAcquired() => {
                         self.machine.turn_depth_event(true);
                     },
-                    event @ (Reload | ReloadAll) => self.reload(matches!(event, Reload)),
+                    event @ (Reload | ReloadAll) => {
+                        self.reload(matches!(event, Reload));
+                        return true
+                    },
+                    RefreshHost => {
+                        Self::select_host();
+                    },
+                    InitiateQuit => {
+                        crate::TEXTURES.quit();
+                        Controller::try_send(ControllerEvent::UnloadAll);
+                        let _ = crate::SPACE_SENDER.write().map(|mut s| s.take());
+                        if let Ok(mut sender) = crate::RENDER_SENDER.try_write() {
+                            sender.take();
+                        }
+                        self.quit();
+                        crate::TEXTURES.cleanup(true);
+                        return false
+                    },
                     Quit => {
                         self.quit();
                         return false;
@@ -456,14 +485,14 @@ impl RenderState {
     }
 
     fn quit(&mut self) {
-        self.cleanup();
+        self.cleanup(true);
         crate::unload_render();
     }
-    pub fn cleanup(&mut self) {
+    pub fn cleanup(&mut self, unload: bool) {
         #[cfg(feature = "space")]
         if let Some(Ok(mut engine)) = self.engine.take() {
             log::debug!("unloading space engine");
-            engine.cleanup();
+            engine.cleanup(unload);
         }
     }
     pub fn cleanup_background(mut self) {
@@ -482,7 +511,7 @@ impl RenderState {
         if let Some(Ok(mut engine)) = self.engine.take() {
             log::debug!("reloading space engine");
             if Self::is_render_thread() {
-                engine.cleanup();
+                engine.cleanup(false);
             } else {
                 log::warn!("TODO: reloading outside of render thread");
                 engine.cleanup_background();
@@ -494,13 +523,17 @@ impl RenderState {
             // probably no need to reload textures/etc unless we've lost the entire d3d device or something?
             TEXTURES.cleanup(RenderState::is_render_thread());
         }
+
+        unsafe {
+            rt::notify_render_reinit();
+        }
     }
 
     fn shutdown(&mut self) {
         // Drain remaining queue for relevant events
         while let Ok(e) = self.receiver.try_recv() {
             match e {
-                RenderEvent::Quit => {
+                RenderEvent::Quit | RenderEvent::InitiateQuit => {
                     self.quit();
                     break
                 },
@@ -511,13 +544,57 @@ impl RenderState {
     }
 
     pub fn unload(mut self) {
-        self.cleanup();
+        self.cleanup(true);
         drop(self);
         crate::unload_render();
     }
 
     pub fn lock() -> MutexGuard<'static, Option<RenderState>> {
         crate::RENDER_STATE.lock().unwrap()
+    }
+    fn host() -> &'static AtomicPtr<u8> {
+        static RENDER_HOST: AtomicPtr<u8> = AtomicPtr::new(ptr::null_mut());
+        &RENDER_HOST
+    }
+    pub fn select_host() {
+        for host in AddonHostName::HOST_PRIORITY {
+            if !host.is_loaded() {
+                continue
+            }
+            if !host.is_active() {
+                log::info!("reactivating {host}");
+                let res = match host {
+                    #[cfg(feature = "extension-arcdps")]
+                    AddonHostName::ArcDPS => crate::exports::arcdps::enter(),
+                    #[cfg(feature = "extension-nexus")]
+                    AddonHostName::Nexus => crate::exports::nexus::enter(),
+                    _ => continue,
+                };
+                if let Err(e) = res {
+                    log::warn!("failed to reenter {host}: {e}");
+                    continue
+                }
+            }
+
+            Self::set_host(*host);
+            return
+        }
+        let prev = Self::host().swap(ptr::null_mut(), Ordering::Relaxed);
+        if !prev.is_null() {
+            log::debug!("primary renderer cleared");
+        }
+    }
+    pub fn set_host(host: AddonHostName) {
+        let id = host.id().as_ptr() as *mut _;
+        let prev = Self::host().swap(id, Ordering::Relaxed);
+        if prev != id {
+            log::debug!("selected primary renderer {host}");
+            // TODO: clear imgui context because uhhh yeah
+        }
+    }
+    pub fn is_host(host: AddonHostName) -> Option<bool> {
+        let id = Self::host().load(Ordering::Relaxed);
+        (!id.is_null()).then_some(id as *const u8 == host.id().as_ptr())
     }
 
     pub fn sender() -> Option<Sender<RenderEvent>> {
@@ -539,9 +616,25 @@ impl RenderState {
             .unwrap_or(false)
     }
 
-    pub fn pre_render() -> bool {
-        let ready = IS_RENDER_THREAD.replace(true);
-        ready || !Self::is_running()
+    pub fn pre_render(host: AddonHostName) -> Option<bool> {
+        let host = match Self::is_host(host) {
+            None => {
+                Self::select_host();
+                Self::is_host(host)
+            },
+            h => h,
+        };
+        match host {
+            None => {
+                // *shrug*
+                None
+            },
+            Some(false) => None,
+            Some(true) => Some({
+                let ready = IS_RENDER_THREAD.replace(true);
+                ready || !Self::is_running()
+            }),
+        }
     }
 
     pub fn render_setup(_ui: &Ui) {
@@ -578,20 +671,31 @@ impl RenderState {
         }
     }
 
-    pub fn render_options(ui: &Ui) {
+    pub fn render_options(ui: &Ui, host: AddonHostName) -> bool {
         let mut lock = Self::lock();
         let state = match &mut *lock {
-            None => return,
+            None => return false,
             Some(state) => state,
         };
         let mut state_errors = Default::default();
         state.primary_window.draw_tabs(
             ui,
+            Some(host),
             &mut state.machine,
             &mut state.timer_window,
             &mut state_errors,
             false,
         );
+        true
+    }
+    pub fn render_options_fallback(ui: &Ui, host: AddonHostName) {
+        use crate::{render::arc::ArcRenderState, settings::state::BootstrapState};
+
+        if ArcRenderState::ui_options_disabled(ui, host) {
+            let res = BootstrapState::read_with(|s| s.start_save())
+                .and_then(|save| BootstrapState::write_file(&save));
+            rt::log::error_ok(res);
+        }
     }
 
     pub fn is_render_thread() -> bool {

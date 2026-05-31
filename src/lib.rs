@@ -26,15 +26,11 @@ use {
             WINDOW_RESIZED,
         },
         gui::{register_render, RenderType},
-        on_unload,
         rtapi::{
             event::{RTAPI_GROUP_MEMBER_JOINED, RTAPI_GROUP_MEMBER_LEFT, RTAPI_GROUP_MEMBER_UPDATE},
             GroupMember,
             GroupMemberOwned,
         },
-        wnd_proc::register_wnd_proc,
-        AddonFlags,
-        UpdateProvider,
     },
     tokio::sync::watch,
 };
@@ -47,7 +43,10 @@ use {
         },
         exports::runtime as rt,
         render::{machine::RenderMachine, RenderEvent, RenderState},
-        settings::{state::BootstrapState, SettingsLock},
+        settings::{
+            state::{AddonHostName, BootstrapState},
+            SettingsLock,
+        },
     },
     anyhow::Context,
     arcdps::{extras::UserInfo, AgentOwned, Language},
@@ -226,7 +225,7 @@ pub mod built_info {
     #[cfg(todo)]
     pub const IS_TAGGED_RELEASE_OR_RC: bool = IS_TAGGED_RELEASE;
     pub const IS_TAGGED_RELEASE: bool = match option_env!("ADDON_VERSION_RELEASE") {
-        Some(r) if r.len() == 1 && r.as_bytes()[0] == b'1' => true,
+        Some(r) if r.len() == 1 && r.as_bytes()[0] == b'z' => true,
         _ => false,
     };
 
@@ -275,10 +274,6 @@ static CONTROLLER_SENDER: RwLock<Option<Sender<ControllerEvent>>> = RwLock::new(
 static QUICK_ACCESS_STATE: LazyLock<watch::Sender<TaimiControls>> =
     LazyLock::new(|| watch::Sender::new(TaimiControls::empty()));
 static RENDER_SENDER: RwLock<Option<Sender<RenderEvent>>> = RwLock::new(None);
-#[cfg(feature = "extension-nexus")]
-static RENDER_CALLBACK: Mutex<Option<Revertible>> = Mutex::new(None);
-#[cfg(all(feature = "extension-nexus", feature = "space"))]
-static RENDER_CALLBACK_PRE: Mutex<Option<Revertible>> = Mutex::new(None);
 static ACCOUNT_NAME_CELL: OnceLock<String> = OnceLock::new();
 
 #[cfg(feature = "space")]
@@ -289,12 +284,12 @@ static CONTROLLER_THREAD: Mutex<Option<JoinHandle<()>>> = Mutex::new(None);
 #[cfg(feature = "extension-nexus-codegen")]
 nexus::export! {
     name: exports::addon_title!(),
-    signature: exports::nexus::SIG,
-    load: exports::nexus::cb_load,
-    unload: exports::nexus::cb_unload,
-    flags: AddonFlags::None,
-    provider: if built_info::IS_TAGGED_RELEASE_OR_RC { UpdateProvider::GitHub } else { UpdateProvider::Manual },
-    update_link: exports::gh_repo_url!(),
+    signature: exports::nexus::cb::SIG,
+    load: exports::nexus::cb::load,
+    unload: exports::nexus::cb::unload,
+    flags: exports::nexus::cb::FLAGS,
+    provider: exports::nexus::cb::UPDATE_PROVIDER,
+    update_link: exports::nexus::cb::update_url!(),
     // TODO: author: env!("ADDON_AUTHOR")
 }
 
@@ -358,6 +353,113 @@ fn crate_init() {
     // but defining, self.rt_sender.clone() explicit entry points is kinder anyway...
     // but contention over who "owns" the global panic hook or logger will only
     // ever matter if we switch to dynamic linking std anyway, so...
+}
+
+pub(crate) fn pre_init_for(host: AddonHostName) -> Result<bool, &'static str> {
+    match host.is_preferred_host() {
+        Ok(()) => (),
+        Err(pref) =>
+            return {
+                let (loud, desc) = match host.is_active() {
+                    true => (true, "already loaded by"),
+                    false => (false, "we like"),
+                };
+                log::info!("ghosting {host}, {desc} {pref} more");
+                match loud {
+                    #[cfg(todo)]
+                    true => Err(pref.name()),
+                    true => Err("disabled via boot.json"),
+                    false => Ok(false),
+                }
+            },
+    }
+
+    for other in AddonHostName::HOST_PRIORITY.iter().filter(|&h| *h != host) {
+        if !other.is_active() {
+            continue
+        }
+        let take_over = match (host, other) {
+            #[cfg(feature = "extension-nexus-extern")]
+            (AddonHostName::Nexus, _) if exports::nexus::r#extern::is_disabled() => false,
+            _ => host.is_explicit_preferred_host().is_ok(),
+        };
+        match other {
+            _ if !take_over => (),
+            #[cfg(feature = "extension-arcdps")]
+            AddonHostName::ArcDPS => {
+                log::info!("switching over from arcdps to {host}");
+                exports::arcdps::disable();
+                // XXX: we should have arcdps quit here...
+            },
+            #[cfg(feature = "extension-nexus")]
+            AddonHostName::Nexus => {
+                log::info!("switching over from nexus to {host}");
+                exports::nexus::disable();
+            },
+            _ => (),
+        }
+    }
+
+    Ok(true)
+}
+/// `success` indicates that it will remain loaded after returning from init
+///
+/// nexus export for example cannot request itself to be unloaded, so will
+/// always "succeed"
+pub(crate) fn post_init_for(host: AddonHostName, success: bool) {
+    #[cfg(todo)]
+    let is_primary = success && _host.is_active();
+
+    RenderState::try_send(RenderEvent::RefreshHost);
+
+    if success {
+        let effective_host = match host.is_active() {
+            false if BootstrapState::current_addon_host().is_some() => AddonHostName::All,
+            _ => host,
+        };
+        BootstrapState::try_write_with(|s| s.try_init_latest_host(effective_host));
+    }
+}
+pub(crate) fn pre_uninit_for(host: AddonHostName) -> bool {
+    if host.is_explicit_preferred_host().is_ok() {
+        return true
+    }
+
+    let mut other_hosts = AddonHostName::HOST_PRIORITY.iter().filter(|&h| *h != host);
+    other_hosts.all(|other| !other.is_active())
+}
+pub(crate) fn post_uninit_for(host: AddonHostName) {
+    let mut pending_cleanup = false;
+    let other_hosts = AddonHostName::HOST_PRIORITY
+        .iter()
+        .filter(|&h| *h != host)
+        .filter(|other| other.is_loaded());
+    for other in other_hosts {
+        match other {
+            #[cfg(feature = "extension-arcdps")]
+            AddonHostName::ArcDPS => {
+                let exit = unsafe { exports::arcdps::ExitHandle::try_exit() };
+                let exit = match exit {
+                    Err(e) => {
+                        log::warn!("failed to request unload from arcdps: {e}");
+                        continue
+                    },
+                    Ok(exit) => exit,
+                };
+                if let Some(exit) = exit {
+                    pending_cleanup = true;
+                    exit.spawn_free();
+                }
+            },
+            _ => (),
+        }
+    }
+
+    if !pending_cleanup {
+        rt::log::TaimiLog::logger().close();
+    }
+
+    RenderState::try_send(RenderEvent::RefreshHost);
 }
 
 fn init() -> Result<(), &'static str> {
@@ -445,44 +547,8 @@ fn init() -> Result<(), &'static str> {
 
 #[cfg(feature = "extension-nexus")]
 fn load_nexus() {
-    use crate::exports::nexus::{quick_access_remove_all, register_keybind, unregister_keybinds};
+    use crate::exports::nexus::register_keybind;
 
-    // Rendering setup
-
-    let taimi_window = nexus::gui::render!(|ui| {
-        #[cfg(not(feature = "space"))]
-        if !RenderState::pre_render() {
-            RenderState::render_setup(ui);
-        }
-        RenderMachine::turn_ui_entry(ui);
-        RenderState::render_ui(ui);
-    });
-    let render_callback = register_render(RenderType::Render, taimi_window);
-    *RENDER_CALLBACK.lock().unwrap() = Some(Box::new(render_callback.into_inner()));
-
-    #[cfg(feature = "space")]
-    {
-        extern "C-unwind" fn nexus_pre_render() {
-            let render_ready = RenderState::pre_render();
-            RenderMachine::turn_render_entry();
-            if !render_ready {
-                #[cfg(feature = "extension-nexus-codegen")]
-                let ui = unsafe { nexus::ui() };
-                RenderState::render_setup(ui);
-            }
-        }
-        let render_callback_pre = register_render(RenderType::PreRender, nexus_pre_render);
-        *RENDER_CALLBACK_PRE.lock().unwrap() = Some(Box::new(render_callback_pre.into_inner()));
-    }
-
-    let taimi_settings = nexus::gui::render!(|ui| {
-        RenderState::render_options(ui);
-    });
-    register_render(RenderType::OptionsRender, taimi_settings).revert_on_unload();
-
-    register_wnd_proc(exports::nexus::wnd).revert_on_unload();
-
-    on_unload(unregister_keybinds);
     // Handle window toggling with keybind and button
     register_keybind(
         TaimiControls::WINDOW_PRIMARY,
@@ -537,17 +603,8 @@ fn load_nexus() {
     #[cfg(feature = "timers")]
     register_keybind(TaimiControls::TIMER_RESET, c"timer-key-reset", c"(null)");
 
-    // Disused currently, icon loading for quick access
-    /*
-    load_texture_from_file("Taimi_ICON", addon_dir.join("icon.png"), Some(receive_texture));
-    load_texture_from_file(
-        "Taimi_ICON_HOVER",
-        addon_dir.join("icon_hover.png"),
-        Some(receive_texture),
-    );
-    */
-
-    on_unload(quick_access_remove_all);
+    #[cfg(todo)]
+    register_keybind(TaimiControls::MENU_PRIMARY, c"context-menu-primary", c"(null)");
 
     const REQUEST_ACCOUNT_NAME: &'static str = "EV_REQUEST_ACCOUNT_NAME";
     ACCOUNT_NAME
@@ -974,11 +1031,7 @@ fn unload() {
             return
         },
     };
-    if let Some(host) = BootstrapState::current_addon_host() {
-        BootstrapState::write_with(|state| {
-            state.latest_addon_host = Some(host);
-        });
-    }
+    BootstrapState::try_write_with(|s| s.try_update_latest_host(None));
 
     log::info!("Unloading addon");
 
@@ -1074,13 +1127,7 @@ fn unload() {
     }
 
     #[cfg(feature = "extension-nexus")]
-    if let Some(revert_render) = RENDER_CALLBACK.lock().unwrap().take() {
-        revert_render();
-    }
-    #[cfg(all(feature = "extension-nexus", feature = "space"))]
-    if let Some(revert_render) = RENDER_CALLBACK_PRE.lock().unwrap().take() {
-        revert_render();
-    }
+    exports::nexus::uninit_cleanup();
 
     if confirm_render_unload {
         unload_render_background();

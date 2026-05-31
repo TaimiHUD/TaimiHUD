@@ -26,6 +26,7 @@ auto-update = Auto-update
 always = Always
 ask = Ask
 never = Never
+update-allow = Allow once
 unset = Unset
 add = Add
 create-arg = Create new { $arg }
@@ -107,6 +108,7 @@ timer-key-reset = Reset Timers
 ## Config
 
 config-tab = Config
+config-advanced = Advanced Settings
 stock-imgui-progress-bar = Stock Imgui Progress Bar
 shadow = Shadow
 centre-text-after-icon = Centre text after icon
@@ -123,6 +125,10 @@ icon-style-plain = Plain
 icon-style-scanlines-1 = Scanlines
 preferred-loader = Loader Preference
 preferred-updater = Update Host Preference
+update-revert-mainline = Revert to mainline releases
+update-revert-mainline-notice-nexus = Select stable vs pre-release betas via Nexus settings
+update-nexus-notice = In-game updates require Nexus. Auto-update responsibility can be configured under extension settings in ArcDPS or Nexus.
+update-nexus-provider-notice = You can manage updates under the addon Configure options in Nexus, as well as { disable } the { preferred-updater } for manual control.
 gh-api-token = GitHub API Token
 gh-api-token-notice = Rate limit errors when updating datasources may be avoided by configuring a personalized token - only provide if you understand the implications of doing so!
 language = Language
@@ -212,6 +218,7 @@ size-frag-kb = { $size } KB
 arcdps = ArcDPS
 arcdps-tab = { arcdps }
 nexus = Nexus
+multi-addon-host = All
 
 ## Markers tab
 
@@ -331,7 +338,7 @@ pathing-config-textured-minimap = Textured trails
 pathing-config-textured-worldmap = Textured trails
 pathing-config-map-open = Fwoom
 pathing-config-camera-source = Camera Data Source
-pathing-config-advanced = Advanced Settings
+pathing-config-advanced = { config-advanced }
 pathing-config-trail-notice = Trail generation settings may require a map change or reload to take effect, and may not work as you might expect.
 pathing-config-trail-y-offset = Vertical Offset
 pathing-config-trail-resolution = Trail Resolution

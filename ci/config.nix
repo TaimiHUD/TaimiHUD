@@ -69,10 +69,18 @@ with lib; let
     else s;
   parseTag = ref: let
     name = removePrefix "v" (removePrefix "refs/tags/" ref);
-    parts = versions.splitVersion name;
+    parts = let
+      # splitversion will split on all hyphens, but semver only splits once...
+      presplit = splitString "-" name;
+      name' =
+        if length presplit > 2
+        then "${head presplit}-${concatStringsSep "/" (tail presplit)}"
+        else name;
+    in
+      versions.splitVersion name';
     isPre = length parts > 4 && pre.channel != "+";
     pre = {
-      channel = elemAt parts 3;
+      channel = replaceStrings ["/"] ["-"] (elemAt parts 3);
       revision = intOr (elemAt parts 4);
     };
   in {
@@ -100,20 +108,36 @@ with lib; let
       then pre.revision
       else 0;
   };
+  #nexusBackend = "codegen";
+  nexusBackend = "extern";
   tag2nexus = tag: let
     rcTag = {
       inherit (tag) success;
       major =
-        if tag.minor > 0
+        if tag.minor > 0 || tag.patch > 0
         then tag.major
         else tag.major - 1;
       minor =
-        if tag.minor > 0
-        then tag.minor - 1
+        if tag.minor > 0 || tag.patch > 0
+        then
+          tag.minor
+          - (
+            if tag.patch > 0
+            then 0
+            else 1
+          )
         else 99;
-      patch = 900 + tag.revision;
-      # TODO: stop using extension-nexus-codegen feature because it won't set this
-      revision = 0;
+      # TODO: make this revision instead and set patch to 99?
+      patch =
+        if nexusBackend == "codegen"
+        then 900 + tag.revision
+        else if tag.patch > 0
+        then tag.patch - 1
+        else 999;
+      revision =
+        if nexusBackend == "extern"
+        then 900 + tag.revision
+        else 0;
     };
     preTag = {
       inherit (tag) success major minor patch;
@@ -182,7 +206,7 @@ in {
     artifactPackage =
       runCommand "taimihud-artifacts" {
         nexusTagName =
-          if nexusTag.success or false
+          if nexusTag.success or false && (tag.pre or null == null || tag.pre.channel == "rc")
           then nexusTagName
           else "";
       } (''
@@ -267,7 +291,7 @@ in {
               files = release;
               prerelease = expr is_pre;
               tag_name = expr tag_name;
-              name = expr "${nexus_tag} && ${pre_name} || ${real_tag}";
+              name = expr "(${nexus_tag}) && ${pre_name} || ${real_tag}";
               #target_commitish = channel branch?
             };
           };
@@ -307,7 +331,7 @@ in {
         is_pre = "contains(${real_tag}, '-')";
         nexus_tag = "${is_pre} && steps.artifact-parse.outputs.release-nexus-tag != ${real_tag} && steps.artifact-parse.outputs.release-nexus-tag";
         real_tag = "github.ref_name";
-        tag_name = "${nexus_tag} || ${real_tag}";
+        tag_name = "(${nexus_tag}) || ${real_tag}";
         confDeploy = {
           name = "${config.name} build --release";
           "if" = let

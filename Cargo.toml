@@ -4,6 +4,7 @@ members = [
   "pathing/pack",
   "pathing/meta",
   "rt/hoard",
+  "rt/ffi",
   "rt/input",
   "rt/sync",
   "space/d3d",
@@ -18,7 +19,7 @@ authors = [
 ]
 homepage = "https://taimihud.com"
 description = "Pathing, encounter timers and markers"
-version = "0.3.3"
+version = "0.4.1"
 edition = "2021"
 build = "build.rs"
 
@@ -124,9 +125,11 @@ extension-arcdps = [
   "nexus/arc",
   "windows/Win32_System_LibraryLoader",
   "windows/Win32_System_Memory",
+  "windows/Win32_System_Threading",
   "texture-loader",
 ]
 extension-arcdps-extras = [
+  "taimi_ffi/fnalloc",
   "closure-ffi",
   "jit-allocator2",
   "nexus/extras",
@@ -149,8 +152,8 @@ extension-arcdps-extern = [
 extension-arcdps-extern-cleanup = [
 ]
 extension-nexus = [
-  "extension-nexus-codegen",
-  #"extension-nexus-extern",
+  #"extension-nexus-codegen",
+  "extension-nexus-extern-todo",
   "nexus/arc",
   "nexus/extras",
   "nexus/rtapi",
@@ -160,6 +163,15 @@ extension-nexus = [
   "taimi_meta?/mumblelink-nexus",
 ]
 extension-nexus-codegen = []
+extension-nexus-extern = [
+  "dep:sync-unsafe-cell",
+  "arcffi",
+]
+extension-nexus-extern-todo = [
+  # TODO: remove all use of the dep (and __macro)!
+  #"nexus",
+  "extension-nexus-extern",
+]
 dpsapi = [
   "dep:dpsapi",
   "dpsapi/nexus",
@@ -184,6 +196,7 @@ windows = [
   "arcffi?/windows-061",
   #"dpsapi?/windows-061",
   "taimi_d3d?/windows",
+  "taimi_ffi/windows",
   "taimi_input?/windows",
 ]
 
@@ -198,7 +211,8 @@ level = "warn"
 check-cfg = [
   'cfg(todo, values("unused", "unnecessary"))',
   'cfg(todo)',
-  'cfg(taimi_has, values("author", "title", "version"))',
+  'cfg(taimi_has, values("author", "title", "version", "url-github", "url-update-base", "url-update-direct"))',
+  'cfg(taimi_update, values("direct", "github", "manual", "none"))',
   'cfg(taimi_debug)', 'cfg(taimi_debug, values("debug"))',
   'cfg(taimi_dev)', 'cfg(taimi_dev, values("debug", "drv", "ci", "branch"))',
   'cfg(taimi_release)', 'cfg(taimi_release, values("tag", "rc", "pre", "release"))',
@@ -280,6 +294,7 @@ bitvec = { workspace = true }
 taimi_pack = { path = "./pathing/pack", optional = true }
 taimi_meta = { path = "./pathing/meta", optional = true, default-features = false, features = ["serde"] }
 taimi_d3d = { path = "./space/d3d", optional = true, default-features = false, features = ["dx11", "serde"] }
+taimi_ffi = { path = "./rt/ffi", default-features = false, features = ["serde"] }
 taimi_input = { path = "./rt/input", optional = true, default-features = false, features = ["serde"] }
 taimi_sync = { path = "./rt/sync", default-features = false, features = ["serde"] }
 taimi_hoard = { path = "./rt/hoard", default-features = false, features = ["serde"] }

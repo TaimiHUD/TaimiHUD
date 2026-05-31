@@ -798,20 +798,25 @@ impl Controller {
                 {
                     use {crate::exports::arcdps as exports, std::thread};
                     let avail = exports::available();
-                    if avail || exports::loaded() {
+                    let arc_cleanup = match avail {
+                        #[cfg(feature = "extension-nexus")]
+                        false if exports::loaded() && !rt::nexus_available() => true,
+                        avail => avail,
+                    };
+                    if arc_cleanup {
                         thread::spawn(move || {
                             if avail {
                                 // wait a tiny bit to give render thread cleanup a chance
                                 thread::sleep(Duration::from_millis(84));
                             }
                             // TODO: synchronize with controller shutdown in case it takes a while...
-                            let res = exports::ExitHandle::try_exit()
+                            let res = unsafe { exports::ExitHandle::try_exit() }
                                 .and_then(|exit| exit.ok_or("unloaded/unaware?"));
                             match res {
                                 Err(e) => log::error!("Failed to leave arcdps: {e}"),
                                 Ok(exit) => {
                                     log::info!("goodbye arc");
-                                    exit.spawn_free();
+                                    exit.free_blocking();
                                 },
                             }
                         });

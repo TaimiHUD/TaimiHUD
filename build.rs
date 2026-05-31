@@ -8,9 +8,14 @@ use {
 
 const FEATURE_BUILT: &'static str = "CARGO_FEATURE_BUILT_INFO";
 const FEATURE_NEXUS_CODEGEN: &'static str = "CARGO_FEATURE_EXTENSION_NEXUS_CODEGEN";
+const FEATURE_NEXUS_EXTERN: &'static str = "CARGO_FEATURE_EXTENSION_NEXUS_EXTERN";
+const FEATURE_NEXUS: &'static str = "CARGO_FEATURE_EXTENSION_NEXUS";
+const FEATURE_UPDATES: &'static str = "CARGO_FEATURE_UPDATES";
 fn main() {
     println!("cargo::rerun-if-env-changed={FEATURE_BUILT}");
     println!("cargo::rerun-if-env-changed={FEATURE_NEXUS_CODEGEN}");
+    println!("cargo::rerun-if-env-changed={FEATURE_NEXUS_EXTERN}");
+    println!("cargo::rerun-if-env-changed={FEATURE_NEXUS}");
 
     #[cfg(feature = "built-info")]
     write_built_info();
@@ -32,6 +37,8 @@ const BUILT_ATTRS: &'static [&'static str] = &[
 const ADDON_TITLE: &'static str = "ADDON_TITLE";
 const ADDON_AUTHOR: &'static str = "ADDON_AUTHOR";
 const ADDON_VERSION: &'static str = "ADDON_VERSION";
+const ADDON_VERSION_NEXUS: &'static str = "ADDONAPI_VERSION";
+const ADDON_URL: &'static str = "ADDON_URL";
 
 fn apply_built_info() {
     println!("cargo::rustc-cfg=taimi_has={:?}", "title");
@@ -159,6 +166,7 @@ fn apply_built_info() {
         }
     };
     let imperative_build = pkg_build == "local";
+    let mut version = None;
     let release_channel = if let Some(pkg_version) =
         pkg_version.as_ref().and_then(|v| v.parse::<Version>().ok())
     {
@@ -189,7 +197,7 @@ fn apply_built_info() {
             },
             None => (),
         }
-        let version = match release_version {
+        let version = version.insert(match release_version {
             Some(version) => {
                 if version.pre.is_empty() {
                     release_channel = None;
@@ -234,7 +242,7 @@ fn apply_built_info() {
                 }
                 version
             },
-        };
+        });
 
         println!("cargo::rustc-env={ADDON_VERSION}_BUILD={}", version.build);
         println!("cargo::rustc-env={ADDON_VERSION}_PRE={}", version.pre);
@@ -244,19 +252,60 @@ fn apply_built_info() {
         println!("cargo::rustc-env={ADDON_VERSION}={version}");
 
         if version.pre.is_empty() {
-            println!("cargo::rustc-env={ADDON_VERSION}_RELEASE=1");
-        } else if let Some(rc) = version.pre.strip_prefix("rc.") {
-            println!("cargo::rustc-env={ADDON_VERSION}_RELEASE={}", version.pre);
+            println!("cargo::rustc-env={ADDON_VERSION}_RELEASE=z");
+        } else {
+            let (mut major, mut minor, mut build, mut rev) = (
+                version.major as i16,
+                version.minor as i16,
+                version.patch as i16,
+                0i16,
+            );
+            if let Some(rc) = version.pre.strip_prefix("rc.") {
+                println!("cargo::rustc-env={ADDON_VERSION}_RELEASE={}", version.pre);
+                if env::var_os(FEATURE_NEXUS).is_some() {
+                    let pre_rc = rc.split(".").next().unwrap_or(rc);
+                    let pre_rc = pre_rc.parse::<u16>().ok().unwrap_or(version.patch as u16);
+                    rev = 900i16 + pre_rc as i16;
+                    if let Some(p) = version.patch.checked_sub(1) {
+                        build = p as i16;
+                    } else {
+                        build = 999;
+                        match version.minor.checked_sub(1) {
+                            Some(m) => minor = m as i16,
+                            None => {
+                                major -= 1;
+                                minor = 99;
+                            },
+                        }
+                    }
+                }
+            } else {
+                let prerev = version.pre.split(".").nth(1).map(str::parse::<u64>);
+                if let Some(Ok(pre)) = prerev {
+                    // TODO
+                    rev = -0x6c00i16 + pre as i16;
+                }
+            }
             if env::var_os(FEATURE_NEXUS_CODEGEN).is_some() {
-                let (major, minor) = match version.minor.checked_sub(1) {
-                    Some(minor) => (version.major, minor),
-                    None => (version.major - 1, 99),
+                let build = match rev {
+                    0 => build,
+                    rev if rev < 0 => build,
+                    rev => {
+                        if build != 999 || version.patch != 0 {
+                            println!("cargo::warning=nexus-codegen can't emit non-zero build revision for {version}");
+                        }
+                        rev
+                    },
                 };
-                let pre_rc = rc.split(".").next().unwrap_or(rc);
-                let pre_rc = pre_rc.parse::<u16>().ok().unwrap_or(version.patch as u16);
-                println!("cargo::rustc-env=CARGO_PKG_VERSION_MAJOR={}", major);
-                println!("cargo::rustc-env=CARGO_PKG_VERSION_MINOR={}", minor);
-                println!("cargo::rustc-env=CARGO_PKG_VERSION_PATCH={}", 900 + pre_rc);
+                println!("cargo::rustc-env=CARGO_PKG_VERSION_MAJOR={major}");
+                println!("cargo::rustc-env=CARGO_PKG_VERSION_MINOR={minor}");
+                println!("cargo::rustc-env=CARGO_PKG_VERSION_PATCH={build}");
+            }
+            if env::var_os(FEATURE_NEXUS_EXTERN).is_some() {
+                println!("cargo::rustc-env={ADDON_VERSION_NEXUS}_MAJOR={major}");
+                println!("cargo::rustc-env={ADDON_VERSION_NEXUS}_MINOR={minor}");
+                println!("cargo::rustc-env={ADDON_VERSION_NEXUS}_BUILD={build}");
+                println!("cargo::rustc-env={ADDON_VERSION_NEXUS}_REVISION={rev}");
             }
         }
 
@@ -296,6 +345,43 @@ fn apply_built_info() {
         "cargo::rustc-env={ADDON_VERSION}_CHANNEL={}",
         release_channel.unwrap_or("")
     );
+    {
+        println!("cargo::rerun-if-env-changed=CARGO_PKG_HOMEPAGE");
+        if let Ok(webroot) = env::var("CARGO_PKG_HOMEPAGE") {
+            println!("cargo::rustc-cfg=taimi_has={:?}", "url-update-base");
+            let ext = ".dll";
+            let update_base = format!("{webroot}/taimi_data/update/{package}");
+            println!("cargo::rustc-env={ADDON_URL}_UPDATE_BASE={update_base}");
+
+            println!("cargo::rustc-cfg=taimi_has={:?}", "url-update-direct");
+            let version = version
+                .as_ref()
+                .map(ToString::to_string)
+                .or(pkg_version.clone())
+                .unwrap_or_default();
+            let channel = release_channel.unwrap_or("release");
+            println!("cargo::rustc-env={ADDON_URL}_UPDATE_DIRECT={update_base}/{channel}/{package}{ext}?v={version}");
+        }
+        let github_org = "TaimiHUD";
+        let github_repo = "TaimiHUD";
+        let github_url = format!("https://github.com/{github_org}/{github_repo}");
+        println!("cargo::rustc-cfg=taimi_has={:?}", "url-github");
+        println!("cargo::rustc-env={ADDON_URL}_GITHUB_OWNER={github_org}");
+        println!("cargo::rustc-env={ADDON_URL}_GITHUB_REPO={github_repo}");
+        println!("cargo::rustc-env={ADDON_URL}_GITHUB={github_url}");
+        let has_updates = env::var_os(FEATURE_UPDATES).is_some();
+        let update_method = match release_channel {
+            None | Some("rc") => "github",
+            #[cfg(todo)]
+            Some("debug") => "none",
+            Some(..) if has_updates => "manual",
+            Some(..) if release.as_ref().map(|r| r.is_ok()).unwrap_or(false) => "direct",
+            #[cfg(todo)]
+            Some(..) => "direct",
+            Some(..) => "none",
+        };
+        println!("cargo::rustc-cfg=taimi_update=\"{update_method}\"");
+    }
 
     tags.push(release_channel.map(|c| match c {
         "rc" => "Prerelease Test",

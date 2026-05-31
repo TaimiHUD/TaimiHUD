@@ -10,7 +10,8 @@ use {
         },
         game_language_id as lang_id,
         marker::format::MarkerType,
-        settings::IconStyle,
+        render::{machine::RenderMachine, RenderState},
+        settings::{state::AddonHostName, IconStyle},
         unload,
         with_i18n,
         TEXTURES,
@@ -18,9 +19,11 @@ use {
     anyhow::anyhow,
     arcdps::Language,
     nexus::{
+        addon::{AddonFlags, UpdateProvider},
         alert,
         data_link::{get_mumble_link_ptr, get_nexus_link, mumble::MumbleLink, NexusLink},
         gamebind,
+        gui::RenderType,
         localization::translate,
         paths,
         rtapi::RealTimeApi,
@@ -41,63 +44,204 @@ use {
     windows::Win32::Foundation::{HWND, LPARAM, WPARAM},
 };
 
+#[cfg(feature = "extension-nexus-codegen")]
+pub use self::cb::with_ui;
+#[cfg(feature = "extension-nexus-extern")]
+pub use self::r#extern::with_ui;
+
+#[cfg(feature = "extension-nexus-codegen")]
+pub(crate) mod cb;
+#[allow(dead_code)]
+pub mod datalink;
+#[cfg(feature = "extension-nexus-extern")]
+pub(crate) mod r#extern;
+
 /// raidcore addon id or NEGATIVE random unique signature
 pub const SIG: i32 = -exports::SIG;
+#[allow(unreachable_patterns)]
+pub const UPDATE_PROVIDER: UpdateProvider = match () {
+    #[cfg(taimi_update = "github")]
+    () => UpdateProvider::GitHub,
+    #[cfg(taimi_update = "direct")]
+    () => UpdateProvider::Direct,
+    #[cfg(taimi_update = "manual")]
+    () => UpdateProvider::Manual,
+    _ => UpdateProvider::None,
+};
+pub const FLAGS: AddonFlags = AddonFlags::None;
 
 static RUNTIME_AVAILABLE: AtomicBool = AtomicBool::new(false);
+static RUNTIME_LOADED: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn pre_init() {
-    RUNTIME_AVAILABLE.store(true, Ordering::Relaxed);
+    RUNTIME_LOADED.store(true, Ordering::Relaxed);
     crate::crate_init();
 }
 
-pub(crate) fn cb_load() {
-    pre_init();
-
-    #[cfg(feature = "extension-arcdps")]
-    if exports::arcdps::available() {
-        log::info!("switching over from arcdps to nexus...");
-        exports::arcdps::disable();
-    }
-
-    crate::init().expect("load failed");
-    crate::load_nexus()
-}
-
-pub(crate) fn cb_unload() {
-    #[cfg(feature = "extension-arcdps")]
-    let own_handle = match exports::arcdps::ExitHandle::try_exit() {
-        Err(e) => {
-            log::warn!("failed to request unload from arcdps: {e}");
-            None
-        },
-        Ok(exit) => {
-            if exit.is_some() {
-                log::info!("scheduling DLL exit after unload...");
+pub(self) fn init() {
+    RUNTIME_AVAILABLE.store(true, Ordering::Relaxed);
+    let res = match crate::pre_init_for(AddonHostName::Nexus) {
+        Ok(true) => Ok(()),
+        Ok(false) => {
+            unsafe {
+                load_fallback();
             }
-            exit
+            #[cfg(todo)]
+            disable();
+            Ok(())
         },
+        Err(e) => Err(e),
     };
 
-    if available() {
-        unload();
+    let res = res.and_then(|()| crate::init());
+    match res {
+        #[cfg(feature = "extension-nexus-extern")]
+        Ok(()) if r#extern::is_disabled() => {
+            log::info!("skipping disabled nexus init");
+            unsafe {
+                load_fallback();
+            }
+        },
+        Ok(()) => unsafe { load_nexus() },
+        Err(e) => {
+            #[cfg(not(panic = "unwind"))]
+            log::error!("nexus load failed: {e}");
+            disable();
+        },
     }
-
-    #[cfg(feature = "extension-arcdps")]
-    if let Some(handle) = own_handle {
-        handle.spawn_free();
-    } else {
-        rt::log::TaimiLog::logger().close();
+    let success = match &res {
+        #[cfg(all(todo, panic = "unwind"))]
+        Err(..) => {
+            // until we figure out a way to consistently trigger unload in nexus,
+            // it can never actually "fail" init
+            false
+        },
+        _ => true,
+    };
+    crate::post_init_for(AddonHostName::Nexus, success);
+    #[cfg(panic = "unwind")]
+    if let Err(e) = res {
+        panic!("{e}")
     }
-
-    RUNTIME_AVAILABLE.store(false, Ordering::SeqCst);
-
-    #[cfg(not(feature = "extension-arcdps"))]
-    rt::log::TaimiLog::logger().close();
 }
 
+unsafe fn load_nexus() {
+    let Some(aapi) = addon_api() else { return };
+    #[cfg(feature = "space")]
+    (aapi.renderer.register)(RenderType::PreRender, unsafe_render_pre);
+    (aapi.renderer.register)(RenderType::Render, unsafe_render);
+    (aapi.renderer.register)(RenderType::OptionsRender, unsafe_options);
+    (aapi.wnd_proc.register)(wnd);
+
+    // TODO: migrate the rest here too...
+    crate::load_nexus();
+}
+unsafe fn load_fallback() {
+    let Some(aapi) = addon_api() else { return };
+
+    if !aapi.imgui_context.is_null() {
+        (aapi.renderer.register)(RenderType::OptionsRender, unsafe_options_fallback);
+    }
+}
+extern "C-unwind" fn unsafe_render_pre() {
+    unsafe {
+        let Some(render_ready) = RenderState::pre_render(AddonHostName::Nexus) else {
+            return
+        };
+        RenderMachine::turn_render_entry();
+        if !render_ready {
+            exports::nexus::with_ui(RenderState::render_setup);
+        }
+    }
+}
+extern "C-unwind" fn unsafe_render() {
+    unsafe {
+        #[cfg(not(feature = "space"))]
+        unsafe_render_pre();
+        if RenderState::is_host(AddonHostName::Nexus) != Some(true) {
+            return
+        }
+        exports::nexus::with_ui(|ui| {
+            RenderMachine::turn_ui_entry(ui);
+            RenderState::render_ui(ui);
+        });
+    }
+}
+extern "C-unwind" fn unsafe_options() {
+    unsafe {
+        let mut running = loaded() && RenderState::is_running();
+        if running {
+            with_ui(|ui| {
+                running &= RenderState::render_options(ui, AddonHostName::Nexus);
+            });
+        }
+        if !running {
+            unsafe_options_fallback();
+        }
+    }
+}
+extern "C-unwind" fn unsafe_options_fallback() {
+    unsafe {
+        with_ui(|ui| RenderState::render_options_fallback(ui, AddonHostName::Nexus));
+    }
+}
+
+pub(self) fn uninit() {
+    let unloading = crate::pre_uninit_for(AddonHostName::Nexus);
+    if unloading {
+        unload();
+    }
+    uninit_cleanup();
+
+    RUNTIME_AVAILABLE.store(false, Ordering::SeqCst);
+    RUNTIME_LOADED.store(false, Ordering::SeqCst);
+
+    if unloading {
+        crate::post_uninit_for(AddonHostName::Nexus);
+    } else {
+        RenderState::try_send(crate::render::RenderEvent::RefreshHost);
+    }
+}
+pub fn enter() -> RuntimeResult<()> {
+    if available() {
+        return Ok(())
+    }
+
+    log::debug!("TODO: enter");
+
+    Ok(())
+}
+
+/// revert nexus handles if any were registered
+///
+/// must remain idempotent if used multiple times during shutdown
+pub fn uninit_cleanup() {
+    if let Some(aapi) = addon_api() {
+        unsafe {
+            (aapi.renderer.deregister)(unsafe_options);
+            (aapi.renderer.deregister)(unsafe_options_fallback);
+            (aapi.renderer.deregister)(unsafe_render);
+            (aapi.renderer.deregister)(unsafe_render_pre);
+            (aapi.wnd_proc.deregister)(wnd);
+        }
+    }
+
+    quick_access_remove_all();
+    unregister_keybinds();
+}
+
+pub fn loaded() -> bool {
+    match RUNTIME_LOADED.load(Ordering::SeqCst) {
+        #[cfg(feature = "extension-nexus-extern")]
+        true if r#extern::addon_api().is_none() || r#extern::requested_api() == 0 => false,
+        loaded => loaded,
+    }
+}
 pub fn available() -> bool {
     RUNTIME_AVAILABLE.load(Ordering::SeqCst)
+}
+pub fn disable() {
+    RUNTIME_AVAILABLE.store(false, Ordering::SeqCst)
 }
 
 pub fn addon_dir() -> RuntimeResult<Option<PathBuf>> {
@@ -145,7 +289,7 @@ pub fn mumble_link_ptr() -> RuntimeResult<Option<NonNull<MumbleLink>>> {
 }
 
 pub fn rtapi() -> RuntimeResult<Option<RealTimeApi>> {
-    if !available() {
+    if !loaded() {
         return Ok(None)
     }
 
@@ -213,31 +357,65 @@ pub fn send_alert(_ui: &rt::imgui::Ui, message: &str) -> RuntimeResult<Option<()
     Ok(Some(()))
 }
 
+pub fn is_nexus_updater() -> bool {
+    match () {
+        #[cfg(feature = "extension-nexus-extern")]
+        _ => is_provider_nexus(&r#extern::requested_provider()),
+        #[cfg(feature = "extension-nexus-codegen")]
+        _ => is_provider_nexus(&UPDATE_PROVIDER),
+    }
+}
+
+pub fn addon_api() -> Option<&'static AddonApi> {
+    match () {
+        #[cfg(feature = "extension-nexus-codegen")]
+        _ if !available() => return None,
+        #[cfg(feature = "extension-nexus-codegen")]
+        _ => Some(AddonApi::get()),
+        #[cfg(feature = "extension-nexus-extern")]
+        _ => r#extern::addon_api(),
+    }
+}
+
 pub fn log(metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Option<()>> {
-    if !available() {
+    #[cfg(todo = "unnecessary")]
+    if !loaded() {
         return Ok(None)
     }
+    let Some(aapi) = addon_api() else { return Ok(None) };
 
     let level = rt::log::nexus_log_level(metadata.level());
     let channel = rt::NAME_C.as_ptr();
 
     unsafe {
-        (AddonApi::get().log)(level, channel, message.as_ptr());
+        (aapi.log)(level, channel, message.as_ptr());
     }
 
     Ok(Some(()))
 }
 
 pub async fn perform_update(release: &rt::update::ResolvedVersion) -> RuntimeResult<Option<()>> {
-    if !available() {
+    #[cfg(todo = "unnecessary")]
+    if !loaded() {
         return Ok(None)
     }
+    let Some(aapi) = addon_api() else { return Ok(None) };
 
     let dll_url = release.dll_url(false).await.map_err(|e| {
         log::error!("{e:#}");
         "DLL URL missing"
     })?;
-    nexus::updater::request_update(SIG, dll_url.as_str());
+    match () {
+        #[cfg(todo = "unnecessary")]
+        () => nexus::updater::request_update(SIG, dll_url.as_str()),
+        () => {
+            let url = String::from(dll_url);
+            unsafe {
+                let url_c = CString::from_vec_unchecked(url.into());
+                (aapi.request_update)(SIG, url_c.as_ptr())
+            }
+        },
+    }
 
     Ok(Some(()))
 }
@@ -273,6 +451,10 @@ pub fn dxgi_swap_chain() -> RuntimeResult<Option<rt::SwapChain>> {
 }
 
 pub extern "C-unwind" fn wnd(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> u32 {
+    if !available() {
+        return msg
+    }
+
     match rt::handle_wnd_event(hwnd, msg, w.0, l.0) {
         m if m == msg => msg,
         _ => 0,
@@ -373,17 +555,16 @@ pub fn unregister_keybinds() {
         log::error!("keybind map poisoned?");
         return
     };
-    for kb in keybinds.keys() {
-        unsafe { (AddonApi::get().input_binds.deregister)(kb.as_ptr()) }
+    if let Some(aapi) = addon_api() {
+        for kb in keybinds.keys() {
+            unsafe { (aapi.input_binds.deregister)(kb.as_ptr()) }
+        }
     }
     keybinds.clear();
 }
 
 pub fn quick_access_add(icon: TaimiControls, state_on: TaimiControls, style: IconStyle) {
-    use {
-        crate::render::RenderState,
-        nexus::quick_access::{add_quick_access, add_quick_access_context_menu},
-    };
+    use nexus::quick_access::{add_quick_access, add_quick_access_context_menu};
 
     let Some(identifier) = IconStyle::control_id(icon) else {
         log::warn!("no button for icon {:#010x}", icon.bits());
@@ -457,15 +638,20 @@ pub fn quick_access_remove_all() {
 }
 
 pub fn quick_access_remove(icon: TaimiControls) {
-    use nexus::quick_access::{remove_quick_access, remove_quick_access_context_menu};
-
+    let Some(aapi) = addon_api() else { return };
     let Some(identifier) = IconStyle::control_id(icon) else { return };
     if IconStyle::control_has_menu(icon) {
         let menu_id = IconStyle::control_menu_id(identifier);
-        remove_quick_access_context_menu(menu_id);
+        unsafe {
+            let menu_id = CString::from_vec_unchecked(menu_id.into());
+            (aapi.quick_access.remove_context_menu)(menu_id.as_ptr())
+        }
     }
     let button_id = IconStyle::control_button_id(identifier);
-    remove_quick_access(button_id);
+    unsafe {
+        let button_id = CString::from_vec_unchecked(button_id.into());
+        (aapi.quick_access.remove)(button_id.as_ptr())
+    }
 }
 
 pub fn quick_access_init(icons: TaimiControls, style: IconStyle, state_on: TaimiControls) {
@@ -481,77 +667,77 @@ impl IconStyle {
     pub fn data_for(self, icon: TaimiControls, on_off: bool, hover: bool) -> Option<&'static [u8]> {
         Some(match (self, Self::canon_icon(icon), hover, on_off) {
             (Self::Plain, TaimiControls::WINDOW_PRIMARY, false, _) =>
-                include_bytes!("../../data/icons/plain/taimi.png"),
+                include_bytes!("../../../data/icons/plain/taimi.png"),
             (Self::Scanlines1, TaimiControls::WINDOW_PRIMARY, false, _) =>
-                include_bytes!("../../data/icons/scanlines-1/taimi.png"),
+                include_bytes!("../../../data/icons/scanlines-1/taimi.png"),
             (Self::Plain, TaimiControls::WINDOW_PRIMARY, true, _) =>
-                include_bytes!("../../data/icons/plain/taimi-hover.png"),
+                include_bytes!("../../../data/icons/plain/taimi-hover.png"),
             (Self::Scanlines1, TaimiControls::WINDOW_PRIMARY, true, _) =>
-                include_bytes!("../../data/icons/scanlines-1/taimi-hover.png"),
+                include_bytes!("../../../data/icons/scanlines-1/taimi-hover.png"),
 
             #[cfg(feature = "markers")]
             (Self::Plain, TaimiControls::WINDOW_MARKERS, false, _) =>
-                include_bytes!("../../data/icons/plain/markers.png"),
+                include_bytes!("../../../data/icons/plain/markers.png"),
             #[cfg(feature = "markers")]
             (Self::Scanlines1, TaimiControls::WINDOW_MARKERS, false, _) =>
-                include_bytes!("../../data/icons/scanlines-1/markers.png"),
+                include_bytes!("../../../data/icons/scanlines-1/markers.png"),
             #[cfg(feature = "markers")]
             (Self::Plain, TaimiControls::WINDOW_MARKERS, true, _) =>
-                include_bytes!("../../data/icons/plain/markers-hover.png"),
+                include_bytes!("../../../data/icons/plain/markers-hover.png"),
             #[cfg(feature = "markers")]
             (Self::Scanlines1, TaimiControls::WINDOW_MARKERS, true, _) =>
-                include_bytes!("../../data/icons/scanlines-1/markers-hover.png"),
+                include_bytes!("../../../data/icons/scanlines-1/markers-hover.png"),
 
             #[cfg(feature = "timers")]
             (Self::Plain, TaimiControls::WINDOW_TIMERS, false, _) =>
-                include_bytes!("../../data/icons/plain/timers.png"),
+                include_bytes!("../../../data/icons/plain/timers.png"),
             #[cfg(feature = "timers")]
             (Self::Scanlines1, TaimiControls::WINDOW_TIMERS, false, _) =>
-                include_bytes!("../../data/icons/scanlines-1/timers.png"),
+                include_bytes!("../../../data/icons/scanlines-1/timers.png"),
             #[cfg(feature = "timers")]
             (Self::Plain, TaimiControls::WINDOW_TIMERS, true, _) =>
-                include_bytes!("../../data/icons/plain/timers-hover.png"),
+                include_bytes!("../../../data/icons/plain/timers-hover.png"),
             #[cfg(feature = "timers")]
             (Self::Scanlines1, TaimiControls::WINDOW_TIMERS, true, _) =>
-                include_bytes!("../../data/icons/scanlines-1/timers-hover.png"),
+                include_bytes!("../../../data/icons/scanlines-1/timers-hover.png"),
 
             #[cfg(feature = "space")]
             (Self::Plain, TaimiControls::WINDOW_PATHING, false, _) =>
-                include_bytes!("../../data/icons/plain/pathing.png"),
+                include_bytes!("../../../data/icons/plain/pathing.png"),
             #[cfg(feature = "space")]
             (Self::Scanlines1, TaimiControls::WINDOW_PATHING, false, _) =>
-                include_bytes!("../../data/icons/scanlines-1/pathing.png"),
+                include_bytes!("../../../data/icons/scanlines-1/pathing.png"),
             #[cfg(feature = "space")]
             (Self::Plain, TaimiControls::WINDOW_PATHING, true, _) =>
-                include_bytes!("../../data/icons/plain/pathing-hover.png"),
+                include_bytes!("../../../data/icons/plain/pathing-hover.png"),
             #[cfg(feature = "space")]
             (Self::Scanlines1, TaimiControls::WINDOW_PATHING, true, _) =>
-                include_bytes!("../../data/icons/scanlines-1/pathing-hover.png"),
+                include_bytes!("../../../data/icons/scanlines-1/pathing-hover.png"),
 
             #[cfg(feature = "space")]
             (Self::Plain, TaimiControls::PATHING_SPACE, false, true) =>
-                include_bytes!("../../data/icons/plain/pathingtoggle-on.png"),
+                include_bytes!("../../../data/icons/plain/pathingtoggle-on.png"),
             #[cfg(feature = "space")]
             (Self::Scanlines1, TaimiControls::PATHING_SPACE, false, true) =>
-                include_bytes!("../../data/icons/scanlines-1/pathingtoggle-on.png"),
+                include_bytes!("../../../data/icons/scanlines-1/pathingtoggle-on.png"),
             #[cfg(feature = "space")]
             (Self::Plain, TaimiControls::PATHING_SPACE, true, true) =>
-                include_bytes!("../../data/icons/plain/pathingtoggle-on-hover.png"),
+                include_bytes!("../../../data/icons/plain/pathingtoggle-on-hover.png"),
             #[cfg(feature = "space")]
             (Self::Scanlines1, TaimiControls::PATHING_SPACE, true, true) =>
-                include_bytes!("../../data/icons/scanlines-1/pathingtoggle-on-hover.png"),
+                include_bytes!("../../../data/icons/scanlines-1/pathingtoggle-on-hover.png"),
             #[cfg(feature = "space")]
             (Self::Plain, TaimiControls::PATHING_SPACE, false, false) =>
-                include_bytes!("../../data/icons/plain/pathingtoggle-off.png"),
+                include_bytes!("../../../data/icons/plain/pathingtoggle-off.png"),
             #[cfg(feature = "space")]
             (Self::Scanlines1, TaimiControls::PATHING_SPACE, false, false) =>
-                include_bytes!("../../data/icons/scanlines-1/pathingtoggle-off.png"),
+                include_bytes!("../../../data/icons/scanlines-1/pathingtoggle-off.png"),
             #[cfg(feature = "space")]
             (Self::Plain, TaimiControls::PATHING_SPACE, true, false) =>
-                include_bytes!("../../data/icons/plain/pathingtoggle-off-hover.png"),
+                include_bytes!("../../../data/icons/plain/pathingtoggle-off-hover.png"),
             #[cfg(feature = "space")]
             (Self::Scanlines1, TaimiControls::PATHING_SPACE, true, false) =>
-                include_bytes!("../../data/icons/scanlines-1/pathingtoggle-off-hover.png"),
+                include_bytes!("../../../data/icons/scanlines-1/pathingtoggle-off-hover.png"),
             _ => {
                 log::warn!("unrecognized quick access icon {:#010x}", icon.bits());
                 return None
@@ -649,4 +835,11 @@ impl IconStyle {
             _ => None,
         }
     }
+}
+
+fn is_provider_nexus(provider: &UpdateProvider) -> bool {
+    matches!(
+        provider,
+        UpdateProvider::Direct | UpdateProvider::GitHub | UpdateProvider::Raidcore
+    )
 }
