@@ -165,6 +165,14 @@ in
       } = "touch $out";
 
       LIBGIT2_NO_VENDOR = true;
+      preConfigure = optionalString (stdenv.hostPlatform.config != stdenv.buildPlatform.config) ''
+        if [[ -n ''${PKG_CONFIG_PATH_FOR_BUILD-} ]]; then
+          export "PKG_CONFIG_PATH_${lib.replaceStrings ["-"] ["_"] stdenv.buildPlatform.config}=$PKG_CONFIG_PATH_FOR_BUILD"
+        fi
+        if [[ -n ''${PKG_CONFIG_FOR_BUILD-} ]]; then
+          export "PKG_CONFIG_${lib.replaceStrings ["-"] ["_"] stdenv.buildPlatform.config}=$PKG_CONFIG_FOR_BUILD"
+        fi
+      '';
 
       # Tells Cargo that we're building for Windows.
       # (https://doc.rust-lang.org/cargo/reference/config.html#buildtarget)
