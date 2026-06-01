@@ -5,15 +5,12 @@ use {
     },
     crate::{
         controller::pathing::{ExternalFilterState, FestivalFixup, PathingController, PathingEvent},
-        exports::runtime::{
-            self as rt,
-            imgui::{self, Condition, StyleVar, TreeNode, Ui},
-        },
+        exports::runtime as rt,
         fl,
         render::{
+            element::prelude::*,
             machine::{RenderMachine, RenderPosition},
             pathing_window::PathingSearchState,
-            RenderState,
         },
         settings::state::ui::pathing::PathingFilterFlags as PathingFilterState,
         space::{
@@ -143,14 +140,16 @@ impl ActivePack {
         current_pois
     }
 
-    pub fn draw_categories(
+    pub fn draw_categories<'ui, U>(
         &mut self,
-        ui: &Ui,
+        ui: &mut U,
         filter_state: PathingFilterState,
         open_items: &mut HashSet<CategoryId>,
         recompute: &mut bool,
         search_state: &PathingSearchState,
-    ) {
+    ) where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let map_filter = match filter_state.contains(PathingFilterState::CurrentMap) {
             true => {
                 if self.available_categories.is_empty() {
@@ -245,8 +244,8 @@ impl ActivePack {
         }
     }
 
-    pub fn draw_category(
-        ui: &Ui,
+    pub fn draw_category<'ui, U>(
+        ui: &mut U,
         category: &Category,
         all_categories: &IndexMap<CategoryId, Category>,
         state: &mut BitVec,
@@ -257,10 +256,11 @@ impl ActivePack {
         search_state: &PathingSearchState,
         category_filter: Option<&BitVec>,
         copyable: (&BTreeSet<usize>, &BTreeSet<usize>, &[Poi]),
-    ) {
-        let push_token = ui.push_id(&category.full_id);
+    ) where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        let _push_token = ui.push_id(category.full_id.as_str());
         if category.is_hidden() {
-            push_token.pop();
             return;
         }
         let mut display = true;
@@ -297,11 +297,11 @@ impl ActivePack {
             };
             if let Some(..) = is_copyable {
                 ui.indent();
-                if ui.small_button(&fl!("copy-arg", arg = (category.display_name()))) {
+                if ui.small_button(fl!("copy-arg", arg = (category.display_name()))) {
                     Self::copy_copyable(ui, &category.marker_attributes);
                 }
                 if ui.is_item_hovered() {
-                    Self::draw_tooltip(ui, category.display_name(), || {
+                    Self::draw_tooltip(ui, category.display_name(), |ui| {
                         Self::draw_tooltip_category(ui, category);
                         Self::draw_tooltip_copyable(
                             ui,
@@ -318,7 +318,7 @@ impl ActivePack {
                     if let Some(idx) = all_categories.get_index_of(&category.full_id) {
                         if state.get(idx).is_some() {
                             let (state, recompute) = (&mut *state, &mut *recompute);
-                            state_checkbox = Some(move || {
+                            state_checkbox = Some(move |ui: &mut U| {
                                 if let Some(mut substate) = state.get_mut(idx) {
                                     if ui.checkbox("", &mut substate) {
                                         *recompute = true;
@@ -338,10 +338,10 @@ impl ActivePack {
                 if !is_root {
                     if let Some(mut checkbox) = state_checkbox.take() {
                         ui.unindent();
-                        checkbox_gap = Some(ui.push_style_var(StyleVar::ItemSpacing([0.0, 0.0])));
+                        checkbox_gap = Some(ui.push_style_item_spacing(ImVec2::ZERO));
                         #[cfg(todo = "unnecessary")]
                         let _inner_gap = ui.push_style_var(StyleVar::ItemInnerSpacing([0.0, 0.0]));
-                        checkbox();
+                        checkbox(ui);
                         ui.same_line();
                     }
                 }
@@ -351,30 +351,64 @@ impl ActivePack {
                     .map(|idx| copyable_categories.contains(&idx))
                     .unwrap_or(false);
 
-                let mut unbuilt = TreeNode::new(category.display_name());
-                if (category.is_separator() || category.sub_categories.is_empty())
+                let flag_leaf = category.is_separator();
+                let flag_bullet = !flag_leaf && category.sub_categories.is_empty();
+                let flag_framed = !flag_leaf && !flag_bullet;
+                let opened =
+                    flag_framed.then(|| ImCondition::always(open_items.contains(&category.full_id)));
+                let flag_span_avail = (category.is_separator() || category.sub_categories.is_empty())
                     && copy_value.is_none()
-                    && !has_copyable_pois
-                {
-                    unbuilt = unbuilt.flags(imgui::TreeNodeFlags::SPAN_AVAIL_WIDTH);
-                }
-                unbuilt = unbuilt
-                    .frame_padding(true)
-                    .tree_push_on_open(false)
-                    .allow_item_overlap(state_checkbox.is_some());
-                if category.is_separator() {
-                    unbuilt = unbuilt.leaf(true);
-                } else if category.sub_categories.is_empty() {
-                    unbuilt = unbuilt.bullet(true);
-                } else {
-                    unbuilt = unbuilt
-                        .framed(true)
-                        .opened(open_items.contains(&category.full_id), Condition::Always);
-                }
-                let tree_token = unbuilt.push(ui);
+                    && !has_copyable_pois;
+                let flags = match ui.imgui_version_num() {
+                    #[cfg(taimi_imgui = "180")]
+                    Some(im180::VERSION_NUM) => {
+                        let mut flags = im180::sys::ImGuiStyleVar_FramePadding
+                            | im180::sys::ImGuiTreeNodeFlags_NoTreePushOnOpen;
+                        if state_checkbox.is_some() {
+                            flags |= im180::sys::ImGuiTreeNodeFlags_AllowItemOverlap;
+                        }
+                        if flag_leaf {
+                            flags |= im180::sys::ImGuiTreeNodeFlags_Leaf;
+                        }
+                        if flag_bullet {
+                            flags |= im180::sys::ImGuiTreeNodeFlags_Bullet;
+                        }
+                        if flag_framed {
+                            flags |= im180::sys::ImGuiTreeNodeFlags_Framed;
+                        }
+                        if flag_span_avail {
+                            flags |= im180::sys::ImGuiTreeNodeFlags_SpanAvailWidth;
+                        }
+                        imw::DynArgsTreeNode::new(Some(flags))
+                    },
+                    #[cfg(taimi_imgui = "192")]
+                    Some(im192::VERSION_NUM) => {
+                        let mut flags = im192::sys::ImGuiStyleVar_FramePadding
+                            | im192::sys::ImGuiTreeNodeFlags_NoTreePushOnOpen;
+                        if state_checkbox.is_some() {
+                            flags |= im192::sys::ImGuiTreeNodeFlags_AllowOverlap;
+                        }
+                        if flag_leaf {
+                            flags |= im192::sys::ImGuiTreeNodeFlags_Leaf;
+                        }
+                        if flag_bullet {
+                            flags |= im192::sys::ImGuiTreeNodeFlags_Bullet;
+                        }
+                        if flag_framed {
+                            flags |= im192::sys::ImGuiTreeNodeFlags_Framed;
+                        }
+                        if flag_span_avail {
+                            flags |= im192::sys::ImGuiTreeNodeFlags_SpanAvailWidth;
+                        }
+                        imw::DynArgsTreeNode::new(Some(flags))
+                    },
+                    _ => Default::default(),
+                };
+                let tree_token =
+                    ui.begin_tree_node(opened, category.full_id.as_str(), category.display_name(), flags);
                 drop(checkbox_gap);
                 if ui.is_item_hovered() && Self::category_has_tooltip(category) {
-                    Self::draw_tooltip(ui, category.display_name(), || {
+                    Self::draw_tooltip(ui, category.display_name(), |ui| {
                         Self::draw_tooltip_category(ui, category);
                     });
                 }
@@ -382,7 +416,7 @@ impl ActivePack {
                     ui.same_line();
                     ui.dummy([4.0, 0.0]);
                     ui.same_line();
-                    checkbox();
+                    checkbox(ui);
                 } else if has_state_checkbox {
                     ui.indent();
                 }
@@ -392,7 +426,7 @@ impl ActivePack {
                         Self::copy_copyable(ui, &category.marker_attributes);
                     }
                     if ui.is_item_hovered() {
-                        Self::draw_tooltip(ui, category.display_name(), || {
+                        Self::draw_tooltip(ui, category.display_name(), |ui| {
                             Self::draw_tooltip_copyable(
                                 ui,
                                 &category.marker_attributes,
@@ -413,7 +447,7 @@ impl ActivePack {
                             ui.same_line();
                         }
                         let copied = match &copyable.attributes.tip_name {
-                            Some(name) => ui.small_button(&fl!("copy-arg", arg = (&name[..]))),
+                            Some(name) => ui.small_button(fl!("copy-arg", arg = (&name[..]))),
                             None => with_i18n!("copy", |copy| ui.small_button(copy)),
                         };
                         if copied {
@@ -426,14 +460,14 @@ impl ActivePack {
                                 .as_ref()
                                 .map(|n| &n[..])
                                 .unwrap_or("Generic Copyable Marker Name");
-                            Self::draw_tooltip(ui, template, || {
+                            Self::draw_tooltip(ui, template, |ui| {
                                 Self::draw_tooltip_poi(ui, &copyable.attributes);
                                 Self::draw_tooltip_copyable(ui, &copyable.attributes, None);
                             });
                         }
                     }
                 }
-                let mut internal_closure = || {
+                let mut internal_closure = |ui: &mut U| {
                     if !open_items.contains(&category.full_id)
                         && !category.is_separator()
                         && !category.sub_categories.is_empty()
@@ -464,8 +498,8 @@ impl ActivePack {
                 };
                 ui.table_next_column();
                 if let Some(token) = tree_token {
-                    internal_closure();
-                    token.pop();
+                    internal_closure(ui);
+                    token.end();
                 } else {
                     if open_items.contains(&category.full_id) {
                         open_items.remove(&category.full_id);
@@ -473,10 +507,12 @@ impl ActivePack {
                 }
             }
         }
-        push_token.pop();
     }
 
-    pub(crate) fn copy_copyable(ui: &Ui, attributes: &MarkerAttributes) {
+    pub(crate) fn copy_copyable<'ui, U>(ui: &mut U, attributes: &MarkerAttributes)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let interaction = attributes.interaction();
         let Some(copy_value) = &interaction.copy_value else { return };
         ui.set_clipboard_text(&copy_value[..]);
@@ -485,7 +521,10 @@ impl ActivePack {
         }
     }
 
-    pub(crate) fn draw_tooltip_category(ui: &Ui, category: &Category) {
+    pub(crate) fn draw_tooltip_category<'ui, U>(ui: &mut U, category: &Category)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let desc = match &category.marker_attributes.tip_description {
             Some(desc) if !desc.is_empty() => Some(&desc[..]),
             _ => None,
@@ -497,7 +536,7 @@ impl ActivePack {
         };
 
         if let Some(title) = title {
-            let _title_font = desc.map(|_| RenderState::push_font("big", ui));
+            let _title_font = NexusLinkFont::Big.push_font(ui);
             ui.text(title);
         }
 
@@ -506,17 +545,20 @@ impl ActivePack {
         }
     }
 
-    fn draw_tooltip_poi(ui: &Ui, attributes: &MarkerAttributes) {
+    fn draw_tooltip_poi<'ui, U>(ui: &mut U, attributes: &MarkerAttributes)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let desc = match &attributes.tip_description {
             Some(desc) if !desc.is_empty() => Some(&desc[..]),
             _ => None,
         };
 
         if let Some(title) = &attributes.tip_name {
-            let _title_font = desc.map(|_| RenderState::push_font("big", ui));
+            let _title_font = NexusLinkFont::Big.push_font(ui);
             ui.text(&title[..]);
         }
-        if let Some(desc) = &attributes.tip_description {
+        if let Some(desc) = desc {
             ui.text_wrapped(&desc[..]);
         }
     }
@@ -549,30 +591,37 @@ impl ActivePack {
         false
     }
 
-    pub(crate) fn draw_tooltip<F: FnOnce()>(ui: &Ui, title_template: &str, f: F) {
+    pub(crate) fn draw_tooltip<'ui, U, F>(ui: &mut U, title_template: &str, f: F)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+        F: FnOnce(&mut U),
+    {
         let _id = ui.push_id("category_tooltip");
-        let [minwidth, lineheight] = ui.calc_text_size(title_template);
-        unsafe {
-            imgui::sys::igSetNextWindowSize([0.0, lineheight * 1.5].into(), Condition::Appearing as _);
-        };
-        let _size = ui.push_style_var(StyleVar::WindowMinSize([minwidth, lineheight]));
-        ui.tooltip(|| {
+        let ImSize2 { width: minwidth, height: lineheight } = ui.calc_text_size(title_template);
+        ui.window_prepare_size(imw::Window::prepare_height(lineheight * 1.5), ImCondition::Always);
+        let size_token = ui.push_window_size_min([minwidth, lineheight]);
+        let tooltip = ui.begin_tooltip();
+        size_token.end();
+        if let Some(_tooltip) = tooltip {
             {
-                let _padding = ui.push_style_var(StyleVar::ItemSpacing([f32::EPSILON, f32::EPSILON]));
+                let _padding = ui.push_style_item_spacing(ImVec2::splat(f32::EPSILON));
                 ui.dummy([minwidth, f32::EPSILON]);
             }
-            f()
-        })
+            f(ui)
+        }
     }
 
-    fn draw_tooltip_copyable(ui: &Ui, attributes: &MarkerAttributes, display_name: Option<&str>) {
+    fn draw_tooltip_copyable<'ui, U>(ui: &mut U, attributes: &MarkerAttributes, display_name: Option<&str>)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let interaction = attributes.interaction();
         let copy_message = interaction.copy_message.as_ref().map(|m| &m[..]);
         match &interaction.copy_value {
             Some(copy_value)
                 if (display_name.is_none() || copy_message.is_none())
                     && Self::copyable_value_has_message(attributes) =>
-                ui.text_wrapped(&format!("\"{copy_value}\"")),
+                ui.text_wrapped(im_fmt!("\"{copy_value}\"")),
             _ => (),
         }
         if let Some(copy_message) = copy_message {

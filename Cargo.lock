@@ -558,6 +558,20 @@ name = "bytemuck"
 version = "1.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9134a6ef01ce4b366b50689c94f82c14bc72bc5d0386829828a2e2752ef7958c"
+dependencies = [
+ "bytemuck_derive",
+]
+
+[[package]]
+name = "bytemuck_derive"
+version = "1.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9abbd1bc6865053c427f7198e6af43bfdedc55ab791faed4fbd361d789575ff"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "byteorder"
@@ -2190,6 +2204,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "macro_rules_attribute"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65049d7923698040cd0b1ddcced9b0eb14dd22c5f86ae59c3740eab64a676520"
+dependencies = [
+ "macro_rules_attribute-proc_macro",
+ "paste",
+]
+
+[[package]]
+name = "macro_rules_attribute-proc_macro"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "670fdfda89751bc4a84ac13eaa63e205cf0fd22b4c9a5fbfa085b63c1f1d3a30"
+
+[[package]]
 name = "magic_migrate"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3631,6 +3661,7 @@ dependencies = [
  "bitvec",
  "built",
  "bvh",
+ "bytemuck",
  "bytes",
  "chrono",
  "closure-ffi",
@@ -3655,10 +3686,12 @@ dependencies = [
  "json-strip-comments",
  "lininterp",
  "log",
+ "macro_rules_attribute",
  "magic_migrate",
  "mint",
  "nalgebra",
  "nexus",
+ "num-traits",
  "open",
  "ordered-float",
  "palette",
@@ -3668,6 +3701,7 @@ dependencies = [
  "reqwest",
  "retour",
  "rust-embed",
+ "rustc-hash 2.1.1",
  "semver",
  "serde",
  "serde_json",
@@ -3685,6 +3719,7 @@ dependencies = [
  "taimi_sync",
  "taimi_ui",
  "tempfile",
+ "tinystr 0.8.1",
  "tobj",
  "tokio",
  "tokio-stream",

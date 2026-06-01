@@ -10,6 +10,7 @@ pub mod edit_marker_window;
 pub mod element;
 #[cfg(feature = "goggles")]
 pub mod goggles;
+pub mod i18n;
 pub mod info_tab;
 pub mod machine;
 #[cfg(feature = "markers")]

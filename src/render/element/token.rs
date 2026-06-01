@@ -1,7 +1,4 @@
-use crate::{
-    exports::runtime::imgui::{self, MouseButton},
-    with_i18n,
-};
+use crate::render::element::prelude::*;
 
 #[derive(Debug, Clone, Default)]
 pub struct ApiTokenInput {
@@ -31,24 +28,26 @@ impl ApiTokenInput {
         self.update_preview(!token.is_empty())
     }
 
-    pub fn draw(&mut self, ui: &imgui::Ui, label_id: &str) -> Option<String> {
+    pub fn draw<'ui, U>(&mut self, ui: &mut U, label_id: &str) -> Option<String>
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let changed = self.draw_input(ui, label_id);
         self.draw_finish(ui, changed)
     }
 
-    pub fn draw_input(&mut self, ui: &imgui::Ui, label_id: &str) -> bool {
+    const MAX_TOKEN_LEN: usize = 0xc0;
+    pub fn draw_input<'ui, U>(&mut self, ui: &mut U, label_id: &str) -> bool
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        let additional = Self::MAX_TOKEN_LEN.saturating_sub(self.buffer.capacity());
+        self.buffer.reserve_exact(additional);
         let changed = with_i18n(label_id, |label| {
             with_i18n!("add", |hint| {
+                // TODO: late-bound i18n display type here to avoid lookup when unused
                 let is_unset = self.is_empty();
-                let mut input = ui
-                    .input_text(&label, &mut self.buffer)
-                    .enter_returns_true(true)
-                    .auto_select_all(true)
-                    .password(true);
-                if is_unset {
-                    input = input.hint(&hint);
-                }
-                input.build()
+                ui.input_password(label, &mut self.buffer, is_unset.then_some(hint))
             })
         });
         if !changed {
@@ -63,7 +62,10 @@ impl ApiTokenInput {
         changed
     }
 
-    pub fn draw_finish(&mut self, ui: &imgui::Ui, mut changed: bool) -> Option<String> {
+    pub fn draw_finish<'ui, U>(&mut self, ui: &mut U, mut changed: bool) -> Option<String>
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         if !changed && self.is_dirty() {
             ui.same_line();
             if with_i18n!("save", |msg| ui.small_button(msg)) {
@@ -80,7 +82,7 @@ impl ApiTokenInput {
                 String::new()
             },
             true => self.buffer.clone(),
-            false if ui.is_item_clicked_with_button(MouseButton::Right) => String::new(),
+            false if ui.is_item_right_clicked() => String::new(),
             false => return None,
         };
         self.update_preview_with(&token);

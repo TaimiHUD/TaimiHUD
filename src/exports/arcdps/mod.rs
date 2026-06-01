@@ -10,15 +10,25 @@ use {
         controller::timers::{TimersController, TimersEvent},
         exports::{
             self,
-            runtime::{self as rt, bindings::TaimiControls, imgui, log::DeferredLogger, RuntimeResult},
+            runtime::{
+                self as rt,
+                alert::LogWarningColour,
+                bindings::TaimiControls,
+                log::DeferredLogger,
+                RuntimeResult,
+            },
         },
         marker::format::MarkerType,
-        render::{machine::RenderMachine, RenderState},
+        render::{
+            element::im::{DrawContextInput, ImDrawWindow, UiContextCell},
+            i18n::LanguageIdentifier,
+            machine::RenderMachine,
+            RenderState,
+        },
         settings::{
             state::{AddonHostName, BootstrapState},
             ArcSettings,
         },
-        with_i18n,
     },
     anyhow::Context,
     arcdps::extras::{ExtrasVersion, UserInfoIter},
@@ -43,6 +53,7 @@ use {
         thread,
         time::Duration,
     },
+    taimi_ui::im::colours::ImColourContainer,
     windows::Win32::{
         Foundation::{HMODULE, HWND},
         UI::{Input::KeyboardAndMouse, WindowsAndMessaging},
@@ -375,7 +386,7 @@ fn add_self() -> RuntimeResult<bool> {
         () if !arcdps::exports::has_add_extension() => None,
         #[cfg(feature = "extension-arcdps-codegen")]
         () => Some(ExtensionLoadResult::from(unsafe {
-            arcdps::exports::raw::add_extension(own_handle.own_handle) as usize
+            arcdps::exports::raw::add_extension(own_handle.own_handle) as u32
         })),
         #[cfg(feature = "extension-arcdps-extern")]
         () => r#extern::arc_args()
@@ -402,7 +413,7 @@ fn add_self() -> RuntimeResult<bool> {
         // duplicate sig means we're probably already loaded
         Err(ExtensionLoadResult::ALREADY_LOADED) => Ok(false),
         Err(e) => {
-            log::warn!("addextension2 failed with code {e}");
+            log::warn!("addextension2 failed with {e}");
             Err("addextension2")
         },
     }
@@ -443,7 +454,8 @@ pub fn is_ingame() -> Option<bool> {
 static MUMBLE_LINK: Mutex<Option<MumbleLink>> = Mutex::new(None);
 
 #[allow(unreachable_patterns)]
-pub fn imgui_context_ptr() -> Option<NonNull<imgui::sys::ImGuiContext>> {
+#[cfg(todo)]
+pub fn imgui_context_ptr() -> Option<NonNull<()>> {
     match () {
         #[cfg(feature = "extension-arcdps-codegen")]
         _ if loaded() => {
@@ -451,12 +463,16 @@ pub fn imgui_context_ptr() -> Option<NonNull<imgui::sys::ImGuiContext>> {
             None
         },
         #[cfg(feature = "extension-arcdps-extern")]
-        _ => r#extern::arc_imgui_context_ptr(),
+        _ => arcffi::nn::nonnull_opt_cast(r#extern::arc_imgui_context_ptr()),
         _ => None,
     }
 }
 
-fn imgui(ui: &imgui::Ui, not_charsel_loading: bool, _hide: u32) {
+fn imgui_present<'ui>(
+    imgui: Option<(&'ui mut UiContextCell, DrawContextInput<'ui>)>,
+    not_charsel_loading: bool,
+    _hide: u32,
+) {
     let available = available();
 
     IS_INGAME.store(not_charsel_loading, Ordering::Relaxed);
@@ -474,28 +490,46 @@ fn imgui(ui: &imgui::Ui, not_charsel_loading: bool, _hide: u32) {
     if !render_ready {
         RenderState::render_setup();
     }
+    if let Some((imgui, context)) = imgui {
+        let ui = imgui.bound_ui();
 
-    RenderMachine::turn_ui_entry(ui);
+        imgui_draw_present(ui, context)
+    }
+}
+fn imgui_draw_present<'ui, U>(ui: &'ui mut U, context: DrawContextInput<'ui>)
+where
+    U: ?Sized + ImDrawWindow<'ui>,
+{
+    RenderMachine::turn_ui_entry(&mut *ui);
 
-    RenderState::render_ui(ui);
+    RenderState::render_ui(ui, context);
 }
 
-fn imgui_options_tab(ui: &imgui::Ui) {
+fn imgui_draw_options_tab<'ui, U>(ui: &mut U, context: DrawContextInput<'ui>)
+where
+    U: ?Sized + ImDrawWindow<'ui>,
+{
     let mut running = available() && RenderState::is_running();
-    if available() && RenderState::is_running() {
-        let mut state = RenderState::lock();
-        if let Some(ref mut state) = *state {
-            state.primary_window.arc_tab.ui_options(ui, AddonHostName::ArcDPS);
-        } else {
+
+    if running {
+        if !RenderState::render_options_arc(ui, context, AddonHostName::ArcDPS) {
             running = false;
         }
     }
     if !running {
-        RenderState::render_options_fallback(ui, AddonHostName::ArcDPS)
+        RenderState::render_options_fallback(ui, context, AddonHostName::ArcDPS)
     }
 }
 
-fn imgui_options_windows(ui: &imgui::Ui, window_name: Option<&str>) -> bool {
+fn imgui_draw_options_windows<'ui, U>(
+    ui: &mut U,
+    context: DrawContextInput<'ui>,
+    window_name: Option<&str>,
+) -> bool
+where
+    U: ?Sized + ImDrawWindow<'ui>,
+{
+    use crate::render::element::prelude::*;
     let hide_checkbox = false;
     if window_name.is_some() || !RenderState::is_running() || !available() {
         return hide_checkbox
@@ -513,7 +547,7 @@ fn imgui_options_windows(ui: &imgui::Ui, window_name: Option<&str>) -> bool {
         if with_i18n!(&window_id, |msg| ui.checkbox(&msg, state)) {
             // just mutating settings is enough?
         }
-        if ui.is_item_clicked_with_button(imgui::MouseButton::Right) {
+        if ui.is_item_right_clicked() {
             context_menu = Some(binding.control().unwrap_or(TaimiControls::WINDOW_PRIMARY));
         }
     }
@@ -996,7 +1030,7 @@ pub fn log(_metadata: &log::Metadata, message: &CStr) -> RuntimeResult<Option<()
     .map(Some)
 }
 
-pub fn detect_language() -> RuntimeResult<Option<String>> {
+pub fn detect_language() -> RuntimeResult<Option<LanguageIdentifier>> {
     if !available() {
         return Ok(None)
     }
@@ -1050,13 +1084,16 @@ pub async fn press_marker_bind(
     rt::keyboard::press_marker_bind(marker, target, down, position).await
 }
 
-pub fn send_alert(ui: &imgui::Ui, message: &str) -> RuntimeResult<Option<()>> {
+pub fn send_alert<U: ?Sized + ImColourContainer<LogWarningColour>>(
+    ui: &U,
+    message: &str,
+) -> RuntimeResult<Option<()>> {
     if !available() {
         return Ok(None)
     }
 
-    let [r, g, b, _] = ui.style_color(imgui::StyleColor::NavHighlight);
-    let (r, g, b) = ((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8);
+    let c = ui.lookup_style_colour(LogWarningColour).truncate() * 255.0f32;
+    let (r, g, b) = (c.x as u8, c.y as u8, c.z as u8);
     let msg = format!("TaimiHUD Alert: <c=#{r:02x}{g:02x}{b:02x}>{message}</c>");
     let msg = unsafe { CString::from_vec_unchecked(msg.into_bytes()) };
 

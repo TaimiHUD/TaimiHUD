@@ -1,9 +1,12 @@
 use {
     crate::{
         exports::runtime::{self as rt, log::DeferredLogger},
+        render::i18n,
         settings::state::{install::InstallId, save_state_backup, Installation, SavedApiToken},
     },
     anyhow::Context,
+    arcffi::repr::EnumRepr,
+    macro_rules_attribute::derive,
     serde::{Deserialize, Serialize},
     std::{
         ffi::{OsStr, OsString},
@@ -203,6 +206,24 @@ impl BootstrapState {
     }
     pub fn try_write_with<F: FnOnce(&mut Self) -> bool>(f: F) -> bool {
         Self::get().send_if_modified(f)
+    }
+
+    #[inline]
+    pub fn language_id(&self) -> Option<i18n::LanguageIdentifier> {
+        self.language.as_ref().and_then(|l| {
+            const REGION_ZH_CN: i18n::unic_subtags::Region = i18n::new_lang_id!(Region: "cn");
+            if REGION_ZH_CN.as_str() == &l[..] {
+                // nexus uses region instead of lang code for some reason, so adjust..
+                return Some(i18n::LANG_ZH)
+            }
+            match l.parse() {
+                Err(e) => {
+                    log::info!(logger: DeferredLogger::BEST_EFFORT, "invalid configured language: {e}");
+                    None
+                },
+                Ok(l) => Some(l),
+            }
+        })
     }
 
     /// only use this for UI, check [self.addon_host_is_preferred()] if verifying
@@ -423,7 +444,8 @@ impl BootstrapState {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize, strum::IntoStaticStr, EnumRepr!)]
+#[repr(u8)]
 pub enum AddonHostName {
     ArcDPS,
     Nexus,

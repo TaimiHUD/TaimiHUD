@@ -1,6 +1,5 @@
 use {
-    crate::fl,
-    nexus::imgui::Ui,
+    crate::{fl, render::element::prelude::*},
     std::fmt::{self},
 };
 
@@ -39,8 +38,10 @@ impl fmt::Display for NeedsUpdate {
 
 impl NeedsUpdate {
     #[allow(dead_code)]
-    pub fn draw(&self, ui: &Ui) {
-        let text = self.to_string();
-        ui.text_wrapped(text);
+    pub fn draw<'ui, U>(&self, ui: &mut U)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        ui.text_wrapped(im_to_s!(self));
     }
 }

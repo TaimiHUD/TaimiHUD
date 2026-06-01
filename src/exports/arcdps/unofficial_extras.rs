@@ -144,7 +144,7 @@ pub(crate) unsafe extern "C" fn cb_squad_update_raw(users: *const extras::user::
 
 #[inline(never)]
 pub(crate) unsafe extern "C" fn cb_language_changed_raw(language: arcdps::Language) {
-    rt::notify_game_language(language)
+    rt::notify_game_language(language.into())
 }
 
 #[inline(never)]

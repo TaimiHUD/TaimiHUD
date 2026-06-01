@@ -135,7 +135,7 @@ extension-arcdps = [
   #"extension-arcdps-codegen",
   "extension-arcdps-extern",
   "extension-arcdps-extras",
-  #"extension-arcdps-imgui",
+  "extension-arcdps-imgui",
   "dep:arcloader-mumblelink",
   "arcloader-mumblelink/gw2_mumble",
   "taimi_meta?/mumblelink-arcloader",
@@ -282,6 +282,10 @@ indexmap = { workspace = true }
 relative-path = { version = "1.9.3", features = [ "serde" ] }
 bitflags = { workspace = true }
 mint = { workspace = true }
+num-traits = { workspace = true }
+bytemuck = { workspace = true }
+rustc-hash = { workspace = true }
+macro_rules_attribute = { workspace = true }
 itertools = { optional = true, version = "0.14.0" }
 tobj = { optional = true, version = "4.0.3", features = [ "reordering" ] }
 bevy_ecs = { optional = true, version = "0.16.0" }
@@ -300,6 +304,7 @@ fluent = "0.16.1"
 fluent-syntax = "0.11"
 rust-embed = { version = "8.7.1", features = [ "debug-embed" ] }
 i18n-embed-fl = "0.9.4"
+tinystr = "0.8"
 unic-langid-impl = "0.9.6"
 rand = "0.9.1"
 ordered-float = { version = "5.0.0", features = [ "serde" ] }
@@ -370,10 +375,11 @@ glamour = "0.18"
 mint = "0.5"
 num-traits = { version = "0.2", default-features = false }
 bytemuck = { version = "1", default-features = false, features = ["extern_crate_std", "derive"] }
+rustc-hash = "2"
 indexmap = "2.9"
 bitvec = "1"
 bitflags = "2"
-# TODO: macro_rules_attribute = "0.2"
+macro_rules_attribute = "0.2"
 
 # unsure how many of these changes can be contributed back upstream?
 #[patch."https://github.com/zerthox/arcdps-rs"]
