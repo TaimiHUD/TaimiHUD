@@ -187,6 +187,7 @@ in {
           cache.inputs = [
             taimiHUD.cargoArtifacts
             legacyPackages.arcdps-imgui_18000.cimgui-static
+            legacyPackages.arcdps-imgui_19270.cimgui-static
             legacyPackages.fenixToolchain
             legacyPackages.git-hooks.package
             legacyPackages.formatter
