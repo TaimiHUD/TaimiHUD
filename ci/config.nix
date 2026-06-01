@@ -8,9 +8,9 @@
 with pkgs;
 with lib; let
   taimiHUD-rs = import ../.;
-  checks = taimiHUD-rs.checks.${pkgs.system};
-  packages = taimiHUD-rs.packages.${pkgs.system};
-  legacyPackages = taimiHUD-rs.legacyPackages.${pkgs.system};
+  checks = taimiHUD-rs.checks.${pkgs.stdenv.hostPlatform.system};
+  packages = taimiHUD-rs.packages.${pkgs.stdenv.hostPlatform.system};
+  legacyPackages = taimiHUD-rs.legacyPackages.${pkgs.stdenv.hostPlatform.system};
   taimiHUD = disableCache (packages.taimiHUD.override {
     builtInfo = {
       ${
