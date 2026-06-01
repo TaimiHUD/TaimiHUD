@@ -8,7 +8,6 @@ use {
         TimerAlert,
         TimerDirection,
         TimerFile,
-        TimerFileAction,
         TimerFileAlert,
         TimerFileDirection,
         TimerFileMarker,
