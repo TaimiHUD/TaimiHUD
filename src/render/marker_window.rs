@@ -1,14 +1,13 @@
 use {
     crate::{
-        fl,
         marker::format::MarkerSet,
+        render::element::prelude::*,
         settings::Settings,
         Controller,
         ControllerEvent,
         MarkersController,
         MarkersEvent,
     },
-    nexus::imgui::{Id, TableColumnFlags, TableColumnSetup, TableFlags, Ui, Window},
     std::sync::Arc,
 };
 
@@ -29,85 +28,82 @@ impl MarkerWindowState {
         self.markers_for_map = markers;
     }
 
-    pub fn draw(&mut self, ui: &Ui) {
+    pub fn draw<'ui, U>(&mut self, ui: &mut U)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let mut open = self.open;
         if let Some(settings) = Settings::try_read() {
             open = settings.markers_window_open;
         };
         if open {
-            Window::new(fl!("marker-window"))
-                .size([300.0, 200.0], nexus::imgui::Condition::FirstUseEver)
-                .opened(&mut open)
-                .build(ui, || {
-                    if ui.button(&fl!("clear-markers")) {
-                        MarkersController::try_send(MarkersEvent::ClearMarkers);
-                    }
-                    ui.same_line();
-                    if ui.button(&fl!("clear-spent-autoplace")) {
-                        MarkersController::try_send(MarkersEvent::ClearSpentAutoplace);
-                    }
-                    if !self.markers_for_map.is_empty() {
-                        let table_flags = TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS;
-                        let table_name = format!("markers_for_map");
-                        let table_token = ui.begin_table_header_with_flags(
-                            &table_name,
-                            [
-                                TableColumnSetup {
-                                    name: &fl!("name"),
-                                    flags: TableColumnFlags::WIDTH_STRETCH,
-                                    init_width_or_weight: 0.0,
-                                    user_id: Id::Str("name"),
-                                },
-                                TableColumnSetup {
-                                    name: &fl!("category"),
-                                    flags: TableColumnFlags::WIDTH_STRETCH,
-                                    init_width_or_weight: 0.0,
-                                    user_id: Id::Str("category"),
-                                },
-                                TableColumnSetup {
-                                    name: &fl!("description"),
-                                    flags: TableColumnFlags::WIDTH_STRETCH,
-                                    init_width_or_weight: 0.0,
-                                    user_id: Id::Str("description"),
-                                },
-                                TableColumnSetup {
-                                    name: &fl!("actions"),
-                                    flags: TableColumnFlags::WIDTH_STRETCH,
-                                    init_width_or_weight: 0.0,
-                                    user_id: Id::Str("actions"),
-                                },
-                            ],
-                            table_flags,
-                        );
-                        ui.table_next_column();
-                        for marker in &self.markers_for_map {
-                            let id_token = ui.push_id(&format!(
-                                "{}{:?}{:?}",
-                                marker.name, marker.author, marker.category
-                            ));
-                            ui.text(format!("{}", marker.name));
-                            ui.table_next_column();
-                            if let Some(category) = &marker.category {
-                                ui.text(format!("{}", category));
-                            } else {
-                                ui.text("");
-                            }
-                            ui.table_next_column();
-                            ui.text_wrapped(format!("{}", marker.description));
-                            ui.table_next_column();
-                            if ui.button(&fl!("markers-place")) {
-                                MarkersController::try_send(MarkersEvent::SetMarker(marker.clone()));
-                            }
-                            ui.table_next_column();
-                            id_token.end();
-                        }
-                        if let Some(token) = table_token {
-                            token.end();
-                        }
-                    } else {
-                        ui.text_wrapped(fl!("no-markers-for-map"));
-                    }
+            let window = with_i18n!("marker-window", |label| ui.begin_taimi_window(
+                "marker-window",
+                label,
+                ImCondition::initial(ImSize2::new(300.0, 200.0)),
+                &mut open,
+            ));
+            if let Some(_window) = window {
+                if ui.button(fl!("clear-markers")) {
+                    MarkersController::try_send(MarkersEvent::ClearMarkers);
+                }
+                ui.same_line();
+                if ui.button(fl!("clear-spent-autoplace")) {
+                    MarkersController::try_send(MarkersEvent::ClearSpentAutoplace);
+                }
+                let cols = ["name", "category", "description", "actions"];
+                let table_flags = match self.markers_for_map.is_empty() {
+                    true => {
+                        with_i18n!("no-markers-for-map", |msg| ui.text_wrapped(msg));
+                        None
+                    },
+                    false => Some(match ui.imgui_version_num() {
+                        #[cfg(taimi_imgui = "180")]
+                        Some(im180::VERSION_NUM) => (
+                            imw::DynArgsTable::new(Some(imw::Table::IM180_FLAGS_PRESET)),
+                            Some(imw::TableColumn::IM180_WIDTH_STRETCH),
+                        ),
+                        #[cfg(taimi_imgui = "192")]
+                        Some(im192::VERSION_NUM) => (
+                            imw::DynArgsTable::new(Some(imw::Table::IM192_FLAGS_PRESET)),
+                            Some(imw::TableColumn::IM192_WIDTH_STRETCH),
+                        ),
+                        _ => (Default::default(), None),
+                    }),
+                };
+                let table_token = table_flags.and_then(|(flags, column_flags)| {
+                    ui.begin_table_with_flags(c"markers_for_map", cols.len(), flags)
+                        .map(|token| (token, column_flags))
                 });
+                if let Some((_table, column_flags)) = table_token {
+                    for id in cols {
+                        let user_id = 0;
+                        with_i18n(id, |label| {
+                            ui.table_column_setup_untyped(Some(label), column_flags, None, user_id)
+                        });
+                    }
+                    ui.table_header_row();
+                    ui.table_next_column();
+                    for marker in &self.markers_for_map {
+                        let id_token = ui.push_id_hash((&marker.name, &marker.author, &marker.category));
+                        ui.text(&marker.name);
+                        ui.table_next_column();
+                        if let Some(category) = &marker.category {
+                            ui.text(category);
+                        } else {
+                            ui.text("");
+                        }
+                        ui.table_next_column();
+                        ui.text_wrapped(&marker.description);
+                        ui.table_next_column();
+                        if ui.button(fl!("markers-place")) {
+                            MarkersController::try_send(MarkersEvent::SetMarker(marker.clone()));
+                        }
+                        ui.table_next_column();
+                        id_token.end();
+                    }
+                }
+            }
         }
 
         if open != self.open {

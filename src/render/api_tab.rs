@@ -4,17 +4,16 @@ use {
             api::{ApiAccountInfo, ApiAccountState, ApiMessage},
             Controller,
         },
-        exports::runtime::{
-            self as rt,
-            imgui::{Condition, Ui},
+        exports::runtime::{self as rt},
+        render::{
+            element::{prelude::*, token::ApiTokenInput},
+            i18n::current_game_language,
+            RenderState,
         },
-        fl,
-        render::{element::token::ApiTokenInput, RenderState},
         settings::state::{BootstrapState, SaveState, SavedApiToken},
         with_i18n,
     },
     chrono::TimeZone,
-    glam::Vec2,
     std::collections::{BTreeMap, BTreeSet, HashMap},
     strum::VariantArray,
     taimi_sync::watched::{watch, Watched},
@@ -62,7 +61,10 @@ impl ApiTabState {
         state
     }
 
-    pub fn draw(&mut self, ui: &Ui, _state_errors: &mut HashMap<String, anyhow::Error>) {
+    pub fn draw<'ui, U>(&mut self, ui: &mut U, _state_errors: &mut HashMap<String, anyhow::Error>)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         if self.boot_state.has_changed().ok() == Some(true) {
             self.sync_boot();
         }
@@ -77,14 +79,25 @@ impl ApiTabState {
         }
         let account_state = self.account_state.borrow_mut();
         let tree_token = (!self.tokens.is_empty() || !account_state.is_empty()).then(|| {
-            with_i18n!("data", |label| rt::imgui::TreeNode::new(&label)
-                .opened(true, Condition::Once)
-                .framed(true)
-                .frame_padding(true)
-                .push(ui))
+            with_i18n!("data", |label| ui.begin_tree_node_framed(
+                ImCondition::initial(true),
+                c"data",
+                label,
+                true,
+            ))
         });
         let has_account_section = tree_token.is_some();
         if let Some(Some(_tree)) = &tree_token {
+            fn id_text<'ui, U: ?Sized + ImDrawWindow<'ui>>(
+                ui: &mut U,
+                id_name: &mut Option<String>,
+                label: impl ImStrExt,
+            ) {
+                if id_name.take().is_some() {
+                    ui.same_line();
+                }
+                ui.text(label);
+            }
             let mut id_name = None;
             if let Some(id) = account_state.account_id() {
                 id_name = ApiTokenState::id_name(id);
@@ -92,25 +105,23 @@ impl ApiTabState {
                     ui.text(&id);
                 }
             }
-            let mut id_text = |label: &str| {
-                if id_name.take().is_some() {
-                    ui.same_line();
-                }
-                ui.text(label);
-            };
             if let Some(last_modified) = &self.account_data_last_modified {
-                id_text(&fl!("checked-for-updates-last", time = last_modified));
+                id_text(
+                    ui,
+                    &mut id_name,
+                    fl!("checked-for-updates-last", time = last_modified),
+                );
             }
             let update_avail = match (
                 account_state.data_update_available,
                 account_state.update_available,
             ) {
                 (Some(false), Some(false)) => {
-                    with_i18n!("update-not-required", |msg| id_text(&msg));
+                    with_i18n!("update-not-required", |msg| id_text(ui, &mut id_name, msg));
                     false
                 },
                 (data_update, None | Some(true)) if self.account_data_last_modified.is_none() => {
-                    with_i18n!("update-unknown", |msg| id_text(&msg));
+                    with_i18n!("update-unknown", |msg| id_text(ui, &mut id_name, msg));
                     data_update.unwrap_or(true)
                 },
                 (data_update, _) => data_update.unwrap_or(false),
@@ -120,7 +131,7 @@ impl ApiTabState {
                 ApiMessage::AccountInfoRefresh(Some(ApiAccountInfo::Account)).try_send();
             }
 
-            if with_i18n!("reload-data-sources", |label| ui.button(&label)) {
+            if with_i18n!("reload-data-sources", |label| ui.button(label)) {
                 ApiMessage::account_reload_all().try_send();
             }
             ui.same_line();
@@ -133,7 +144,7 @@ impl ApiTabState {
             }
 
             if with_i18n!("api-auto-update", |label| ui
-                .checkbox(&label, &mut self.auto_update))
+                .checkbox(label, &mut self.auto_update))
             {
                 ApiMessage::SetAutoUpdate(self.auto_update).try_send();
             }
@@ -144,13 +155,13 @@ impl ApiTabState {
         {
             let enables = self.pathing_enables.get_mut();
             if enables.contains(PathingEnables::KATRENDER) && enables.contains(PathingEnables::API_BYPASS) {
-                with_i18n!("pathing-config-api-bypass", |label| ui.text(&label));
+                with_i18n!("pathing-config-api-bypass", |label| ui.text(label));
                 let hovered = ui.is_item_hovered();
                 ui.same_line();
-                with_i18n!("enabled", |label| ui.text(&label));
+                with_i18n!("enabled", |label| ui.text(label));
 
                 if hovered {
-                    with_i18n!("pathing-config", |label| ui.tooltip_text(&label));
+                    with_i18n!("pathing-config", |label| ui.tooltip_text(label));
                 }
             }
         }
@@ -174,7 +185,7 @@ impl ApiTabState {
         with_i18n!("api-setup-open", |label| RenderState::draw_open_button(
             ui, label, url, url
         ));
-        if let _font = RenderState::push_font("ui", ui) {
+        if let _font = NexusLinkFont::Ui.push_font(ui) {
             with_i18n!("api-notice", |msg| ui.text_wrapped(msg))
         }
         #[cfg(todo = "unnecessary")]
@@ -217,26 +228,32 @@ impl ApiTokenAdd {
         }
     }
 
-    pub fn draw(&mut self, ui: &Ui) {
+    pub fn draw<'ui, U>(&mut self, ui: &mut U)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         match self.status {
             None => {
                 self.draw_input(ui);
             },
             Some(TokenStatus::Setup) => {
-                let _font = RenderState::push_font("big", ui);
-                with_i18n!("api-status-setup", |msg| ui.text(&msg));
+                with_i18n!("api-status-setup", |msg| ui
+                    .text_with_font(NexusLinkFont::Big, msg));
             },
         }
     }
 
-    pub fn draw_input(&mut self, ui: &Ui) {
+    pub fn draw_input<'ui, U>(&mut self, ui: &mut U)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         match self.token.draw(ui, "api-token-label") {
             None => (),
             Some(token) if token.is_empty() => (),
             Some(token) => {
                 let mut token = SavedApiToken::new(token);
-                if let Some(lang) = rt::game_language() {
-                    token.locale = crate::game_language_id(lang).into();
+                if let Some(lang) = current_game_language() {
+                    token.locale = lang.language.as_str().into();
                 }
                 ApiMessage::TokenAdd(token).try_send();
                 self.status = Some(TokenStatus::Setup);
@@ -274,9 +291,12 @@ impl ApiTokenState {
         }
     }
 
-    pub fn draw(&mut self, ui: &Ui, id: &str, account_name: &str) {
-        RenderState::font_text("big", ui, &self.name);
-        let subheader = Vec2::from(ui.item_rect_max());
+    pub fn draw<'ui, U>(&mut self, ui: &mut U, id: &str, account_name: &str)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        ui.text_with_font(NexusLinkFont::Big, &self.name);
+        let subheader = ui.item_rect_max();
         if !self.account_name.is_empty() && self.account_name != account_name {
             let is_suffix = |c: char| c == '.' || c.is_ascii_digit();
             let name = match self.account_name.split_once(is_suffix) {
@@ -293,10 +313,10 @@ impl ApiTokenState {
             ApiMessage::TokenRemove(id.into()).try_send();
             let _ = rt::send_alert(ui, "token removed");
         }
-        match ui.item_rect_max()[1] {
+        match ui.item_rect_max().y {
             text_y if text_y >= subheader.y => (),
             text_y => {
-                ui.set_cursor_screen_pos(subheader.with_y(text_y).to_array());
+                ui.set_cursor_screen_pos(subheader.with_y(text_y));
             },
         }
         // TODO: this could just be a hover tooltip...
@@ -317,7 +337,7 @@ impl ApiTokenState {
         }
         ui.dummy([4.0, 0.0]);
 
-        if let _font = RenderState::push_font("ui", ui) {
+        if let _font = NexusLinkFont::Ui.push_font(ui) {
             with_i18n!("api-refresh", |msg| ui.text(msg));
 
             for (i, &endpoint) in ApiAccountInfo::VARIANTS.iter().enumerate() {

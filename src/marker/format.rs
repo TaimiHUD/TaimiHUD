@@ -11,7 +11,7 @@ use {
     glam::Vec3,
     glamour::Point3,
     glob::Paths,
-    nexus::{gamebind::GameBind, imgui::Ui},
+    nexus::gamebind::GameBind,
     ordered_float::OrderedFloat,
     serde::{Deserialize, Serialize},
     serde_repr::{Deserialize_repr, Serialize_repr},
@@ -549,7 +549,10 @@ impl MarkerType {
         (1..9).flat_map(|i| Self::from_repr(i))
     }
 
-    pub fn icon(&self, ui: &Ui) {
+    pub fn icon<'ui, U>(&self, ui: &mut U)
+    where
+        U: ?Sized + crate::render::element::im::ImDrawWindow<'ui>,
+    {
         RenderState::marker_icon(ui, Some(32.0), &self);
     }
 

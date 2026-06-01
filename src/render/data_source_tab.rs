@@ -1,12 +1,8 @@
 use {
     crate::{
         controller::ControllerEvent,
-        exports::runtime::{
-            self as rt,
-            imgui::{PopupModal, StyleColor, TableColumnSetup, TableFlags, Ui},
-        },
-        fl,
-        render::RenderState,
+        exports::runtime as rt,
+        render::{element::prelude::*, RenderState},
         settings::{
             source::{MetadataKey, Source},
             NeedsUpdate,
@@ -37,32 +33,31 @@ impl DataSourceTabState {
         }
     }
 
-    pub fn draw_uninstall(&self, ui: &Ui, rs: &RemoteState) {
-        let source_text = rs.source().name().into_owned();
-        let modal_name = fl!("addon-uninstall-modal-title", source = source_text);
-        if ui.button(&fl!("addon-uninstall-modal-button")) {
+    pub fn draw_uninstall<'ui, U>(&self, ui: &mut U, rs: &RemoteState)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        let source_text = rs.source().name();
+        let modal_name = fl!("addon-uninstall-modal-title", source = &source_text[..]);
+        if ui.button(fl!("addon-uninstall-modal-button")) {
             ui.open_popup(&modal_name);
         }
         if ui.is_item_hovered() {
             if let Some(path) = &rs.installed_path {
                 let rel = rt::relative_path(path).display().to_string();
-                ui.tooltip_text(fl!("location", path = rel));
+                ui.tooltip_text(fl!("location", path = &rel));
             }
         }
-        if let Some(_token) = PopupModal::new(&modal_name)
-            .always_auto_resize(true)
-            .begin_popup(ui)
-        {
-            ui.text_wrapped(&modal_name);
+        if let Some(_token) = ui.begin_popup_modal(&modal_name, Default::default(), None) {
+            ui.text_wrapped(modal_name);
             ui.dummy([4.0, 4.0]);
             if let Some(path) = &rs.installed_path {
-                let path_string = format!("{}", &path.display());
-                ui.text(&fl!("location", path = path_string));
+                let path_string = path.display().to_string();
+                ui.text(fl!("location", path = &path_string));
             }
             ui.dummy([4.0, 4.0]);
-            let token = ui.push_style_color(StyleColor::Text, [1.0, 0.0, 0.0, 1.0]);
-            ui.text(fl!("addon-uninstall-modal-description"));
-            token.pop();
+            with_i18n!("addon-uninstall-modal-description", |label| ui
+                .text_unformatted_coloured(label, [1.0, 0.0, 0.0, 1.0]));
             ui.dummy([4.0, 4.0]);
             if ui.button(fl!("addon-uninstall-modal-button")) {
                 Controller::try_send(ControllerEvent::UninstallAddon {
@@ -78,7 +73,10 @@ impl DataSourceTabState {
         }
     }
 
-    pub fn draw(&mut self, ui: &Ui, _state_errors: &mut HashMap<String, anyhow::Error>) {
+    pub fn draw<'ui, U>(&mut self, ui: &mut U, _state_errors: &mut HashMap<String, anyhow::Error>)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let table_token = if self.downloading_update {
             ui.text(fl!("downloading-update"));
             None
@@ -113,32 +111,46 @@ impl DataSourceTabState {
             ui.same_line();
             if let Some(last_checked) = &settings.last_checked {
                 let time_display = last_checked.format("%F %T %Z").to_string();
-                ui.text(fl!("checked-for-updates-last", time = time_display));
+                ui.text(fl!("checked-for-updates-last", time = &time_display));
             } else {
-                ui.text(fl!("checked-for-updates-last", time = "Never"));
+                ui.text(fl!("checked-for-updates-last", [time = fl!("never")]));
             }
             ui.dummy([8.0, 8.0]);
-            let table_flags = TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS;
-            let table_token = ui.begin_table_header_with_flags(
-                "remotes",
-                [
-                    TableColumnSetup::new(fl!("remote")),
-                    TableColumnSetup::new(fl!("module")),
-                    TableColumnSetup::new(fl!("description")),
-                    TableColumnSetup::new(fl!("update-status")),
-                    TableColumnSetup::new(fl!("actions")),
-                ],
-                table_flags,
-            );
-            ui.table_next_column();
-            self.populated_generation = self.populated_generation.wrapping_add(1);
-            for download_data in &settings.remotes {
+            let table_flags = match ui.imgui_version_num() {
+                #[cfg(taimi_imgui = "180")]
+                Some(im180::VERSION_NUM) => imw::Table::IM180_ARGS_PRESET,
+                #[cfg(taimi_imgui = "192")]
+                Some(im192::VERSION_NUM) => imw::Table::IM192_ARGS_PRESET,
+                _ => Default::default(),
+            };
+            let cols = ["remote", "module", "description", "update-status", "actions"];
+            let table_token = ui.begin_table_with_flags(c"remotes", cols.len(), table_flags);
+            let remotes = if let Some(..) = &table_token {
+                for col in cols {
+                    let user_id = 0;
+                    with_i18n!(col, |label| ui.table_column_setup_untyped(
+                        Some(label),
+                        Default::default(),
+                        None,
+                        user_id
+                    ));
+                }
+                ui.table_header_row();
+                ui.table_next_column();
+                self.populated_generation = self.populated_generation.wrapping_add(1);
+                Some(settings.remotes.iter())
+            } else {
+                None
+            }
+            .into_iter()
+            .flatten();
+            for download_data in remotes {
                 let source_id = download_data.datasource_name();
                 let source = download_data.source();
                 if download_data.installed_tag.is_none() && source.is_deprecated() {
                     continue
                 }
-                let pushy = ui.push_id(&source_id);
+                let _pushy = ui.push_id(&source_id);
                 if let Some(source) = self.populated_sources.get_mut(&source_id[..]) {
                     *source = (download_data.kind, self.populated_generation);
                 } else {
@@ -194,7 +206,6 @@ impl DataSourceTabState {
                 }
 
                 ui.table_next_column();
-                pushy.pop();
             }
             table_token
         } else {
@@ -213,7 +224,7 @@ impl DataSourceTabState {
                     continue
                 }
                 let source_name = source.name();
-                let pushy = ui.push_id(&source_name);
+                let _pushy = ui.push_id(&source_name);
                 self.draw_remote(ui, kind, source);
                 ui.table_next_column();
 
@@ -227,7 +238,6 @@ impl DataSourceTabState {
                     });
                 }
                 ui.table_next_column();
-                pushy.pop();
             }
             drop(table_token);
         }
@@ -239,7 +249,10 @@ impl DataSourceTabState {
         }
     }
 
-    fn draw_remote(&mut self, ui: &Ui, kind: SourceKind, source: &dyn Source) {
+    fn draw_remote<'ui, U>(&mut self, ui: &mut U, kind: SourceKind, source: &dyn Source)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let display_name = source.display_name();
         let author = match source.get_metadata_str(MetadataKey::Author) {
             Some(author) if display_name.starts_with(&author[..]) => None,

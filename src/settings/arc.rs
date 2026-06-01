@@ -217,7 +217,15 @@ impl ArcUpdatePreference {
         }
     }
 
-    pub fn as_str(&self) -> &'static str {
+    pub fn label_ident(&self) -> &'static str {
+        match self {
+            Self::Always => "always",
+            Self::Ask { .. } => "ask",
+            _ => "never",
+        }
+    }
+    /// TODO: remove and stop using display for UI without adapters
+    pub fn label_english(&self) -> &'static str {
         match self {
             Self::Always => "Always",
             Self::Ask { .. } => "Ask",
@@ -302,7 +310,7 @@ impl fmt::Display for ArcUpdatePreference {
             Self::Ask { authorized: Some(Ok(v)) } => write!(f, "Allow {v}"),
             Self::Ask { authorized: Some(Err(v)) } => write!(f, "Ignore {v}"),
             Self::Once { authorized: v } => write!(f, "Just {v}"),
-            pref => f.write_str(pref.as_str()),
+            pref => f.write_str(pref.label_english()),
         }
     }
 }

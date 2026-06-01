@@ -4,7 +4,6 @@ mod render;
 pub mod resources;
 mod settings;
 mod timer;
-mod util;
 
 #[cfg(feature = "markers")]
 mod marker;
@@ -15,7 +14,7 @@ mod space;
 //use i18n_embed_fl::fl;
 #[cfg(feature = "extension-nexus")]
 use {
-    crate::exports::runtime::{bindings::TaimiControls, log::DeferredLogger},
+    crate::exports::runtime::bindings::TaimiControls,
     nexus::{
         event::{
             arc::{ACCOUNT_NAME, COMBAT_LOCAL},
@@ -25,7 +24,6 @@ use {
             MUMBLE_IDENTITY_UPDATED,
             WINDOW_RESIZED,
         },
-        gui::{register_render, RenderType},
         rtapi::{
             event::{RTAPI_GROUP_MEMBER_JOINED, RTAPI_GROUP_MEMBER_LEFT, RTAPI_GROUP_MEMBER_UPDATE},
             GroupMember,
@@ -43,41 +41,31 @@ use {
             ControllerSender,
         },
         exports::runtime as rt,
-        render::{machine::RenderMachine, RenderEvent, RenderState},
+        render::{i18n, RenderEvent, RenderState},
         settings::{
             state::{AddonHostName, BootstrapState},
             SettingsLock,
         },
     },
     anyhow::Context,
-    arcdps::{extras::UserInfo, AgentOwned, Language},
+    arcdps::{extras::UserInfo, AgentOwned},
     controller::markers::SquadState,
-    i18n_embed::{
-        fluent::{fluent_language_loader, FluentLanguageLoader},
-        DefaultLocalizer,
-        LanguageLoader,
-        RustEmbedNotifyAssets,
-    },
     marker::format::MarkerType,
     nexus::event::{arc::CombatData, extras::SquadUpdate, MumbleIdentityUpdate},
     relative_path::RelativePathBuf,
     rust_embed::RustEmbed,
     settings::SourcesFile,
     std::{
-        borrow::Cow,
-        collections::BTreeSet,
         ffi::{c_char, CStr},
         mem,
         panic,
         path::PathBuf,
         ptr,
-        slice,
-        sync::{Condvar, LazyLock, Mutex, OnceLock, RwLock},
+        sync::{Arc, Condvar, LazyLock, Mutex, OnceLock, RwLock},
         thread::{self, JoinHandle},
         time::Duration,
     },
     tokio::sync::mpsc,
-    unic_langid_impl::LanguageIdentifier,
 };
 
 #[cfg(feature = "space")]
@@ -90,125 +78,7 @@ type Revertible = Box<dyn FnOnce() + Send + 'static>;
 // https://github.com/kellpossible/cargo-i18n/blob/95634c35eb68643d4a08ff4cd17406645e428576/i18n-embed/examples/library-fluent/src/lib.rs
 #[derive(RustEmbed)]
 #[folder = "i18n/"]
-pub struct LocalizationsEmbed;
-
-pub static LOCALIZATIONS: LazyLock<RustEmbedNotifyAssets<LocalizationsEmbed>> =
-    LazyLock::new(|| RustEmbedNotifyAssets::new(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("i18n/")));
-
-static LANGUAGE_LOADER: LazyLock<FluentLanguageLoader> = LazyLock::new(|| {
-    let assets = &*LOCALIZATIONS;
-    let loader: FluentLanguageLoader = fluent_language_loader!();
-    loader
-        .load_available_languages(assets)
-        .expect("Error while loading fallback language");
-    let res =
-        BootstrapState::read_with(
-            |state| match state.language.as_ref().and_then(|l| l.parse().ok()) {
-                Some(language) if loader.current_language() != language =>
-                    i18n_embed::select(&loader, assets, slice::from_ref(&language))
-                        .with_context(|| format!("Failed to select language {language}"))
-                        .map(drop),
-                _ => Ok(()),
-            },
-        );
-    if let Err(e) = res {
-        log::warn!(logger: DeferredLogger::BEST_EFFORT, "{e:#}");
-    }
-    language_loader_setup(&loader);
-    loader
-});
-fn language_loader_setup(loader: &FluentLanguageLoader) {
-    loader.set_use_isolating(false);
-    #[cfg(todo)]
-    loader.with_bundles_mut(|b| {
-        // might be needed for fluent 0.17..
-        let res = b.add_builtins().context("Failed to add i18n/fluent builtins");
-        if let Err(e) = res {
-            log::warn!("{e:#}");
-        }
-    });
-}
-
-#[macro_export]
-macro_rules! fl {
-    ($message_id:literal) => {{
-        i18n_embed_fl::fl!($crate::LANGUAGE_LOADER, $message_id)
-    }};
-
-    ($message_id:literal, $($args:expr),*) => {{
-        i18n_embed_fl::fl!($crate::LANGUAGE_LOADER, $message_id, $($args), *)
-    }};
-}
-
-static I18N_WARN_ONCE: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
-pub fn with_i18n<R, F>(message_id: &str, f: F) -> R
-where
-    F: FnOnce(Cow<str>) -> R,
-{
-    use {core::cell::RefCell, fluent_syntax::ast::PatternElement};
-
-    // XXX: why does this not take an FnOnce...
-    let mut f = RefCell::new(Some(f));
-    let res = LANGUAGE_LOADER.with_fluent_message(message_id, |m| {
-        let msg = m.value().and_then(|m| match &m.elements[..] {
-            &[PatternElement::TextElement { value: one }] => Some(one),
-            _ => None,
-        })?;
-        let f = f.try_borrow_mut().ok()?.take()?;
-        Some(f(Cow::Borrowed(msg)))
-    });
-    match (res, f.get_mut().take()) {
-        (Some(Some(r)), _) => r,
-        (Some(None), Some(f)) => f(LANGUAGE_LOADER.get(message_id).into()),
-        (None, Some(f)) => {
-            let warn_once = match I18N_WARN_ONCE.try_lock() {
-                Ok(once) if once.contains(message_id) => false,
-                Ok(mut once) => {
-                    once.insert(message_id.into());
-                    true
-                },
-                Err(..) => false,
-            };
-            if warn_once {
-                log::debug!(logger: DeferredLogger::BEST_EFFORT, "missing i18n message {message_id}");
-            }
-            f(Cow::Borrowed(message_id))
-        },
-        (_, None) => unreachable!("with_message calls once"),
-    }
-}
-#[macro_export]
-macro_rules! with_i18n {
-    ($message_id:literal, $closure:expr) => {
-        {
-            'with_i18n_: {
-                #![allow(unreachable_code)]
-                let res = $crate::with_i18n($message_id, $closure);
-                break 'with_i18n_ res;
-                // still check ID at compile time...
-                #[cfg(debug_assertions)]
-                let _ = $crate::fl!($message_id);
-            }
-        }
-    };
-    (($message_id:expr, $($rest_id:tt)+), |($arg:ident, $($rest_arg:tt)*)| $closure:expr) => {
-        $crate::with_i18n! {
-            $message_id, |$arg| $crate::with_i18n! {
-                $($rest_id)*,
-                |$($rest_arg)*| $closure
-            }
-        }
-    };
-    ($message_id:expr, $closure:expr) => {
-        {
-            $crate::with_i18n($message_id, $closure)
-        }
-    };
-}
-
-pub fn localizer() -> DefaultLocalizer<'static> {
-    DefaultLocalizer::new(&*LANGUAGE_LOADER, &*LOCALIZATIONS)
-}
+pub(crate) struct LocalizationsEmbed;
 
 pub mod built_info {
     #[cfg(feature = "built-info")]
@@ -271,6 +141,7 @@ pub mod built_info {
 
 static TEXTURES: LazyLock<rt::TextureLoader> = LazyLock::new(|| rt::TextureLoader::new());
 static CONTROLLER_SENDER: RwLock<ControllerSender> = RwLock::new(ControllerSender::EMPTY);
+#[cfg(feature = "extension-nexus")]
 static QUICK_ACCESS_STATE: LazyLock<watch::Sender<TaimiControls>> =
     LazyLock::new(|| watch::Sender::new(TaimiControls::empty()));
 static RENDER_SENDER: RwLock<Option<mpsc::Sender<RenderEvent>>> = RwLock::new(None);
@@ -512,8 +383,17 @@ fn init() -> Result<(), &'static str> {
     rt::reset_shutdown();
     let addon_dir = &*ADDON_DIR;
 
-    if let Err(e) = rt::reload_language() {
-        log::debug!("No language detected at init: {e}");
+    let lang_config = BootstrapState::read_with(|state| state.language_id());
+    let lang_explicit = lang_config.is_some();
+    let fallback = i18n::fallback_language();
+    let language = lang_config
+        .or(rt::detect_language().ok())
+        .unwrap_or(fallback.clone());
+    if !lang_explicit && &language != fallback {
+        log::info!("Loading detected language {language} for internationalization...");
+    }
+    if let Err(e) = i18n::load_language(&language) {
+        log::debug!("Failed language setup: {e:#}");
     }
 
     #[cfg(feature = "texture-loader")]
@@ -712,7 +592,7 @@ fn load_nexus() {
             let cb = event_consume!(
                 <arcdps::Language> | language | {
                     if let Some(language) = language {
-                        rt::notify_game_language(*language)
+                        rt::notify_game_language(*language as i32)
                     }
                 }
             );
@@ -731,11 +611,11 @@ fn load_nexus() {
     EV_LANGUAGE_CHANGED
         .subscribe(event_consume!(
             <()> |_| {
-                let res = rt::reload_language()
+                let res = rt::auto_reload_language()
                     .map_err(anyhow::Error::msg)
                     .context("failed to load language");
                 if let Err(e) = res {
-                    log::warn!("{e:#}");
+                    log::info!("{e:#}");
                 }
             }
         ))
@@ -777,41 +657,6 @@ pub fn resize_render(newsize: Option<[f32; 2]>) {
 
 #[cfg(feature = "extension-arcdps")]
 fn load_arcdps() -> Result<(), &'static str> {
-    Ok(())
-}
-
-pub const LANGUAGES_GAME: [Language; 5] = [
-    Language::English,
-    Language::French,
-    Language::German,
-    Language::Spanish,
-    Language::Chinese,
-];
-pub const LANGUAGES_EXTRA: [&'static str; 5] = ["cz", "it", "pl", "pt-br", "ru"];
-
-pub fn game_language_id(lang: Language) -> &'static str {
-    match lang {
-        Language::English => "en",
-        Language::French => "fr",
-        Language::German => "de",
-        Language::Spanish => "es",
-        Language::Chinese => "cn",
-    }
-}
-
-fn load_language(detected_language: &str) -> rt::RuntimeResult {
-    if LANGUAGE_LOADER.current_language().language.as_str() == detected_language {
-        return Ok(())
-    }
-
-    let detected_language_identifier: LanguageIdentifier = detected_language
-        .parse()
-        .map_err(|_| "Cannot parse detected language")?;
-    let get_language = vec![detected_language_identifier];
-    // TODO: this may happen twice at startup and can be skipped if no change detected?
-    i18n_embed::select(&*LANGUAGE_LOADER, &*LOCALIZATIONS, get_language.as_slice())
-        .map_err(|_| "Couldn't load language!")?;
-    language_loader_setup(&LANGUAGE_LOADER);
     Ok(())
 }
 
@@ -1286,8 +1131,6 @@ fn unload_render_background() {
 }
 
 fn with_any_error<R, F: FnOnce(&str) -> R>(e: &dyn std::any::Any, f: F) -> R {
-    use std::sync::Arc;
-
     let buf;
     let msg = if let Some(m) = e.downcast_ref::<&str>() {
         *m

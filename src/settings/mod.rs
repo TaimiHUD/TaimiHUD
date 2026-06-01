@@ -5,6 +5,7 @@ mod progress_bar_config;
 mod settings_struct;
 pub(crate) mod source;
 pub mod state;
+pub mod ui;
 mod v1;
 
 pub use {
@@ -26,6 +27,7 @@ pub use {
         GitHubSource,
         Source,
     },
+    ui::UiConfig,
     v1::{RemoteState, TimerSettings},
 };
 

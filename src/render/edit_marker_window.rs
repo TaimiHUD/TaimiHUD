@@ -2,25 +2,13 @@ use {
     crate::{
         controller::markers::MarkerSaveEvent,
         exports::runtime as rt,
-        fl,
         marker::format::{MarkerEntry, MarkerFiletype, MarkerSet, MarkerType},
-        util::{ComboInput, PositionInput, UiExt},
+        render::element::prelude::*,
         MarkersController,
         MarkersEvent,
         ACCOUNT_NAME_CELL,
     },
     glam::Vec3,
-    nexus::imgui::{
-        ComboBox,
-        Id,
-        PopupModal,
-        Selectable,
-        TableColumnFlags,
-        TableColumnSetup,
-        TableFlags,
-        Ui,
-        Window,
-    },
     std::{f32, mem, path::PathBuf},
     strum::IntoEnumIterator,
 };
@@ -33,7 +21,7 @@ use {
 */
 pub struct EditMarkerWindowState {
     pub open: bool,
-    pub formatted_name: String,
+    pub formatted_name: Option<String>,
     pub name: String,
     pub description: String,
     pub author: String,
@@ -47,7 +35,7 @@ pub struct EditMarkerWindowState {
     pub save_mode: Option<MarkerSaveMode>,
     pub original_category: Option<String>,
     pub filenames: Vec<PathBuf>,
-    pub problems: Vec<String>,
+    pub problems: Vec<I18nRef<'static>>,
 }
 
 pub struct IndividualMarkerState {
@@ -115,7 +103,7 @@ impl EditMarkerWindowState {
             formatted_name: Default::default(),
             name: Default::default(),
             trigger: Default::default(),
-            category: ComboInput::new(&fl!("category")),
+            category: ComboInput::new(fl!("category")),
             description: Default::default(),
             map_id: Default::default(),
             author: Default::default(),
@@ -130,7 +118,7 @@ impl EditMarkerWindowState {
         }
     }
 
-    pub fn validate_presave(&self) -> Vec<String> {
+    pub fn validate_presave(&self) -> Vec<I18nRef<'static>> {
         let mut conditions = Vec::new();
         if self.name.is_empty() {
             conditions.push(fl!("name-empty"));
@@ -153,7 +141,7 @@ impl EditMarkerWindowState {
         conditions
     }
 
-    pub fn validate_save(&self) -> Vec<String> {
+    pub fn validate_save(&self) -> Vec<I18nRef<'static>> {
         let mut conditions = Vec::new();
         if let Some(path) = &self.path {
             if path.is_empty() {
@@ -165,7 +153,10 @@ impl EditMarkerWindowState {
         conditions
     }
 
-    pub fn draw_validate(&self, ui: &Ui) {
+    pub fn draw_validate<'ui, U>(&self, ui: &mut U)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         if self.problems.len() > 0 {
             ui.text_wrapped(fl!("validation-fail"));
         }
@@ -286,277 +277,287 @@ impl EditMarkerWindowState {
         }
     }
 
-    pub fn draw(&mut self, ui: &Ui) {
+    pub fn draw<'ui, U>(&mut self, ui: &mut U)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let mut open = self.open;
         if open {
-            let closed = Window::new(&fl!("edit-markers"))
-                .size([300.0, 200.0], nexus::imgui::Condition::FirstUseEver)
-                .opened(&mut open)
-                .build(ui, || {
-                    let name_name = fl!("name");
-                    let name_input = ui.input_text(&name_name, &mut self.name);
-                    name_input.build();
-                    let author_name = fl!("author");
-                    let author_input = ui.input_text(&author_name, &mut self.author);
-                    author_input.build();
-                    self.category.draw(ui);
-                    ui.dummy([4.0; 2]);
-                    let map_id_name = fl!("map-id");
-                    let map_id_input = ui.input_int(&map_id_name, &mut self.map_id);
-                    map_id_input.build();
-                    if ui.button(&fl!("set-map-id")) {
-                        if let Ok(ml) = rt::mumble_link_ptr() {
-                            self.map_id = ml.read_map_id() as i32
-                        }
+            let window = with_i18n!("edit-markers", |label| ui.begin_taimi_window(
+                "edit-markers",
+                label,
+                ImCondition::initial(ImSize2::new(300.0, 200.0)),
+                &mut open,
+            ));
+            if let Some(_window) = window {
+                let _name_input = with_i18n!("name", |label| ui.input_text_managed(
+                    label,
+                    &mut self.name,
+                    128,
+                    IM_STR_NONE,
+                    None
+                ));
+                let _author_input = with_i18n!("author", |label| ui.input_text_managed(
+                    label,
+                    &mut self.author,
+                    128,
+                    IM_STR_NONE,
+                    None,
+                ));
+                self.category.draw(ui);
+                ui.dummy([4.0; 2]);
+                let _map_id_changed = with_i18n!("map-id", |label| ui.input_int(label, &mut self.map_id));
+                if with_i18n!("set-map-id", |label| ui.button(label)) {
+                    if let Ok(ml) = rt::mumble_link_ptr() {
+                        self.map_id = ml.read_map_id() as i32
                     }
-                    ui.dummy([4.0; 2]);
-                    let description_name = fl!("description");
-                    let description_input =
-                        ui.input_text_multiline(&description_name, &mut self.description, [0.0, 0.0]);
-                    description_input.build();
-                    self.trigger.draw_display(ui, true);
-                    self.trigger.draw_take_current(ui);
-                    self.trigger.draw_edit_manual(ui, true);
-                    ui.dummy([4.0; 2]);
-                    #[cfg(feature = "extension-nexus")]
-                    if let Ok(Some(rtapi)) = rt::rtapi() {
-                        use nexus::rtapi::GroupType;
+                }
+                ui.dummy([4.0; 2]);
+                let _description_input = with_i18n!("description", |label| ui
+                    .input_text_managed_multiline(label, &mut self.description, 256, None));
+                self.trigger.draw_display(ui, true);
+                self.trigger.draw_take_current(ui);
+                self.trigger.draw_edit_manual(ui, true);
+                ui.dummy([4.0; 2]);
+                #[cfg(feature = "extension-nexus")]
+                if let Ok(Some(rtapi)) = rt::rtapi() {
+                    use nexus::rtapi::GroupType;
 
-                        if let Some(group) = rtapi.read_group() {
-                            let is_squad =
-                                matches!(group.group_type, Ok(GroupType::Squad | GroupType::RaidSquad));
-                            if is_squad {
-                                if ui.button(&fl!("take-squad-markers")) {
-                                    for (i, marker) in group.squad_markers.iter().enumerate() {
-                                        if *marker != [f32::INFINITY; 3] {
-                                            self.markers[i].set_position(Vec3::from_array(*marker));
-                                        }
+                    if let Some(group) = rtapi.read_group() {
+                        let is_squad =
+                            matches!(group.group_type, Ok(GroupType::Squad | GroupType::RaidSquad));
+                        if is_squad {
+                            if ui.button(fl!("take-squad-markers")) {
+                                for (i, marker) in group.squad_markers.iter().enumerate() {
+                                    if *marker != [f32::INFINITY; 3] {
+                                        self.markers[i].set_position(Vec3::from_array(*marker));
                                     }
                                 }
-                            } else {
-                                ui.text_colored([1.0, 1.0, 0.0, 1.0], &fl!("cannot-take-squad-markers"));
                             }
                         } else {
-                            ui.text_colored([1.0, 1.0, 0.0, 1.0], &fl!("cannot-take-squad-markers"));
+                            ui.text_colored([1.0, 1.0, 0.0, 1.0], fl!("cannot-take-squad-markers"));
                         }
                     } else {
-                        ui.text_colored([1.0, 1.0, 0.0, 1.0], &fl!("rt-api-required-squad-markers"));
+                        ui.text_colored([1.0, 1.0, 0.0, 1.0], fl!("cannot-take-squad-markers"));
                     }
-                    ui.dummy([4.0; 2]);
-                    let table_flags = TableFlags::RESIZABLE | TableFlags::ROW_BG | TableFlags::BORDERS;
-                    let table = ui.begin_table_header_with_flags(
-                        "edit_markers",
-                        [
-                            TableColumnSetup {
-                                name: &fl!("icon"),
-                                flags: TableColumnFlags::WIDTH_FIXED,
-                                init_width_or_weight: 0.0,
-                                user_id: Id::Str("marker_icon"),
-                            },
-                            TableColumnSetup {
-                                name: &fl!("description"),
-                                flags: TableColumnFlags::WIDTH_STRETCH,
-                                init_width_or_weight: 0.0,
-                                user_id: Id::Str("marker_desc"),
-                            },
-                            TableColumnSetup {
-                                name: &fl!("local-header"),
-                                flags: TableColumnFlags::WIDTH_STRETCH,
-                                init_width_or_weight: 0.0,
-                                user_id: Id::Str("marker_pos"),
-                            },
-                            TableColumnSetup {
-                                name: &fl!("controls"),
-                                flags: TableColumnFlags::WIDTH_STRETCH,
-                                init_width_or_weight: 0.0,
-                                user_id: Id::Str("marker_pos"),
-                            },
-                        ],
-                        table_flags,
-                    );
+                } else {
+                    ui.text_colored([1.0, 1.0, 0.0, 1.0], fl!("rt-api-required-squad-markers"));
+                }
+                ui.dummy([4.0; 2]);
+                let cols = ["icon", "description", "local-header", "controls"];
+                let (table_flags, column_flags, col0_flags) = match ui.imgui_version_num() {
+                    #[cfg(taimi_imgui = "180")]
+                    Some(im180::VERSION_NUM) => (
+                        imw::DynArgsTable::new(Some(imw::Table::IM180_FLAGS_PRESET)),
+                        Some(imw::TableColumn::IM180_WIDTH_STRETCH),
+                        Some(imw::TableColumn::IM180_WIDTH_FIXED),
+                    ),
+                    #[cfg(taimi_imgui = "192")]
+                    Some(im192::VERSION_NUM) => (
+                        imw::DynArgsTable::new(Some(imw::Table::IM192_FLAGS_PRESET)),
+                        Some(imw::TableColumn::IM192_WIDTH_STRETCH),
+                        Some(imw::TableColumn::IM192_WIDTH_FIXED),
+                    ),
+                    _ => (Default::default(), None, None),
+                };
+                let table_token = ui.begin_table_with_flags(c"edit_markers", cols.len(), table_flags);
+                if let Some(_table) = table_token {
+                    for (i, id) in cols.into_iter().enumerate() {
+                        let user_id = 0;
+                        let flags = match i {
+                            0 => col0_flags,
+                            _ => column_flags,
+                        };
+                        with_i18n(id, |label| {
+                            ui.table_column_setup_untyped(Some(label), flags, None, user_id)
+                        });
+                    }
+                    ui.table_header_row();
                     ui.table_next_column();
                     for (i, value) in MarkerType::iter_real_values().enumerate() {
-                        let pushy = ui.push_id(Id::Str(&format!("{}", value)));
+                        let pushy = ui.push_id_hash(value);
                         if let Some(mt) = MarkerType::from_repr(i as u8 + 1) {
                             mt.icon(ui);
                         }
                         ui.table_next_column();
-                        let label_size = ui.push_item_width(-1.0);
-                        let label = format!("##Marker Description {value}");
-                        let meep = ui.push_id(&label);
-                        let description_input = ui.input_text(&label, &mut self.markers[i].description);
-                        description_input.hint(&fl!("no-description")).build();
-                        label_size.pop(ui);
-                        meep.pop();
+                        let Some(marker) = self.markers.get_mut(i) else {
+                            for _ in 0..3 {
+                                ui.table_next_column();
+                            }
+                            continue
+                        };
+                        {
+                            let _label_size = ui.item_prepare_push_width_dyn(-1.0);
+                            let label = c"##Marker Description";
+                            let _changed = with_i18n!("no-description", |hint| ui.input_text_managed(
+                                label,
+                                &mut marker.description,
+                                128,
+                                Some(hint),
+                                None,
+                            ));
+                        }
                         ui.table_next_column();
-                        self.markers[i].position.draw_display(ui, false);
+                        marker.position.draw_display(ui, false);
                         ui.table_next_column();
-                        self.markers[i].position.draw_take_current(ui);
-                        self.markers[i].position.draw_edit_manual(ui, false);
+                        marker.position.draw_take_current(ui);
+                        marker.position.draw_edit_manual(ui, false);
                         ui.table_next_column();
-                        pushy.pop();
                     }
-                    if let Some(token) = table {
-                        token.end();
+                }
+                ui.dummy([4.0; 2]);
+                self.draw_validate(ui);
+                ui.dummy([4.0; 2]);
+                if self.save_mode == Some(MarkerSaveMode::Edit) {
+                    if ui.button(fl!("save-edit")) {
+                        self.problems = self.validate_presave();
+                        if self.problems.is_empty() {
+                            let name = self
+                                .formatted_name
+                                .insert(fl!("save-edit-item", item = &self.name).into());
+                            ui.open_popup(&*name);
+                        }
                     }
-                    ui.dummy([4.0; 2]);
-                    self.draw_validate(ui);
-                    ui.dummy([4.0; 2]);
+                } else {
+                    if ui.button(fl!("save")) {
+                        self.problems = self.validate_presave();
+                        if self.problems.len() == 0 {
+                            let name = self
+                                .formatted_name
+                                .insert(fl!("save-item", item = &self.name).into());
+                            ui.open_popup(&*name);
+                        }
+                    }
+                }
+                let popup = self
+                    .formatted_name
+                    .as_ref()
+                    .map(|name| ui.begin_popup_modal(name, Default::default(), None));
+                if let Some(_token) = popup {
                     if self.save_mode == Some(MarkerSaveMode::Edit) {
-                        if ui.button(&fl!("save-edit")) {
-                            self.problems = self.validate_presave();
-                            if self.problems.is_empty() {
-                                self.formatted_name = fl!("save-edit-item", item = self.name.clone());
-                                ui.open_popup(&self.formatted_name);
-                            }
-                        }
-                    } else {
-                        if ui.button(&fl!("save")) {
-                            self.problems = self.validate_presave();
-                            if self.problems.len() == 0 {
-                                self.formatted_name = fl!("save-item", item = self.name.clone());
-                                ui.open_popup(&self.formatted_name);
-                            }
-                        }
-                    }
-                    if let Some(_token) = PopupModal::new(&self.formatted_name)
-                        .always_auto_resize(true)
-                        .begin_popup(ui)
-                    {
-                        if self.save_mode == Some(MarkerSaveMode::Edit) {
-                            ui.text_colored([1.0, 1.0, 0.0, 1.0], fl!("overwrite-markerset"));
-                            if ui.button(fl!("save")) {
-                                self.save_file();
-                                return true;
-                            }
-                            ui.same_line();
-                        } else {
-                            self.draw_validate(ui);
-                            let msm_name = |item: &MarkerSaveMode| match item {
-                                MarkerSaveMode::Create => fl!("save-standalone"),
-                                MarkerSaveMode::Append => fl!("save-append"),
-                                _ => "".to_string(),
-                            };
-                            let save_mode_closure = || {
-                                let mut selected = self.save_mode.clone();
-                                for item in [MarkerSaveMode::Create, MarkerSaveMode::Append].iter() {
-                                    if Selectable::new(msm_name(item))
-                                        .selected(Some(item) == self.save_mode.as_ref())
-                                        .build(ui)
-                                    {
-                                        selected = Some(item.clone());
-                                        // standalone paths are relative
-                                        // append paths are absolute
-                                        // pls dont mix them :(
-                                        self.path = None;
-                                    }
-                                }
-                                selected
-                            };
-                            let combo_box_text = match &self.save_mode {
-                                Some(s) => format!("{}", msm_name(s)),
-                                None => "".to_string(),
-                            };
-                            if let Some(Some(selection)) = ComboBox::new(fl!("save-mode"))
-                                .preview_value(combo_box_text)
-                                .build(ui, save_mode_closure)
-                            {
-                                self.save_mode = Some(selection);
-                            }
-                        }
-                        match self.save_mode {
-                            Some(MarkerSaveMode::Create) => {
-                                let filetype_closure = || {
-                                    let mut selected = self.filetype.clone();
-                                    for item in MarkerFiletype::iter() {
-                                        if Selectable::new(item.to_string())
-                                            .selected(Some(&item) == self.filetype.as_ref())
-                                            .build(ui)
-                                        {
-                                            selected = Some(item.clone());
-                                        }
-                                    }
-                                    selected
-                                };
-                                let combo_box_text = match &self.filetype {
-                                    Some(s) => format!("{}", s),
-                                    None => "".to_string(),
-                                };
-                                if let Some(Some(selection)) = ComboBox::new(fl!("filetype"))
-                                    .preview_value(combo_box_text)
-                                    .build(ui, filetype_closure)
-                                {
-                                    self.filetype = Some(selection);
-                                }
-                                ui.help_marker(|| {
-                                    ui.tooltip_text(fl!("marker-filetype-explanation"));
-                                });
-                                let filename = self.path.get_or_insert_default();
-                                let filename_text = fl!("filename");
-                                ui.input_text(filename_text, filename).build();
-                                if ui.button(fl!("save")) {
-                                    self.problems = self.validate_save();
-                                    if self.problems.len() == 0 {
-                                        self.save_file();
-                                        return true;
-                                    }
-                                }
-                                ui.same_line();
-                            },
-                            Some(MarkerSaveMode::Append) => {
-                                let filename_closure = || {
-                                    let mut selected = self.path.clone();
-                                    for item in &self.filenames {
-                                        let path_name = format!("{}", item.display());
-                                        if Selectable::new(&path_name)
-                                            .selected(Some(&path_name) == self.path.as_ref())
-                                            .build(ui)
-                                        {
-                                            selected = Some(path_name);
-                                        }
-                                    }
-                                    selected
-                                };
-                                let combo_box_text = match &self.path {
-                                    Some(s) => format!("{}", s),
-                                    None => "".to_string(),
-                                };
-                                if let Some(Some(selection)) = ComboBox::new(fl!("filename"))
-                                    .preview_value(combo_box_text)
-                                    .build(ui, filename_closure)
-                                {
-                                    self.path = Some(selection).clone();
-                                }
-                                if ui.button(fl!("refresh-files")) {
-                                    self.request_filenames();
-                                }
-                                ui.same_line();
-                                if ui.button(fl!("save")) {
-                                    self.problems = self.validate_save();
-                                    if self.problems.len() == 0 {
-                                        self.save_file();
-                                        return true;
-                                    }
-                                }
-                                ui.same_line();
-                            },
-                            _ => (),
-                        }
-                        if ui.button(fl!("close")) {
-                            ui.close_current_popup();
-                            return true;
+                        ui.text_colored([1.0, 1.0, 0.0, 1.0], fl!("overwrite-markerset"));
+                        if ui.button(fl!("save")) {
+                            self.save_file();
+                            open = false;
                         }
                         ui.same_line();
-                        if ui.button(fl!("cancel")) {
-                            ui.close_current_popup();
+                    } else {
+                        self.draw_validate(ui);
+                        let msm_name = |item: &MarkerSaveMode| match item {
+                            MarkerSaveMode::Create => Some(fl!("save-standalone")),
+                            MarkerSaveMode::Append => Some(fl!("save-append")),
+                            _ => None,
+                        };
+                        let combo_box_text = self.save_mode.as_ref().and_then(msm_name);
+                        let combo =
+                            with_i18n!("save-mode", |label| ui.begin_combo_opt(label, combo_box_text,));
+                        let mut selected = None;
+                        if let Some(_combo) = combo {
+                            for item in [MarkerSaveMode::Create, MarkerSaveMode::Append].iter() {
+                                if ui.selectable(
+                                    msm_name(item).unwrap(),
+                                    Some(item) == self.save_mode.as_ref(),
+                                ) {
+                                    selected = Some(item.clone());
+                                    // standalone paths are relative
+                                    // append paths are absolute
+                                    // pls dont mix them :(
+                                    self.path = None;
+                                }
+                            }
+                        }
+                        if let Some(selection) = selected {
+                            self.save_mode = Some(selection);
                         }
                     }
-                    false
-                });
-            self.open = match closed {
-                Some(true) => false,
-                _ => open,
-            };
+                    match self.save_mode {
+                        Some(MarkerSaveMode::Create) => {
+                            let combo_box_text = match &self.filetype {
+                                Some(s) => Some(s.to_string()),
+                                None => None,
+                            };
+                            let combo =
+                                with_i18n!("filetype", |label| ui.begin_combo_opt(label, combo_box_text,));
+                            let mut selected = None;
+                            if let Some(_combo) = combo {
+                                for item in MarkerFiletype::iter() {
+                                    if ui.selectable(im_to_s!(item), Some(&item) == self.filetype.as_ref())
+                                    {
+                                        selected = Some(item.clone());
+                                    }
+                                }
+                            }
+                            if let Some(selection) = selected {
+                                self.filetype = Some(selection);
+                            }
+                            ui.help_marker(|ui, _click| {
+                                ui.tooltip_text(fl!("marker-filetype-explanation"));
+                            });
+                            let filename = self.path.get_or_insert_default();
+                            with_i18n!("filename", |label| ui.input_text_managed(
+                                label,
+                                filename,
+                                64,
+                                IM_STR_NONE,
+                                None
+                            ));
+                            if ui.button(fl!("save")) {
+                                self.problems = self.validate_save();
+                                if self.problems.len() == 0 {
+                                    self.save_file();
+                                    open = false;
+                                }
+                            }
+                            ui.same_line();
+                        },
+                        Some(MarkerSaveMode::Append) => {
+                            let mut selected = None;
+                            let combo_box_text = match &self.path {
+                                Some(s) => Some(&s[..]),
+                                None => None,
+                            };
+                            let combo =
+                                with_i18n!("filename", |label| ui.begin_combo_opt(label, combo_box_text,));
+                            if let Some(_combo) = combo {
+                                for item in &self.filenames {
+                                    let path_name = format!("{}", item.display());
+                                    if ui.selectable(
+                                        im_to_s!(item.display()),
+                                        Some(&path_name) == self.path.as_ref(),
+                                    ) {
+                                        selected = Some(path_name);
+                                    }
+                                }
+                            }
+                            if let Some(selection) = selected {
+                                self.path = Some(selection).clone();
+                            }
+                            if ui.button(fl!("refresh-files")) {
+                                self.request_filenames();
+                            }
+                            ui.same_line();
+                            if ui.button(fl!("save")) {
+                                self.problems = self.validate_save();
+                                if self.problems.len() == 0 {
+                                    self.save_file();
+                                    open = false;
+                                }
+                            }
+                            ui.same_line();
+                        },
+                        _ => (),
+                    }
+                    if ui.button(fl!("close")) {
+                        ui.close_current_popup();
+                        open = false;
+                    }
+                    ui.same_line();
+                    if ui.button(fl!("cancel")) {
+                        ui.close_current_popup();
+                    }
+                }
+            }
+            self.open = open;
         }
     }
 }

@@ -1,3 +1,7 @@
+#[cfg(any(feature = "markers", feature = "space"))]
+pub use nexus::event::MumbleIdentityUpdate;
+#[cfg(any(feature = "markers", feature = "space"))]
+use taimi_meta::ui::{realign_fov, MapOpen};
 use {
     crate::{
         controller::{timers::TimersController, Controller, ControllerEvent},
@@ -12,11 +16,6 @@ use {
         coords::{LocalSpace, SignObtainer},
         ui::{gameplay::GameplayState, UiState},
     },
-};
-#[cfg(any(feature = "markers", feature = "space"))]
-use {
-    arcloader_mumblelink::identity::NexusIdentityShare,
-    taimi_meta::ui::{realign_fov, MapOpen},
 };
 
 impl RenderMachine {
