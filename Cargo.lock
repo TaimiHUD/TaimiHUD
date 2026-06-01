@@ -3688,6 +3688,7 @@ dependencies = [
  "closure-ffi",
  "jit-allocator2",
  "log",
+ "num-traits",
  "serde",
  "windows 0.61.1",
 ]

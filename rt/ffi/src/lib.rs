@@ -7,6 +7,7 @@ pub mod cstr;
 pub mod data;
 #[cfg(feature = "fnalloc")]
 pub mod fnalloc;
+pub mod repr;
 #[cfg(feature = "windows")]
 pub mod win32;
 
