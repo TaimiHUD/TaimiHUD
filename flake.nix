@@ -7,7 +7,7 @@
     };
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
     libimgui = {
-      url = "git+https://codeberg.org/TaimiHUD/libimgui.git";
+      url = "git+https://codeberg.org/TaimiHUD/libimgui.git?ref=refs/heads/symver";
       inputs = {
         nixpkgs.follows = "nixpkgs";
         fenix.follows = "fenix";
@@ -84,7 +84,7 @@
             dirty = false;
             platform = null;
           };
-          inherit (legacyPackages) arcdps-imgui_18000;
+          inherit (legacyPackages) arcdps-imgui_18000 arcdps-imgui_19270;
         };
         taimiHUD = packages.taimiHUD-develop.override {
           inherit (packages.taimiHUD-develop) cargoArtifacts;

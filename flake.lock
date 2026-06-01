@@ -132,15 +132,16 @@
         "rust": "rust"
       },
       "locked": {
-        "lastModified": 1779040533,
-        "narHash": "sha256-tLIGJ15kExLxmAX+D9E0yKm/z8poSDapaxivVBdH0Sc=",
-        "ref": "refs/heads/main",
-        "rev": "518813ab3eb09d4dde65d9e3b5e1a63b0fae24ce",
-        "revCount": 16,
+        "lastModified": 1779040518,
+        "narHash": "sha256-NkkMMu4OjXlqNPqypEsn/CNdBmS1OCZ6s7ZoLHa4qgs=",
+        "ref": "refs/heads/symver",
+        "rev": "8bab608feb747af55fab08a989c04b9dcfbdf8f6",
+        "revCount": 19,
         "type": "git",
         "url": "https://codeberg.org/TaimiHUD/libimgui.git"
       },
       "original": {
+        "ref": "refs/heads/symver",
         "type": "git",
         "url": "https://codeberg.org/TaimiHUD/libimgui.git"
       }
