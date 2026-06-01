@@ -369,3 +369,6 @@ superadventurefestival = Super Adventure Box
 lunarnewyear = Lunar New Year
 festivalofthefourwinds = Festival Of The Four Winds
 dragonbash = Dragon Bash
+
+## Gamebinds (see `default_keybind`s in src/exports/runtime/bindings/controls.rs)
+UI_ShowHideUI = Alternar Visibilidade da Interface
