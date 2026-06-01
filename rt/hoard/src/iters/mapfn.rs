@@ -1,6 +1,6 @@
 use {
     core::{fmt, iter, mem},
-    std::{borrow::Cow, slice},
+    std::slice,
 };
 
 /// unlike [iter::Map], [self.map] is not guaranteed to run in sequence
