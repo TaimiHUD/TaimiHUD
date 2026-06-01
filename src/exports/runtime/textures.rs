@@ -1,8 +1,12 @@
 #[cfg(feature = "extension-nexus")]
 use glamour::Size2;
+#[cfg(feature = "texture-loader")]
 use {
-    crate::exports::runtime as rt,
-    anyhow::Context,
+    anyhow::{anyhow, Context},
+    std::{io, thread},
+    windows::Win32::Graphics::Dxgi::Common::{self as dxgi, DXGI_FORMAT},
+};
+use {
     std::{
         collections::{hash_map, HashMap},
         future::Future,
@@ -12,12 +16,6 @@ use {
     },
     taimi_d3d::dx11::buffer::TextureView2,
     tokio::sync::{self, mpsc, RwLock},
-};
-#[cfg(feature = "texture-loader")]
-use {
-    anyhow::anyhow,
-    std::{io, thread},
-    windows::Win32::Graphics::Dxgi::Common::{self as dxgi, DXGI_FORMAT},
 };
 
 #[cfg(feature = "texture-loader")]
@@ -579,18 +577,8 @@ pub struct ImguiTexture {
 }
 impl ImguiTexture {
     #[inline(always)]
-    pub fn im_size(&self) -> [f32; 2] {
-        self.size.to_array()
-    }
-    #[inline(always)]
-    pub fn im_id(&self) -> rt::imgui::TextureId {
-        let id = self
-            .id
-            .as_ref()
-            .map(|id| id.as_d3d_raw().as_ptr() as usize)
-            .context("imgui texture empty");
-
-        rt::imgui::TextureId::new(rt::log::error_ok(id).unwrap_or(0))
+    pub fn im_size(&self) -> taimi_ui::im::ui::ImSize2 {
+        self.size.cast()
     }
 }
 

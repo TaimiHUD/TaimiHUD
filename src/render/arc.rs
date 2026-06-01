@@ -3,12 +3,9 @@ use {crate::controller::pathing::PathingEvent, taimi_meta::ui::MapContext};
 use {
     crate::{
         controller::timers::{TimersController, TimersEvent},
-        exports::runtime::{
-            bindings::CONTROLS,
-            imgui::{self, Condition, MouseButton, TreeNode, TreeNodeFlags},
-        },
+        exports::runtime::bindings::CONTROLS,
         render::{
-            element::{addons::AddonHostSelection, keys::KeyBindSelection},
+            element::{addons::AddonHostSelection, keys::KeyBindSelection, prelude::*},
             RenderEvent,
             RenderState,
         },
@@ -38,8 +35,8 @@ impl ArcRenderState {
     pub fn new() -> Self {
         let mut state = Self {
             boot_changes: BootstrapState::get().subscribe(),
-            load_host: Default::default(),
-            update_host: Default::default(),
+            load_host: AddonHostSelection::new(fl!("preferred-loader"), Err(None)),
+            update_host: AddonHostSelection::new(fl!("preferred-updater"), Ok(fl!("disabled"))),
             bindings: Default::default(),
             detected: false,
         };
@@ -54,22 +51,28 @@ impl ArcRenderState {
         self.update_host.host = state.update_host_preference();
     }
 
-    pub fn ui_options(&mut self, ui: &imgui::Ui, host: AddonHostName) {
+    pub fn ui_options<'ui, U, C>(&mut self, ui: &mut U, context: &mut C, host: AddonHostName)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+        C: ?Sized + DrawContext<'ui>,
+    {
         if self.boot_changes.has_changed().ok() == Some(true) {
             self.sync_boot();
         }
 
-        let load_host_preference = match self.load_host.draw(ui, "preferred-loader") {
-            None if ui.is_item_clicked_with_button(MouseButton::Right) => Some(None),
-            host => host.map(Some),
+        let load_host_preference = match self.load_host.draw(ui, context) {
+            false if ui.is_item_right_clicked() => Some(None),
+            false => None,
+            true => Some(self.load_host.host),
         };
         if let Some(host) = load_host_preference {
             BootstrapState::write_with(|s| s.addon_host_preference = host);
         }
 
-        let update_host_preference = match self.update_host.draw_opt(ui, "preferred-updater") {
-            None if ui.is_item_clicked_with_button(MouseButton::Right) => Some(None),
-            host => host.map(Some),
+        let update_host_preference = match self.update_host.draw(ui, context) {
+            false if ui.is_item_right_clicked() => Some(None),
+            false => None,
+            true => Some(Some(self.update_host.host)),
         };
         if let Some(host) = update_host_preference {
             BootstrapState::write_with(|s| s.set_update_host_preference(host));
@@ -84,35 +87,47 @@ impl ArcRenderState {
             }
         }
         #[cfg(feature = "extension-arcdps")]
-        if host != AddonHostName::ArcDPS {
-            if exports::loaded() {
-                if drawn {
-                    ui.same_line();
-                }
-                if ui.button("un-arcdps") {
-                    Self::un_arcdps();
-                }
-            } else if self.detected && !rt::arcdps_available() {
-                if drawn {
-                    ui.same_line();
-                }
-                if with_i18n!("arcdps", |label| ui.button(&label)) {
-                    if let Err(e) = exports::enter() {
-                        log::error!("arc unavailable? {e}");
-                    }
+        if exports::loaded() {
+            if drawn {
+                ui.same_line();
+            }
+            if ui.button("un-arcdps") {
+                Self::un_arcdps();
+            }
+        } else if self.detected && !rt::arcdps_available() {
+            if drawn {
+                ui.same_line();
+            }
+            if with_i18n!("arcdps", |label| ui.button(label)) {
+                if let Err(e) = exports::enter() {
+                    log::error!("arc unavailable? {e}");
                 }
             }
         }
         let _ = drawn;
 
-        let _keybinds = with_i18n!("addonbinds", |msg| TreeNode::new(&msg)
-            .flags(TreeNodeFlags::FRAMED)
-            .opened(true, Condition::Once)
-            .tree_push_on_open(true)
-            .build(ui, || self.ui_options_keybinds(ui)));
+        let args = match ui.imgui_version_num() {
+            #[cfg(taimi_imgui = "180")]
+            Some(im180::VERSION_NUM) => imw::TreeNode::IM180_ARGS_FRAMED,
+            #[cfg(taimi_imgui = "192")]
+            Some(im192::VERSION_NUM) => imw::TreeNode::IM192_ARGS_FRAMED,
+            _ => Default::default(),
+        };
+        let keybinds = with_i18n!("addonbinds", |msg| ui.begin_tree_node(
+            Some(ImCondition::INITIAL),
+            c"addonbinds",
+            msg,
+            args
+        ));
+        if let Some(_keybinds) = keybinds {
+            self.ui_options_keybinds(ui);
+        }
     }
 
-    fn ui_options_keybinds(&mut self, ui: &imgui::Ui) {
+    fn ui_options_keybinds<'ui, U>(&mut self, ui: &mut U)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         for &binding in ArcSettings::VK_WINDOWS {
             self.bindings.do_keybind(
                 ui,
@@ -189,7 +204,11 @@ impl ArcRenderState {
         }
     }
 
-    pub fn ui_options_disabled(ui: &imgui::Ui, host: AddonHostName) -> bool {
+    pub fn ui_options_disabled<'ui, U, C>(ui: &mut U, context: &mut C, host: AddonHostName) -> bool
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+        C: ?Sized + DrawContext<'ui>,
+    {
         use crate::settings::state::UpdatePreference;
         ui.text("addon offline or disabled via boot.json");
 
@@ -204,34 +223,33 @@ impl ArcRenderState {
         });
 
         ui.separator();
-        let mut new_pref_host =
-            match AddonHostSelection::new_minimal(pref_host).draw(ui, "Loader Preference") {
-                None if ui.is_item_clicked_with_button(MouseButton::Right) => Some(None),
-                host => host.map(Some),
-            };
+        let mut new_pref_host = AddonHostSelection::with_host("Loader Preference", Err(None), pref_host);
+        let mut new_pref_host = match new_pref_host.draw(ui, context) {
+            true => Some(new_pref_host.host),
+            false => None,
+        };
         let mut new_pref_updater =
-            match AddonHostSelection::new_minimal(pref_updater).draw_opt(ui, "Update Host Preference") {
-                None if ui.is_item_clicked_with_button(MouseButton::Right) => Some(None),
-                host => host.map(Some),
-            };
+            AddonHostSelection::with_host("Update Host Preference", Err(Some("Disabled")), pref_updater);
+        let mut new_pref_updater = match new_pref_updater.draw(ui, context) {
+            true => Some(Some(new_pref_updater.host)),
+            false => None,
+        };
         if ui.button("Reset") {
             new_pref_host = Some(None);
             new_pref_updater = Some(None);
         }
 
         #[cfg(feature = "extension-arcdps")]
-        if host != AddonHostName::ArcDPS {
-            if rt::arcdps_available() {
-                ui.same_line();
-                if ui.button("un-arcdps") {
-                    Self::un_arcdps();
-                }
-            } else if !exports::loaded() {
-                ui.same_line();
-                if ui.button(&"arcdps") {
-                    if let Err(e) = exports::enter() {
-                        log::error!("arc unavailable? {e}");
-                    }
+        if rt::arcdps_available() {
+            ui.same_line();
+            if ui.button("un-arcdps") {
+                Self::un_arcdps();
+            }
+        } else if !exports::loaded() && AddonHostName::ArcDPS.is_detected() == Some(true) {
+            ui.same_line();
+            if ui.button(&"arcdps") {
+                if let Err(e) = exports::enter() {
+                    log::error!("arc unavailable? {e}");
                 }
             }
         }
@@ -245,8 +263,8 @@ impl ArcRenderState {
         ui.separator();
         ui.text("update authorization");
         ui.same_line();
-        ui.text(&format!("{pref_update}"));
-        if ui.is_item_clicked_with_button(MouseButton::Right) {
+        ui.text(im_to_s!(pref_update));
+        if ui.is_item_right_clicked() {
             new_pref_update = Some(None);
         }
         ui.same_line();
@@ -259,7 +277,7 @@ impl ArcRenderState {
                 new_pref_update = Some(Some(UpdatePreference::Never));
             }
         }
-        if ui.is_item_clicked_with_button(MouseButton::Right) {
+        if ui.is_item_right_clicked() {
             new_pref_update = Some(None);
         }
         let changed = new_pref_host.is_some() | new_pref_updater.is_some() | new_pref_update.is_some();

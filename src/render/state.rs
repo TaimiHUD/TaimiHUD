@@ -2,10 +2,10 @@ use {
     crate::{
         controller::ControllerEvent,
         exports::runtime::{self as rt, bindings::TaimiControls},
-        fl,
         marker::format::MarkerType,
         marker_icon_data,
         render::{
+            element::prelude::*,
             machine::{RenderMachine, RenderTaskQueue},
             MarkerWindowState,
             PrimaryWindowState,
@@ -20,19 +20,6 @@ use {
         TEXTURES,
     },
     anyhow::Context,
-    glam::Vec2,
-    nexus::imgui::{
-        internal::RawCast,
-        Condition,
-        Font,
-        Image,
-        Io,
-        PopupModal,
-        StyleColor,
-        Ui,
-        Window,
-        WindowFlags,
-    },
     relative_path::RelativePathBuf,
     serde::{Deserialize, Serialize},
     std::{
@@ -47,7 +34,7 @@ use {
             MutexGuard,
         },
     },
-    strum::{Display, EnumIter},
+    strum::{Display, EnumIter, IntoStaticStr},
     tokio::sync::mpsc::{Receiver, Sender},
 };
 
@@ -110,7 +97,9 @@ impl RenderEvent {
     };
 }
 
-#[derive(Display, Default, Clone, Debug, Deserialize, Serialize, EnumIter, PartialEq)]
+#[derive(
+    Display, IntoStaticStr, Default, Copy, Clone, Debug, Deserialize, Serialize, EnumIter, PartialEq,
+)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum TextFont {
@@ -139,6 +128,8 @@ pub struct RenderState {
     pub runtime: Option<crate::controller::runtime::RemoteContext>,
     #[cfg(feature = "space")]
     pub engine: Option<anyhow::Result<Engine>>,
+    pub container_state: elem::frame::ContainerContextState,
+    pub frame_state: elem::frame::RenderFrameUi,
 }
 
 impl RenderState {
@@ -150,6 +141,8 @@ impl RenderState {
             runtime: None,
             #[cfg(feature = "space")]
             engine: None,
+            container_state: Default::default(),
+            frame_state: Default::default(),
             task_queue: Default::default(),
             alert: Default::default(),
             primary_window: PrimaryWindowState::new(),
@@ -164,7 +157,10 @@ impl RenderState {
         }
     }
 
-    fn draw(&mut self, ui: &Ui) -> bool {
+    fn draw<'ui, U>(&mut self, ui: &mut U, context: DrawContextInput<'ui>) -> bool
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         match self.receiver.try_recv() {
             Ok(event) => {
                 use RenderEvent::*;
@@ -287,7 +283,6 @@ impl RenderState {
             },
             Err(_error) => (),
         }
-        self.handle_alert(ui);
 
         self.frame_count = self.frame_count.saturating_add(1);
         let fps_settled = || {
@@ -295,7 +290,7 @@ impl RenderState {
             // though imgui seems to init fps at FLT_MAX or something,
             // uncapped frame rates (600+) seem like a workable indicator for this -
             // the moment charsel is working it will drop down to a reasonable value
-            let fps = ui.io().framerate;
+            let fps = ui.with_io_dyn(|io| io.frame_rate());
             fps <= 340.0f32 && fps.to_bits() != 0.0f32.to_bits()
         };
         let startup_delay = match self.frame_count {
@@ -316,10 +311,22 @@ impl RenderState {
             return true
         }
 
+        let mut container_state = self.container_state.clone();
+        let mut context = context.new_root_scope(&mut container_state);
+
+        self.handle_alert(ui);
         self.timer_window.draw(ui);
+        let slot = match () {
+            #[cfg(feature = "space")]
+            _ => (&mut self.engine,),
+            #[cfg(not(feature = "space"))]
+            _ => (),
+        };
         self.primary_window.draw(
             ui,
+            &mut context,
             &mut self.machine,
+            slot,
             &mut self.timer_window,
             &mut self.state_errors,
         );
@@ -334,11 +341,8 @@ impl RenderState {
         let mut items_to_delete = Vec::new();
         for (entry_name, errory) in &self.state_errors {
             ui.open_popup(entry_name);
-            if let Some(_token) = PopupModal::new(&entry_name)
-                .always_auto_resize(true)
-                .begin_popup(ui)
-            {
-                ui.text(format!("{:?}", errory));
+            if let Some(_token) = ui.begin_popup_modal(entry_name, Default::default(), None) {
+                ui.text(im_fmt!("{errory:#}"));
                 ui.dummy([4.0; 2]);
                 if ui.button(fl!("okay")) {
                     items_to_delete.push(entry_name.clone());
@@ -354,7 +358,10 @@ impl RenderState {
 
         true
     }
-    pub fn marker_icon(ui: &Ui, height: Option<f32>, marker: &MarkerType) {
+    pub fn marker_icon<'ui, U>(ui: &mut U, height: Option<f32>, marker: &MarkerType)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let key = marker.to_string();
         let icon = match TEXTURES.lookup_imgui(&key) {
             Some(t) => t,
@@ -367,14 +374,21 @@ impl RenderState {
         }
         .unwrap_or_default();
         let size = match height {
-            Some(height) => [height, height],
+            Some(height) => ImSize2::splat(height),
             None => icon.im_size(),
         };
-        Image::new(icon.im_id(), size).build(ui);
+        ui.image(icon, size);
         ui.same_line();
     }
 
-    pub fn icon(ui: &Ui, height: Option<f32>, alert_icon: Option<&RelativePathBuf>, path: Option<&Path>) {
+    pub fn icon<'ui, U>(
+        ui: &mut U,
+        height: Option<f32>,
+        alert_icon: Option<&RelativePathBuf>,
+        path: Option<&Path>,
+    ) where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let icon = match alert_icon {
             Some(icon) => icon,
             None => return,
@@ -391,13 +405,17 @@ impl RenderState {
         }
         .unwrap_or_default();
         let size = match height {
-            Some(height) => [height, height],
+            Some(height) => ImSize2::splat(height),
             None => icon.im_size(),
         };
-        Image::new(icon.im_id(), size).build(ui);
+        ui.image(icon, size);
         ui.same_line();
     }
-    pub fn draw_open_path_button<S: AsRef<str> + Display>(ui: &Ui, text: S, path: &Path) {
+    pub fn draw_open_path_button<'ui, U, S>(ui: &mut U, text: S, path: &Path)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+        S: ImStrExt,
+    {
         Self::draw_open_button(
             ui,
             text,
@@ -411,123 +429,126 @@ impl RenderState {
             || rt::relative_path(path).display(),
         )
     }
-    pub fn draw_open_button<S, O, TT>(
-        ui: &Ui,
+    pub fn draw_open_button<'ui, U, S, O, TT>(
+        ui: &mut U,
         text: S,
         openable: impl FnOnce() -> O,
         tooltip: impl FnOnce() -> TT,
     ) where
-        S: AsRef<str> + Display,
-        O: Into<String> + Display,
+        U: ?Sized + ImDrawWindow<'ui>,
+        S: ImStrExt,
+        O: Display + Into<String>,
         TT: Display,
     {
-        if ui.button(&text) {
+        let text = text.im_into_imstr();
+        let imstr = &text;
+        if ui.button(imstr) {
             let openable = openable();
-            log::debug!("Triggered open {openable} for {text}");
+            let display = ImStrExt::im_as_display(&imstr);
+            log::debug!("Triggered open {openable} for {display}");
             let openable_display = openable.to_string();
-            let text_display = text.to_string();
-            let entry_name = fl!("open-error", kind = text_display, path = openable_display);
-            Controller::try_send(ControllerEvent::OpenOpenable(entry_name.clone(), openable.into()));
+            let text_display = text.im_into_string();
+            let entry_name = fl!("open-error", kind = &text_display, path = &openable_display);
+            Controller::try_send(ControllerEvent::OpenOpenable(entry_name.into(), openable.into()));
         } else if ui.is_item_hovered() {
             let tooltip = tooltip().to_string();
-            ui.tooltip_text(fl!("location", path = tooltip));
+            ui.tooltip_text(fl!("location", path = &tooltip));
         }
     }
 
-    pub fn push_font<'a>(font: &str, ui: &'a Ui) -> Option<nexus::imgui::FontStackToken<'a>> {
-        let imfont_pointer = rt::read_nexus_link()
-            .ok()
-            .and_then(|nexus_link| match font {
-                #[cfg(feature = "extension-nexus")]
-                "big" => Some(nexus_link.font_big),
-                #[cfg(feature = "extension-nexus")]
-                "ui" => Some(nexus_link.font_ui),
-                #[cfg(feature = "extension-nexus")]
-                "font" => Some(nexus_link.font),
-                _ => None,
-            })
-            .and_then(|font| unsafe { Self::font_from_raw(font) });
-        imfont_pointer.map(|font| ui.push_font(font.id()))
-    }
-    pub fn font_text(font: &str, ui: &Ui, text: &str) {
-        let font_handle = Self::push_font(font, ui);
-        ui.text_wrapped(text);
-        drop(font_handle);
-    }
-    pub fn offset_font_text(
-        font: &str,
-        ui: &Ui,
-        position: Vec2,
-        bounding_size: Vec2,
+    pub fn offset_font_text<'ui, U>(
+        font: Option<NexusLinkFont>,
+        ui: &mut U,
+        position: ImPos2,
+        bounding_size: ImSize2,
         shadow: bool,
         text: &str,
-    ) {
-        let font_handle = Self::push_font(font, ui);
-        let text_size = Vec2::from(ui.calc_text_size(text));
+    ) where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        let _font_token = ui.push_font_opt(font);
+        let text_size = ui.calc_text_size(text);
         let cursor_pos =
             Alignment::get_position(Alignment::CENTRE_MIDDLE, position, bounding_size, text_size);
         if shadow {
-            let cursor_pos_shadow = cursor_pos + Vec2 { x: 2.0, y: text_size.y / 8.0 };
-            ui.set_cursor_pos(cursor_pos_shadow.into());
-            let token = ui.push_style_color(StyleColor::Text, [0.0, 0.0, 0.0, 1.0]);
-            ui.text(text);
-            token.pop();
+            let cursor_pos_shadow = cursor_pos + ImVec2 { x: 2.0, y: text_size.height / 8.0 };
+            ui.set_cursor_pos(cursor_pos_shadow);
+            ui.text_unformatted_coloured(text, ImColourIndex::V4_BLACK);
         }
-        ui.set_cursor_pos(cursor_pos.into());
+        ui.set_cursor_pos(cursor_pos);
         ui.text(text);
-        drop(font_handle);
     }
 
-    unsafe fn font_from_raw<'a>(font: *const nexus::imgui::sys::ImFont) -> Option<&'a Font> {
-        match font {
-            p if p.is_null() => None,
-            imfont_pointer => Some(Font::from_raw(&*imfont_pointer)),
-        }
-    }
-
-    fn handle_alert(&mut self, ui: &Ui) {
+    fn handle_alert<'ui, U>(&mut self, ui: &mut U)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         if let Some(alert) = &self.alert {
             let message = &alert.message;
-            let imfont = match rt::read_nexus_link() {
-                #[cfg(feature = "extension-nexus")]
-                Ok(nexus_link) => unsafe { Self::font_from_raw(nexus_link.font_big) },
-                _ => None,
-            };
-            Self::render_alert(ui, ui.io(), message, imfont);
+            let _token = NexusLinkFont::Big.push_font(ui);
+            let font_scale = _token.as_ref().map(|_| {
+                let TODO = /*big_scale*/ 0u32;
+                1.0
+            });
+            Self::render_alert(ui, message, font_scale);
         }
     }
-    pub fn render_alert(ui: &Ui, io: &Io, text: &String, font: Option<&Font>) {
-        use WindowFlags;
-        let font_handle = font.map(|font| ui.push_font(font.id()));
-        let font_scale = font.map(|f| f.scale).unwrap_or(1.0);
-        let fb_scale = io.display_framebuffer_scale;
-        let [text_width, text_height] = ui.calc_text_size(text);
-        let text_width = text_width * font_scale;
-        let offset_x = text_width / 2.0;
-        let [game_width, game_height] = io.display_size;
-        let centre_x = game_width / 2.0;
-        let centre_y = game_height / 2.0;
-        let above_y = game_height * 0.2;
-        let text_x = (centre_x - offset_x) * fb_scale[0];
-        let text_y = (centre_y - above_y) * fb_scale[1];
-        Window::new("TAIMIHUD_ALERT_AREA")
-            .flags(
-                WindowFlags::ALWAYS_AUTO_RESIZE
-                    | WindowFlags::NO_TITLE_BAR
-                    | WindowFlags::NO_RESIZE
-                    | WindowFlags::NO_BACKGROUND
-                    | WindowFlags::NO_MOVE
-                    | WindowFlags::NO_SCROLLBAR
-                    | WindowFlags::NO_INPUTS
-                    | WindowFlags::NO_FOCUS_ON_APPEARING
-                    | WindowFlags::NO_BRING_TO_FRONT_ON_FOCUS,
-            )
-            .position([text_x, text_y], Condition::Always)
-            .size([text_width * 1.25, text_height * 2.0], Condition::Always)
-            .build(ui, || {
-                ui.text(text);
-            });
-        drop(font_handle);
+    /// TODO: imw::Window::PIVOT_CENTRE probably makes some calculations here unnecessary
+    pub fn render_alert<'ui, U>(ui: &mut U, text: &String, font_scale: Option<f32>)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        let font_scale = font_scale.unwrap_or(1.0);
+        let (game, fb_scale) = ui.im_io_display_size();
+        let mut tsize = ui.calc_text_size(text);
+        tsize.width *= font_scale;
+        let text_pos = {
+            let centre = game.to_vector() * 0.5;
+            let offset_x = tsize.width / 2.0;
+            let above_y = game.height * 0.2;
+            let pos = centre - ImVec2::new(offset_x, above_y);
+            (pos * fb_scale).to_point().cast::<ImSpace>()
+        };
+        ui.window_prepare_pos(text_pos, ImCondition::Always, imw::Window::PIVOT_TOPLEFT);
+        ui.window_prepare_size(
+            tsize.cast::<ImSpace>() * ImSize2::new(1.25, 2.0),
+            ImCondition::Always,
+        );
+        let window_flags = match ui.imgui_version_num() {
+            #[cfg(taimi_imgui = "180")]
+            Some(im180::VERSION_NUM) => {
+                let flags = im180::sys::ImGuiWindowFlags_AlwaysAutoResize
+                    | im180::sys::ImGuiWindowFlags_NoTitleBar
+                    | im180::sys::ImGuiWindowFlags_NoResize
+                    | im180::sys::ImGuiWindowFlags_NoBackground
+                    | im180::sys::ImGuiWindowFlags_NoMove
+                    | im180::sys::ImGuiWindowFlags_NoScrollbar
+                    | im180::sys::ImGuiWindowFlags_NoInputs
+                    | im180::sys::ImGuiWindowFlags_NoFocusOnAppearing
+                    | im180::sys::ImGuiWindowFlags_NoBringToFrontOnFocus
+                    | im180::sys::ImGuiWindowFlags_NoSavedSettings;
+                imw::DynArgsWindow::new(Some(flags))
+            },
+            #[cfg(taimi_imgui = "192")]
+            Some(im192::VERSION_NUM) => {
+                let flags = im192::sys::ImGuiWindowFlags_AlwaysAutoResize
+                    | im192::sys::ImGuiWindowFlags_NoTitleBar
+                    | im192::sys::ImGuiWindowFlags_NoResize
+                    | im192::sys::ImGuiWindowFlags_NoBackground
+                    | im192::sys::ImGuiWindowFlags_NoMove
+                    | im192::sys::ImGuiWindowFlags_NoScrollbar
+                    | im192::sys::ImGuiWindowFlags_NoInputs
+                    | im192::sys::ImGuiWindowFlags_NoFocusOnAppearing
+                    | im192::sys::ImGuiWindowFlags_NoBringToFrontOnFocus
+                    | im192::sys::ImGuiWindowFlags_NoSavedSettings;
+                imw::DynArgsWindow::new(Some(flags))
+            },
+            _ => Default::default(),
+        };
+        let window = ui.begin_window_with(c"TAIMIHUD_ALERT_AREA", None, window_flags);
+        if let Some(_window) = imw::BeginVisible::pop_open(window) {
+            ui.text(text);
+        }
     }
 
     fn quit(&mut self) {
@@ -698,7 +719,10 @@ impl RenderState {
         if let Some(mut state) = Self::lock() {}
     }
 
-    pub fn render_ui(ui: &Ui) {
+    pub fn render_ui<'ui, U>(ui: &mut U, context: DrawContextInput<'ui>)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let is_running = Self::is_running();
 
         if is_running {
@@ -712,7 +736,7 @@ impl RenderState {
         };
 
         let is_running = match is_running {
-            true => state.draw(ui),
+            true => state.draw(ui, context),
             false => false,
         };
 
@@ -722,17 +746,32 @@ impl RenderState {
         }
     }
 
-    pub fn render_options(ui: &Ui, host: AddonHostName) -> bool {
+    pub fn render_options<'ui, U>(ui: &mut U, context: DrawContextInput<'ui>, host: AddonHostName) -> bool
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let mut lock = Self::lock();
         let state = match &mut *lock {
             None => return false,
             Some(state) => state,
         };
+
         let mut state_errors = Default::default();
+        let mut container_state = state.container_state.clone();
+        let mut context = context.new_root_scope(&mut container_state);
+
+        let slot = match () {
+            #[cfg(feature = "space")]
+            _ => (&mut state.engine,),
+            #[cfg(not(feature = "space"))]
+            _ => (),
+        };
         state.primary_window.draw_tabs(
             ui,
+            &mut context,
             Some(host),
             &mut state.machine,
+            slot,
             &mut state.timer_window,
             &mut state_errors,
             false,
@@ -740,17 +779,45 @@ impl RenderState {
         true
     }
     #[cfg(feature = "extension-arcdps")]
-    pub fn render_options_fallback(ui: &Ui, host: AddonHostName) {
+    pub fn render_options_arc<'ui, U>(
+        ui: &mut U,
+        context: DrawContextInput<'ui>,
+        host: AddonHostName,
+    ) -> bool
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        let mut lock = Self::lock();
+        let state = match &mut *lock {
+            None => return false,
+            Some(state) => state,
+        };
+        let mut container_state = state.container_state.clone();
+        let mut context = context.new_root_scope(&mut container_state);
+
+        state.primary_window.arc_tab.ui_options(ui, &mut context, host);
+        true
+    }
+    #[cfg(feature = "extension-arcdps")]
+    pub fn render_options_fallback<'ui, U>(ui: &mut U, context: DrawContextInput<'ui>, host: AddonHostName)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         use crate::{render::arc::ArcRenderState, settings::state::BootstrapState};
 
-        if ArcRenderState::ui_options_disabled(ui, host) {
+        let mut container_state = Default::default();
+        let mut context = context.new_root_scope(&mut container_state);
+        if ArcRenderState::ui_options_disabled(ui, &mut context, host) {
             let res = BootstrapState::read_with(|s| s.start_save())
                 .and_then(|save| BootstrapState::write_file(&save));
             rt::log::error_ok(res);
         }
     }
     #[cfg(not(feature = "extension-arcdps"))]
-    pub fn render_options_fallback(ui: &Ui, _host: AddonHostName) {
+    pub fn render_options_fallback<'ui, U>(ui: &mut U, host: AddonHostName)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         ui.text("TODO: offline");
     }
 
@@ -777,33 +844,48 @@ pub struct Alignment {}
 
 #[allow(dead_code)]
 impl Alignment {
-    pub const LEFT_TOP: Vec2 = Vec2::new(0.0, 0.0);
-    pub const LEFT_MIDDLE: Vec2 = Vec2::new(0.0, 0.5);
-    pub const LEFT_BOTTOM: Vec2 = Vec2::new(0.0, 1.0);
-    pub const CENTRE_TOP: Vec2 = Vec2::new(0.5, 0.0);
-    pub const CENTRE_MIDDLE: Vec2 = Vec2::new(0.5, 0.5);
-    pub const CENTRE_BOTTOM: Vec2 = Vec2::new(0.5, 1.0);
-    pub const RIGHT_TOP: Vec2 = Vec2::new(1.0, 0.0);
-    pub const RIGHT_MIDDLE: Vec2 = Vec2::new(1.0, 0.5);
-    pub const RIGHT_BOTTOM: Vec2 = Vec2::new(1.0, 1.0);
+    pub const LEFT_TOP: ImVec2 = ImVec2::new(0.0, 0.0);
+    pub const LEFT_MIDDLE: ImVec2 = ImVec2::new(0.0, 0.5);
+    pub const LEFT_BOTTOM: ImVec2 = ImVec2::new(0.0, 1.0);
+    pub const CENTRE_TOP: ImVec2 = ImVec2::new(0.5, 0.0);
+    pub const CENTRE_MIDDLE: ImVec2 = ImVec2::new(0.5, 0.5);
+    pub const CENTRE_BOTTOM: ImVec2 = ImVec2::new(0.5, 1.0);
+    pub const RIGHT_TOP: ImVec2 = ImVec2::new(1.0, 0.0);
+    pub const RIGHT_MIDDLE: ImVec2 = ImVec2::new(1.0, 0.5);
+    pub const RIGHT_BOTTOM: ImVec2 = ImVec2::new(1.0, 1.0);
 
-    pub fn get_position(scaler: Vec2, position: Vec2, bounding_size: Vec2, element_size: Vec2) -> Vec2 {
-        let scaled_size = (bounding_size - element_size) * scaler;
+    pub fn get_position(
+        scaler: ImVec2,
+        position: ImPos2,
+        bounding_size: ImSize2,
+        element_size: ImSize2,
+    ) -> ImPos2 {
+        let scaled_size = (bounding_size - element_size).to_vector() * scaler;
         position + scaled_size
     }
 
-    pub fn set_cursor(ui: &Ui, scaler: Vec2, position: Vec2, bounding_size: Vec2, element_size: Vec2) {
-        ui.set_cursor_pos(Self::get_position(scaler, position, bounding_size, element_size).into());
+    pub fn set_cursor<'ui, U>(
+        ui: &mut U,
+        scaler: ImVec2,
+        position: ImPos2,
+        bounding_size: ImSize2,
+        element_size: ImSize2,
+    ) where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        ui.set_cursor_pos(Self::get_position(scaler, position, bounding_size, element_size));
     }
 
-    pub fn set_cursor_with_offset(
-        ui: &Ui,
-        scaler: Vec2,
-        position: Vec2,
-        bounding_size: Vec2,
-        element_size: Vec2,
-        offset: Vec2,
-    ) {
+    pub fn set_cursor_with_offset<'ui, U>(
+        ui: &mut U,
+        scaler: ImVec2,
+        position: ImPos2,
+        bounding_size: ImSize2,
+        element_size: ImSize2,
+        offset: ImVec2,
+    ) where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let position = position + offset;
         Self::set_cursor(ui, scaler, position, bounding_size, element_size);
     }

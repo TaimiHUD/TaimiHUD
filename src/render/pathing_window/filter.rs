@@ -1,7 +1,7 @@
 use {
     super::PathingWindowState,
     crate::{
-        exports::runtime::imgui::Ui,
+        render::element::prelude::*,
         settings::state::ui::pathing::{PathingFilterFlags, PathingSearchFlags},
         with_i18n,
     },
@@ -96,14 +96,29 @@ impl Default for PathingSearchState {
 }
 
 impl PathingWindowState {
-    pub fn draw_filters(&mut self, ui: &Ui) -> bool {
-        let pushy = ui.push_id("pathing-search");
-        let mut search_dirty = ui
-            .input_text("", &mut self.search_state.buffer)
-            .hint("Search")
-            .build();
+    pub fn draw_filters<'ui, U>(&mut self, ui: &mut U) -> bool
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        let pushy = ui.push_id(c"pathing-search");
+        let flags = match ui.imgui_version_num() {
+            #[cfg(taimi_imgui = "180")]
+            Some(im180::VERSION_NUM) =>
+                Some(imw::InputText::IM180_FLAGS_PRESET & !im180::sys::ImGuiInputTextFlags_EnterReturnsTrue),
+            #[cfg(taimi_imgui = "192")]
+            Some(im192::VERSION_NUM) =>
+                Some(imw::InputText::IM192_FLAGS_PRESET & !im192::sys::ImGuiInputTextFlags_EnterReturnsTrue),
+            _ => None,
+        };
+        let mut search_dirty = with_i18n!("pathing-search", |hint| ui.input_text_managed(
+            c"",
+            &mut self.search_state.buffer,
+            64,
+            Some(hint),
+            flags,
+        ));
         ui.same_line();
-        if ui.button("X") {
+        if ui.button(c"X") {
             self.search_state.clear();
             self.ui_state.write_if(|s| {
                 s.search.query.clear();
@@ -111,7 +126,7 @@ impl PathingWindowState {
             });
         }
         if ui.is_item_hovered() {
-            with_i18n!("searchbar-clear", |msg| ui.tooltip_text(msg));
+            with_i18n!("pathing-search-clear", |msg| ui.tooltip_text(msg));
         }
         let search_flags = PathingSearchFlags::all()
             .iter()
@@ -124,7 +139,7 @@ impl PathingWindowState {
                 flag
             ));
         }
-        pushy.pop();
+        pushy.end();
         ui.dummy([4.0; 2]);
         with_i18n!("filter-options", |msg| ui.text(msg));
         let filters = PathingFilterFlags::USER
