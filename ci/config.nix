@@ -185,6 +185,7 @@ in {
           ];
           cache.inputs = [
             taimiHUD.cargoArtifacts
+            legacyPackages.fenixToolchain
             legacyPackages.git-hooks.package
             legacyPackages.formatter
           ];
