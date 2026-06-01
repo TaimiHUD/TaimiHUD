@@ -43,7 +43,7 @@ ftl_value() {
 }
 
 fl_report() {
-	local fl_langs fl_lang fl_key fl_value fl_fallback_count \
+	local fl_langs fl_lang fl_key fl_value fl_value_en fl_fallback_count fl_fallback_keys \
 		fl_keys all_keys en_keys report_fmt=${FL_REPORT_FMT-txt}
 	if [[ $# -gt 0 ]]; then
 		fl_langs=($@)
@@ -52,19 +52,43 @@ fl_report() {
 	fi
 	en_keys=($(fl_keys en))
 	for fl_lang in "${fl_langs[@]}"; do
+		fl_fallback_keys=()
 		if [[ $fl_lang = en ]]; then
 			fl_keys=("${en_keys[@]}");
 		else
 			fl_keys=($(fl_keys "$fl_lang"))
+
+			all_keys=$(printf ' %s ' "${fl_keys[@]}")
+			for fl_key in "${en_keys[@]}"; do
+				if [[ $all_keys != *" $fl_key "* ]]; then
+					fl_fallback_keys+=("$fl_key")
+				fi
+			done
 		fi
 		case $report_fmt in
 			txt)
 				printf ':: %s (%d keys)\n' "$fl_lang" "${#fl_keys[@]}"
 				;;
 			html)
-				printf '<h2>%s</h2>\n' "$fl_lang"
+				printf '<h2 id="%s">%s</h2>\n' "$fl_lang" "$fl_lang"
 				printf '<details><summary>%d keys</summary><ul>\n' "${#fl_keys[@]}"
-				printf '<li><pre style="display:inline;">%s</pre></li>\n' "${fl_keys[@]}"
+				if [[ $fl_lang != en && -n ${FL_REPORT_VALUES-} ]]; then
+					for fl_key in "${fl_keys[@]}"; do
+						IFS=$'\n' fl_value_en=($(fl_value en "$fl_key"))
+						IFS=$'\n' fl_value=($(fl_value $fl_lang "$fl_key"))
+						if [[ -n ${fl_value_en[*]-} && $fl_value = $fl_value_en ]]; then
+							fl_fallback_keys+=("$fl_key")
+						else
+							printf '<li><figure><figcaption><pre style="display:inline;">%s =</pre></figcaption>\n<blockquote>' "$fl_key"
+							if [[ "${fl_value[*]}" != *'https://'* ]]; then
+								printf '%s<br/>' "${fl_value[@]}"
+							fi
+							printf '</blockquote></figure></li>\n'
+						fi
+					done
+				else
+					printf '<li><pre style="display:inline;">%s</pre></li>\n' "${fl_keys[@]}"
+				fi
 				printf '</ul></details>\n'
 				;;
 			*)
@@ -85,7 +109,7 @@ fl_report() {
 		esac
 		fl_fallback_count=0
 		all_keys=$(printf ' %s ' "${fl_keys[@]}")
-		for fl_key in "${en_keys[@]}"; do
+		for fl_key in "${fl_fallback_keys[@]}"; do
 			if [[ $all_keys = *" $fl_key "* ]]; then
 				continue
 			fi
