@@ -1,12 +1,8 @@
 use {
     crate::{
-        exports::runtime::{
-            bindings::{self, Control, KeyIntercept},
-            imgui,
-        },
-        fl,
+        exports::runtime::bindings::{self, Control, KeyIntercept},
+        render::element::prelude::*,
         settings::{state::SaveState, ArcVk},
-        with_i18n,
     },
     anyhow::Context,
     std::{
@@ -22,11 +18,14 @@ pub struct KeyBindSelection {
 }
 
 impl KeyBindSelection {
-    pub fn draw_gamebind<'a>(
+    pub fn draw_gamebind<'a, 'ui, U>(
         &'a mut self,
-        ui: &imgui::Ui,
+        ui: &mut U,
         control: Control,
-    ) -> Option<&'a mut KeyBindState> {
+    ) -> Option<&'a mut KeyBindState>
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let default_key = bindings::DEFAULT_GAMEBINDS
             .get(&control.into())
             .copied()
@@ -41,7 +40,7 @@ impl KeyBindSelection {
         let key = i32::from(control) as usize;
 
         let keyname = control.label_ident();
-        let _id_token = ui.push_id(&keyname);
+        let _id_token = ui.push_id(keyname);
 
         with_i18n!(keyname, |msg| self.draw_bind(
             ui,
@@ -52,23 +51,35 @@ impl KeyBindSelection {
         ))
     }
 
-    pub fn draw_keybind<'a, F: FnOnce(&ArcVk)>(
+    pub fn draw_keybind<'a, 'ui, F, U>(
         &'a mut self,
-        ui: &imgui::Ui,
+        ui: &mut U,
         vk: &'static ArcVk,
         action: Option<F>,
-    ) -> Option<&'a mut KeyBindState> {
+    ) -> Option<&'a mut KeyBindState>
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+        F: FnOnce(&ArcVk),
+    {
         let _id_token = ui.push_id(vk.id);
-        let action = move |name: &str| match action {
-            Some(action) =>
-                if ui.button(name) {
-                    action(vk)
+        fn act<'ui, U>(ui: &mut U, action: bool, name: impl ImStrExt) -> bool
+        where
+            U: ?Sized + ImDrawWindow<'ui>,
+        {
+            match action {
+                true => ui.button(name),
+                false => {
+                    ui.text(name);
+                    false
                 },
-            None => ui.text(name),
+            }
+        }
+        let act = match vk.id.strip_prefix(ArcVk::TIMER_KEY_TRIGGER_PREFIX) {
+            Some(id) => act(ui, action.is_some(), fl!("timer-key-trigger", id = id)),
+            None => act(ui, action.is_some(), fl!(vk.id)),
         };
-        match vk.id.strip_prefix(ArcVk::TIMER_KEY_TRIGGER_PREFIX) {
-            Some(id) => action(&fl!("timer-key-trigger", id = id)),
-            None => with_i18n!(vk.id, |name| action(&name)),
+        if let (true, Some(action)) = (act, action) {
+            action(vk);
         }
         ui.same_line();
 
@@ -87,9 +98,9 @@ impl KeyBindSelection {
         ))
     }
 
-    pub fn draw_bind<'a>(
+    pub fn draw_bind<'a, 'ui, U: ?Sized + ImDrawWindow<'ui>>(
         &'a mut self,
-        ui: &imgui::Ui,
+        ui: &mut U,
         key: usize,
         current: KeyInput,
         default: KeyInput,
@@ -107,7 +118,11 @@ impl KeyBindSelection {
         changed.then_some(binding_buffer)
     }
 
-    pub fn do_keybind<F: FnOnce(&ArcVk)>(&mut self, ui: &imgui::Ui, vk: &'static ArcVk, action: Option<F>) {
+    pub fn do_keybind<'ui, U, F>(&mut self, ui: &mut U, vk: &'static ArcVk, action: Option<F>)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+        F: FnOnce(&ArcVk),
+    {
         let changed = self.draw_keybind(ui, vk, action);
 
         if let Some(new) = changed {
@@ -130,7 +145,10 @@ impl KeyBindSelection {
         }
     }
 
-    pub fn do_gamebind(&mut self, ui: &imgui::Ui, control: Control) {
+    pub fn do_gamebind<'ui, U>(&mut self, ui: &mut U, control: Control)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let changed = self.draw_gamebind(ui, control);
 
         if let Some(new) = changed {
@@ -154,8 +172,9 @@ impl KeyBindSelection {
             }
         }
     }
-    pub fn do_gamebinds<I: IntoIterator>(&mut self, ui: &imgui::Ui, controls: I)
+    pub fn do_gamebinds<'ui, U, I: IntoIterator>(&mut self, ui: &mut U, controls: I)
     where
+        U: ?Sized + ImDrawWindow<'ui>,
         I::Item: Into<Control>,
     {
         for control in controls {
@@ -252,19 +271,30 @@ impl KeyBindState {
         binding_buffer
     }
 
-    pub fn draw_input(&mut self, ui: &imgui::Ui, key: usize, label: &str) -> bool {
+    pub fn draw_input<'ui, U>(&mut self, ui: &mut U, key: usize, label: &str) -> bool
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let mut changed = {
-            let input = ui
-                .input_text(label, &mut self.name_buffer)
-                .read_only(self.configuring)
-                .auto_select_all(true)
-                .always_insert_mode(true)
-                .enter_returns_true(true)
-                .no_undo_redo(true)
-                .no_horizontal_scroll(true);
+            let flags = match self.configuring {
+                true => match ui.imgui_version_num() {
+                    #[cfg(taimi_imgui = "180")]
+                    Some(im180::VERSION_NUM) => imw::InputText::IM180_ARGS_READ_ONLY,
+                    #[cfg(taimi_imgui = "192")]
+                    Some(im192::VERSION_NUM) => imw::InputText::IM180_ARGS_READ_ONLY,
+                    _ => Default::default(),
+                },
+                false => Default::default(),
+            };
+            self.name_buffer.reserve(8);
             match &self.default_name {
-                Some(name) => input.hint(&name[..]).build(),
-                _ => with_i18n!("unset", |unbound| input.hint(&unbound[..]).build()),
+                Some(name) => ui.input_text_with(label, &mut self.name_buffer, Some(name), flags),
+                _ => with_i18n!("unset", |unbound| ui.input_text_with(
+                    label,
+                    &mut self.name_buffer,
+                    Some(unbound),
+                    flags
+                )),
             }
         };
 
@@ -274,7 +304,7 @@ impl KeyBindState {
             }));
             self.clear_cache();
         }
-        if !changed && ui.is_item_clicked_with_button(imgui::MouseButton::Right) {
+        if !changed && ui.is_item_right_clicked() {
             changed = true;
             self.clear();
             self.pending.get_or_insert(Ok(KeyInput::EMPTY));
@@ -289,7 +319,10 @@ impl KeyBindState {
         changed
     }
 
-    pub fn draw_bind(&mut self, ui: &imgui::Ui, any_configuring: bool) -> bool {
+    pub fn draw_bind<'ui, U>(&mut self, ui: &mut U, any_configuring: bool) -> bool
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         match (self.configuring, any_configuring) {
             (true, _) => self.draw_bind_prompt(ui),
             (false, false) => {
@@ -303,13 +336,17 @@ impl KeyBindState {
         }
     }
 
-    pub fn draw_bind_prompt(&mut self, ui: &imgui::Ui) -> bool {
+    pub fn draw_bind_prompt<'ui, U>(&mut self, ui: &mut U) -> bool
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        let ui = &mut { ui };
         with_i18n!("press-key", |msg| match bindings::held_mods() {
             mods if mods.is_empty() => ui.text_disabled(&msg),
             mods => {
                 ui.text(&msg);
                 ui.same_line();
-                ui.text(format!(":: {mods}+"));
+                ui.text(im_fmt!(":: {mods}+"));
             },
         });
         match KeyIntercept::intercept_take() {
@@ -337,7 +374,10 @@ impl KeyBindState {
         false
     }
 
-    pub fn draw_bind_button(&mut self, ui: &imgui::Ui) {
+    pub fn draw_bind_button<'ui, U>(&mut self, ui: &mut U)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         debug_assert!(!KeyIntercept::intercept_ready());
         if with_i18n!("bind", |label| ui.button(&label)) {
             KeyIntercept::intercept_restart();

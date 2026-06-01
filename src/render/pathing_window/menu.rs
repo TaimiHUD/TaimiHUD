@@ -2,17 +2,19 @@ use {
     super::PathingWindowState,
     crate::{
         controller::pathing::{PathingController, PathingEvent},
+        render::element::prelude::*,
         space::{engine::Engine, pack::ActivePack},
         with_i18n,
     },
-    glam::Vec2,
-    nexus::imgui::{Id, MenuItem, MouseButton, StyleVar, Ui},
     taimi_pack::Category,
 };
 
 type CategoryMenuContext = (Vec<u32>, bool);
 impl PathingWindowState {
-    pub fn draw_context_menu(&mut self, ui: &Ui, engine: &mut Engine) {
+    pub fn draw_context_menu<'ui, U>(&mut self, ui: &mut U, engine: &mut Engine)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         self.draw_context_menu_packs(ui, engine, false);
         if !engine.packs.loaded_packs.is_empty() {
             Self::dead_zone_spacing(ui, false);
@@ -22,14 +24,17 @@ impl PathingWindowState {
             }
         }
     }
-    pub fn draw_context_menu_packs(&mut self, ui: &Ui, engine: &mut Engine, filtered: bool) {
+    pub fn draw_context_menu_packs<'ui, U>(&mut self, ui: &mut U, engine: &mut Engine, filtered: bool)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let _id = ui.push_id(match filtered {
-            false => "packmenu-active",
-            true => "packmenu-all",
+            false => c"packmenu-active",
+            true => c"packmenu-all",
         });
         let mut was_multi_root = None;
         for (pack_idx, pack) in engine.packs.loaded_packs.values_mut().enumerate() {
-            let _id_pack = ui.push_id(Id::Int(pack_idx as _));
+            let _id_pack = ui.push_id(pack_idx);
             if !filtered && pack.available_categories.is_empty() {
                 pack.update_available_categories();
             }
@@ -51,7 +56,7 @@ impl PathingWindowState {
                 });
             if pack.pack.categories.root_categories.is_empty() {
                 if filtered {
-                    MenuItem::new(&pack.pack.name).enabled(false).build(ui);
+                    ui.menu_item_enabled(&pack.pack.name, true, false);
                 }
                 continue
             }
@@ -80,7 +85,7 @@ impl PathingWindowState {
                     state,
                     act,
                     &mut ctx,
-                    Some(&mut |part| {
+                    Some(&mut |ui, part| {
                         if part == 0 {
                             ui.text(&pack.pack.name);
                         }
@@ -103,15 +108,18 @@ impl PathingWindowState {
             }
         }
     }
-    pub fn draw_context_menu_cat_leaf(
-        ui: &Ui,
+    pub fn draw_context_menu_cat_leaf<'ui, U>(
+        ui: &mut U,
         cat_index: usize,
         cat: &Category,
         filtered: Option<bool>,
         state: Option<bool>,
         _ctx: &mut CategoryMenuContext,
-    ) -> (bool, bool) {
-        let _id = ui.push_id(Id::Int(cat_index as _));
+    ) -> (bool, bool)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        let _id = ui.push_id(cat_index);
         Self::dead_zone_spacing(ui, false);
         let decorative = cat.is_separator();
         let is_copyable = cat
@@ -120,22 +128,27 @@ impl PathingWindowState {
             .as_ref()
             .and_then(|i| i.copy_value.as_ref())
             .is_some();
-        let item = MenuItem::new(cat.display_name())
-            .selected(state.unwrap_or(false))
-            .enabled(!decorative || is_copyable);
+        let mk_menu = |ui: &mut U, shortcut: Option<&mut dyn ImStr>| {
+            ui.menu_item_with(
+                cat.display_name(),
+                state.unwrap_or(false),
+                shortcut,
+                !decorative || is_copyable,
+            )
+        };
         let mut toggled = match () {
             _ if cat.is_separator() && cat.display_name().is_empty() => {
                 ui.separator();
                 Self::dead_zone_spacing(ui, false);
                 return (false, false)
             },
-            _ if is_copyable => with_i18n!("copy", |label| item.shortcut(&label).build(ui)),
-            _ if ActivePack::category_has_tooltip(cat) => item.shortcut("?").build(ui),
+            _ if is_copyable => with_i18n!("copy", |label| mk_menu(ui, Some(&mut { label }))),
+            _ if ActivePack::category_has_tooltip(cat) => mk_menu(ui, Some(&mut c"?")),
             _ if filtered == Some(true) && !decorative =>
-                with_i18n!("inactive", |label| item.shortcut(&label).build(ui)),
-            _ => item.build(ui),
+                with_i18n!("inactive", |label| mk_menu(ui, Some(&mut { label }))),
+            _ => mk_menu(ui, None),
         };
-        if ui.is_item_clicked_with_button(MouseButton::Right) {
+        if ui.is_item_right_clicked() {
             toggled |= true;
         }
         let hovered = ui.is_item_hovered();
@@ -144,16 +157,19 @@ impl PathingWindowState {
         }
         (toggled, hovered)
     }
-    pub fn draw_context_menu_cat_branch(
-        ui: &Ui,
+    pub fn draw_context_menu_cat_branch<'ui, U>(
+        ui: &mut U,
         pack: &ActivePack,
         cat_index: usize,
         cat: &Category,
         filtered: Option<bool>,
         state: Option<bool>,
         ctx: &mut CategoryMenuContext,
-    ) -> (bool, bool) {
-        let _id = ui.push_id(Id::Int(cat_index as _));
+    ) -> (bool, bool)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        let _id = ui.push_id(cat_index);
         Self::dead_zone_spacing(ui, true);
 
         let tooltip_hint = match ActivePack::category_has_tooltip(cat) {
@@ -168,8 +184,8 @@ impl PathingWindowState {
         };
         // TODO: manually igSetNextWindowSize when opening a new category
         // because it seems to "inherit" the last menu's size and that's dumb
-        let menu_start = Vec2::from_array(ui.cursor_pos());
-        let menu_size = Vec2::from_array(ui.calc_text_size(cat.display_name()));
+        let menu_start = ui.cursor_pos();
+        let menu_size = ui.calc_text_size(cat.display_name());
         let menu = ui.begin_menu_with_enabled(cat.display_name(), true);
         let mut toggled = false;
         if let Some(_menu) = &menu {
@@ -178,28 +194,31 @@ impl PathingWindowState {
         drop(menu);
         toggled |= ui.is_item_clicked();
         let hovered = ui.is_item_hovered();
-        if ui.is_item_clicked_with_button(MouseButton::Right) {
+        if ui.is_item_right_clicked() {
             toggled |= true;
         }
         if !tooltip_hint.is_empty() || !state_postfix.is_empty() {
             let checkpoint = ui.cursor_pos();
-            ui.set_cursor_pos((menu_start + menu_size.with_y(0.0)).into());
-            ui.text(format!(" {tooltip_hint}{state_postfix}"));
+            ui.set_cursor_pos(menu_start + menu_size.with_y(0.0).to_vector());
+            ui.text(im_fmt!(" {tooltip_hint}{state_postfix}"));
             ui.set_cursor_pos(checkpoint);
         }
 
         Self::dead_zone_spacing(ui, true);
         (toggled, hovered)
     }
-    pub fn draw_context_menu_cat_children(
-        ui: &Ui,
+    pub fn draw_context_menu_cat_children<'ui, U>(
+        ui: &mut U,
         pack: &ActivePack,
         _cat_index: usize,
         cat: &Category,
         filtered: Option<bool>,
         state: Option<bool>,
         ctx: &mut CategoryMenuContext,
-    ) -> bool {
+    ) -> bool
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let &mut (_, ctx_filtered, ..) = ctx;
         let mut toggled = false;
 
@@ -297,13 +316,17 @@ impl PathingWindowState {
                     false => "enable",
                 };
                 toggled |= with_i18n!(label, |label| {
-                    let item = MenuItem::new(&label);
                     match filtered {
-                        Some(true) => with_i18n!("inactive", |off_map| item.shortcut(&off_map).build(ui)),
-                        _ => item.build(ui),
+                        Some(true) => with_i18n!("inactive", |off_map| ui.menu_item_with(
+                            label,
+                            false,
+                            Some(off_map),
+                            true
+                        )),
+                        _ => ui.menu_item(label, false),
                     }
                 });
-                if ui.is_item_clicked_with_button(MouseButton::Right) {
+                if ui.is_item_right_clicked() {
                     toggled |= true;
                 }
                 if ui.is_item_hovered() {
@@ -315,8 +338,8 @@ impl PathingWindowState {
 
         toggled
     }
-    pub fn draw_context_menu_cat(
-        ui: &Ui,
+    pub fn draw_context_menu_cat<'ui, U>(
+        ui: &mut U,
         inline: bool,
         pack: &ActivePack,
         cat_index: usize,
@@ -324,7 +347,10 @@ impl PathingWindowState {
         filtered: Option<bool>,
         state: Option<bool>,
         ctx: &mut CategoryMenuContext,
-    ) -> (bool, bool) {
+    ) -> (bool, bool)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let &mut (_, ctx_filtered, ..) = ctx;
         if filtered == Some(true) && !ctx_filtered {
             return (false, false)
@@ -351,8 +377,8 @@ impl PathingWindowState {
 
         (toggled, hovered)
     }
-    pub fn act_context_menu_cat(
-        ui: &Ui,
+    pub fn act_context_menu_cat<'ui, U>(
+        ui: &mut U,
         _pack: &ActivePack,
         cat_index: usize,
         cat: &Category,
@@ -360,8 +386,11 @@ impl PathingWindowState {
         state: Option<bool>,
         (toggled, hovered): (bool, bool),
         ctx: &mut CategoryMenuContext,
-        mut draw_tooltip: Option<&mut dyn FnMut(usize)>,
-    ) -> bool {
+        mut draw_tooltip: Option<&mut dyn FnMut(&mut U, usize)>,
+    ) -> bool
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let (recompute, ..) = ctx;
         if toggled {
             let is_copyable = cat
@@ -378,34 +407,37 @@ impl PathingWindowState {
             }
         }
         if hovered && (ActivePack::category_has_tooltip(cat) || draw_tooltip.is_some()) {
-            ActivePack::draw_tooltip(ui, cat.display_name(), || {
+            ActivePack::draw_tooltip(ui, cat.display_name(), |ui| {
                 if let Some(draw) = &mut draw_tooltip {
-                    draw(0);
+                    draw(ui, 0);
                 }
                 ActivePack::draw_tooltip_category(ui, cat);
                 if let Some(draw) = &mut draw_tooltip {
-                    draw(1);
+                    draw(ui, 1);
                 }
                 if filtered.is_none() && state.is_some() && cat.sub_categories.is_empty() {
                     ui.spacing();
                     ui.text("shift-click to enable");
                 }
                 if let Some(draw) = &mut draw_tooltip {
-                    draw(2);
+                    draw(ui, 2);
                 }
             });
         }
-        toggled && ui.io().key_shift
+        toggled && ui.im_io_mod_keys().contains(KeyState::SHIFT)
     }
     /// create a dead zone for the mouse to rest without triggering a menu change
-    const MENU_DEAD_ZONE: Vec2 = Vec2::new(2.0, 2.0);
-    fn dead_zone_spacing(ui: &Ui, branch: bool) {
-        let _vspace = ui.push_style_var(StyleVar::ItemSpacing([0.2, 0.2]));
+    const MENU_DEAD_ZONE: ImVec2 = ImVec2::new(2.0, 2.0);
+    fn dead_zone_spacing<'ui, U>(ui: &mut U, branch: bool)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        let _vspace = ui.push_style_item_spacing(ImVec2::splat(0.2));
         let sz = match branch {
             true => Self::MENU_DEAD_ZONE,
             false => Self::MENU_DEAD_ZONE / 2.0,
         };
-        if Vec2::from(ui.cursor_pos()).y > Vec2::from(ui.cursor_start_pos()).y + Self::MENU_DEAD_ZONE.y {
+        if ui.cursor_pos().y > ui.cursor_start_pos().y + Self::MENU_DEAD_ZONE.y {
             // create a dead zone for the mouse to rest without triggering a menu change
             ui.dummy(sz.to_array());
         }

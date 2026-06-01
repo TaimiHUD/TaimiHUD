@@ -1,10 +1,10 @@
 use {
     crate::{
         exports::runtime as rt,
+        render::element::prelude::*,
         space::goggles::{self, LensClass, LENSES, LENS_PTR},
     },
     anyhow::Context,
-    nexus::imgui,
     std::{mem, ptr, sync::atomic::Ordering, thread},
     windows::{core::Interface, Win32::Graphics::Direct3D11::ID3D11DeviceContext_Vtbl},
 };
@@ -27,7 +27,10 @@ pub fn options_ui(ui: &imgui::Ui) {
     options_ui_lenses(ui);
 }
 
-pub fn options_ui_lenses(ui: &imgui::Ui) {
+pub fn options_ui_lenses<'ui, U>(ui: &mut U)
+where
+    U: ?Sized + ImDrawWindow<'ui>,
+{
     if let Ok(lenses) = LENSES.read() {
         let selected_lens = LENS_PTR.load(Ordering::Relaxed);
         let preview = match selected_lens {
@@ -40,9 +43,10 @@ pub fn options_ui_lenses(ui: &imgui::Ui) {
         if let Some(combo) = ui.begin_combo("Lens", preview) {
             let mut new_lens = None;
             for (&key, &clss) in lenses.iter() {
-                let selected = imgui::Selectable::new(format!("{clss:?} ({key:08x})"))
-                    .selected(selected_lens as usize == key)
-                    .build(ui);
+                let selected = ui.selectable(
+                    format_args!("{clss:?} ({key:08x})"),
+                    selected_lens as usize == key,
+                );
                 if selected {
                     new_lens = Some((key, clss));
                 }

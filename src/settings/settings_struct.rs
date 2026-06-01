@@ -5,6 +5,7 @@ use {
         exports::runtime::{self as rt, bindings::TaimiControls},
         settings::{
             state::{save_state_backup, UiState},
+            ui::UiConfig,
             IconStyle,
         },
         with_i18n,
@@ -14,7 +15,6 @@ use {
     chrono::{DateTime, Utc},
     futures::stream::{self, StreamExt},
     magic_migrate::TryMigrate,
-    nexus::imgui::Ui,
     serde::{Deserialize, Serialize},
     std::{
         borrow::Cow,
@@ -60,14 +60,19 @@ impl fmt::Display for NeedsUpdate {
 }
 
 impl NeedsUpdate {
-    pub fn draw(&self, ui: &Ui) {
-        let text = self.to_string();
-        use NeedsUpdate::*;
-        match &self {
-            Unknown => ui.text_colored([1.0, 1.0, 0.0, 1.0], text),
-            Error(_e) => ui.text_colored([1.0, 0.0, 0.0, 1.0], text),
-            Known(true, _id) => ui.text_colored([1.0, 0.6, 0.0, 1.0], text),
-            Known(false, _id) => ui.text_colored([0.0, 1.0, 0.0, 1.0], text),
+    #[allow(irrefutable_let_patterns)]
+    pub fn draw<'ui, U>(&self, ui: &mut U)
+    where
+        U: ?Sized + crate::render::element::im::ImDrawWindow<'ui>,
+    {
+        use crate::render::element::prelude::*;
+        if let text = format_args!("{self}") {
+            match &self {
+                Self::Unknown => ui.text_colored([1.0, 1.0, 0.0, 1.0], text),
+                Self::Error(_e) => ui.text_colored([1.0, 0.0, 0.0, 1.0], text),
+                Self::Known(true, _id) => ui.text_colored([1.0, 0.6, 0.0, 1.0], text),
+                Self::Known(false, _id) => ui.text_colored([0.0, 1.0, 0.0, 1.0], text),
+            }
         }
     }
 }
@@ -173,8 +178,10 @@ pub struct Settings {
     pub arc: Option<ArcSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pathing: Option<PathingSettings>,
-    #[serde(default, skip_serializing_if = "UiState::is_empty")]
+    #[serde(default)]
     pub ui_state: UiState,
+    #[serde(default)]
+    pub ui_config: UiConfig,
 }
 
 impl Settings {
@@ -473,6 +480,7 @@ impl Settings {
             pathing: Default::default(),
             arc: Default::default(),
             ui_state: Default::default(),
+            ui_config: Default::default(),
         }
     }
     pub fn file_path(addon_dir: &Path) -> PathBuf {
@@ -670,6 +678,10 @@ impl Settings {
     pub fn pathing_mut(&mut self) -> SettingsMutField<'_, PathingSettings> {
         let pathing = self.pathing.get_or_insert_default();
         SettingsMutField::with_parts(&self.dirty, pathing)
+    }
+    #[inline]
+    pub fn ui_config_mut(&mut self) -> SettingsMutField<'_, UiConfig> {
+        SettingsMutField::with_parts(&self.dirty, &mut self.ui_config)
     }
 }
 pub struct SettingsMutField<'a, T: ?Sized> {
