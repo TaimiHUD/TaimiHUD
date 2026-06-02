@@ -142,6 +142,11 @@ impl FestivalFixup {
             Festival::SuperAdventureBox,
             FestivalWindow::with_timestamp(1776182400, 1778007600),
         ),
+        // Dragon Bash 2026: 2026-06-02 — 2026-06-23
+        (
+            Festival::DragonBash,
+            FestivalWindow::with_timestamp(1780416000, 1782241200),
+        ),
     ];
 }
 
