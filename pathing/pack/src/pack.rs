@@ -13,12 +13,16 @@ use {
     anyhow::Context,
     indexmap::{map::Entry, IndexMap, IndexSet},
     std::{
+        borrow::Borrow,
         collections::HashSet,
         fmt,
+        hash::{Hash, Hasher},
         io::{Cursor, Read as _},
         iter,
         mem,
+        ops,
         path::Path,
+        sync::Arc,
     },
     uuid::Uuid,
     xml::{common::Position, name::OwnedName, reader::XmlEvent},
@@ -1005,4 +1009,224 @@ fn fixup_xml_typos(pack_xml: &str) -> std::borrow::Cow<'_, str> {
         false => pack_xml,
     };
     pack_xml
+}
+
+#[derive(Debug, Clone)]
+pub struct PackCategoryArc {
+    pack: Arc<Pack>,
+    category_idx: usize,
+}
+impl PackCategoryArc {
+    #[inline(always)]
+    pub unsafe fn new_unchecked(pack: Arc<Pack>, category_idx: usize) -> Self {
+        Self { pack, category_idx }
+    }
+    #[inline]
+    pub fn new(pack: Arc<Pack>, category_idx: usize) -> Option<Self> {
+        match category_idx >= pack.categories.all_categories.len() {
+            true => None,
+            false => Some(unsafe { Self::new_unchecked(pack, category_idx) }),
+        }
+    }
+    pub fn get_category<Q>(pack: &Arc<Pack>, id: &Q) -> Option<Self>
+    where
+        CategoryId: Borrow<Q>,
+        Q: ?Sized + Eq + Hash,
+    {
+        pack.categories
+            .all_categories
+            .get_full(id)
+            .map(|(idx, ..)| unsafe { Self::new_unchecked(pack.clone(), idx) })
+    }
+    pub fn find_category<F>(pack: &Arc<Pack>, mut f: F) -> Option<Self>
+    where
+        F: FnMut(&Category, usize) -> bool,
+    {
+        pack.categories
+            .all_categories
+            .iter()
+            .enumerate()
+            .find(|&(i, (_, cat))| f(cat, i))
+            .map(|(i, _)| unsafe { Self::new_unchecked(pack.clone(), i) })
+    }
+
+    pub fn children_cloned(&self) -> impl Iterator<Item = Self> + '_ {
+        self.child_ids()
+            .filter_map(move |cat| Self::get_category(&self.pack, cat))
+    }
+    #[inline]
+    pub fn cat_ref(&self) -> &Category {
+        let cat = self.pack.categories.all_categories.get_index(self.category_idx);
+        match cat {
+            #[cfg(debug_assertions)]
+            cat => cat.unwrap(),
+            #[cfg(not(debug_assertions))]
+            cat => unsafe { cat.unwrap_unchecked() },
+        }
+        .1
+    }
+    #[inline]
+    pub fn pack(&self) -> &Arc<Pack> {
+        &self.pack
+    }
+    #[inline]
+    pub fn into_pack(self) -> Arc<Pack> {
+        self.pack
+    }
+    #[inline]
+    pub fn category_idx(&self) -> usize {
+        self.category_idx
+    }
+}
+impl ops::Deref for PackCategoryArc {
+    type Target = Category;
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.cat_ref()
+    }
+}
+impl PartialEq for PackCategoryArc {
+    #[inline]
+    fn eq(&self, rhs: &Self) -> bool {
+        Arc::ptr_eq(&self.pack, &rhs.pack) && self.category_idx == rhs.category_idx
+    }
+}
+impl Eq for PackCategoryArc {}
+impl Hash for PackCategoryArc {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        Arc::as_ptr(&self.pack).hash(state);
+        self.category_idx.hash(state);
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PackPoiArc {
+    pack: Arc<Pack>,
+    poi_idx: usize,
+}
+impl PackPoiArc {
+    #[inline(always)]
+    pub unsafe fn new_unchecked(pack: Arc<Pack>, poi_idx: usize) -> Self {
+        Self { pack, poi_idx }
+    }
+    #[inline]
+    pub fn new(pack: Arc<Pack>, poi_idx: usize) -> Option<Self> {
+        match poi_idx >= pack.pois.len() {
+            true => None,
+            false => Some(unsafe { Self::new_unchecked(pack, poi_idx) }),
+        }
+    }
+    pub fn find_poi<F>(pack: &Arc<Pack>, mut f: F) -> Option<Self>
+    where
+        F: FnMut(&Poi, usize) -> bool,
+    {
+        pack.pois
+            .iter()
+            .enumerate()
+            .find(|&(i, poi)| f(poi, i))
+            .map(|(i, _)| unsafe { Self::new_unchecked(pack.clone(), i) })
+    }
+
+    #[inline]
+    pub fn poi_ref(&self) -> &Poi {
+        unsafe { self.pack.pois.get_unchecked(self.poi_idx) }
+    }
+    #[inline]
+    pub fn pack(&self) -> &Arc<Pack> {
+        &self.pack
+    }
+    #[inline]
+    pub fn into_pack(self) -> Arc<Pack> {
+        self.pack
+    }
+    #[inline]
+    pub fn poi_idx(&self) -> usize {
+        self.poi_idx
+    }
+}
+impl ops::Deref for PackPoiArc {
+    type Target = Poi;
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.poi_ref()
+    }
+}
+impl PartialEq for PackPoiArc {
+    #[inline]
+    fn eq(&self, rhs: &Self) -> bool {
+        Arc::ptr_eq(&self.pack, &rhs.pack) && self.poi_idx == rhs.poi_idx
+    }
+}
+impl Eq for PackPoiArc {}
+impl Hash for PackPoiArc {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        Arc::as_ptr(&self.pack).hash(state);
+        self.poi_idx.hash(state);
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PackTrailArc {
+    pack: Arc<Pack>,
+    trail_idx: usize,
+}
+impl PackTrailArc {
+    #[inline(always)]
+    pub unsafe fn new_unchecked(pack: Arc<Pack>, trail_idx: usize) -> Self {
+        Self { pack, trail_idx }
+    }
+    #[inline]
+    pub fn new(pack: Arc<Pack>, trail_idx: usize) -> Option<Self> {
+        match trail_idx >= pack.trails.len() {
+            true => None,
+            false => Some(unsafe { Self::new_unchecked(pack, trail_idx) }),
+        }
+    }
+    pub fn find_trail<F>(pack: &Arc<Pack>, mut f: F) -> Option<Self>
+    where
+        F: FnMut(&Trail, usize) -> bool,
+    {
+        pack.trails
+            .iter()
+            .enumerate()
+            .find(|&(i, trail)| f(trail, i))
+            .map(|(i, _)| unsafe { Self::new_unchecked(pack.clone(), i) })
+    }
+
+    #[inline]
+    pub fn trail_ref(&self) -> &Trail {
+        unsafe { self.pack.trails.get_unchecked(self.trail_idx) }
+    }
+    #[inline]
+    pub fn pack(&self) -> &Arc<Pack> {
+        &self.pack
+    }
+    #[inline]
+    pub fn into_pack(self) -> Arc<Pack> {
+        self.pack
+    }
+    #[inline]
+    pub fn trail_idx(&self) -> usize {
+        self.trail_idx
+    }
+}
+impl ops::Deref for PackTrailArc {
+    type Target = Trail;
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.trail_ref()
+    }
+}
+impl PartialEq for PackTrailArc {
+    #[inline]
+    fn eq(&self, rhs: &Self) -> bool {
+        Arc::ptr_eq(&self.pack, &rhs.pack) && self.trail_idx == rhs.trail_idx
+    }
+}
+impl Eq for PackTrailArc {}
+impl Hash for PackTrailArc {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        Arc::as_ptr(&self.pack).hash(state);
+        self.trail_idx.hash(state);
+    }
 }
