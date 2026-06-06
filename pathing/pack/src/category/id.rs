@@ -1,6 +1,7 @@
 use std::{
     borrow::{Borrow, Cow, ToOwned},
     cmp,
+    convert::TryFrom,
     fmt,
     hash,
     iter,
@@ -11,6 +12,9 @@ use std::{
     str,
     sync::Arc,
 };
+
+#[cfg(feature = "serde")]
+use ::serde::{Deserialize, Serialize};
 
 pub const SEP_CHAR: char = '.';
 pub const SEP_STR: &'static str = ".";
@@ -37,6 +41,16 @@ pub trait AsFullId {
     }
     fn id_starts_with(&self, prefix: impl AsRef<FullIdRef>) -> bool {
         full_id_starts_with(self, prefix.as_ref())
+    }
+    fn id_is_root(&self) -> bool {
+        let mut segs = self.segments().into_iter();
+        if segs.next().is_some() {
+            segs.next().is_none()
+        } else {
+            // XXX: unclear if empty is or isn't..?
+            // but we expect at least one segment atm so
+            false
+        }
     }
 }
 fn full_id_starts_with<I: ?Sized + AsFullId>(id: &I, prefix: &FullIdRef) -> bool {
@@ -77,6 +91,8 @@ impl<'a, T: ?Sized + AsFullId> AsFullId for &'a T {
 pub type FullIdRef = IdNameSeg;
 
 #[derive(Debug)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 #[repr(transparent)]
 pub struct IdNameSeg {
     pub segment: str,
@@ -125,6 +141,22 @@ impl IdNameSeg {
             parent = next.parent();
             Some(next)
         })
+    }
+    #[inline]
+    pub fn cow_from_str<'a>(id: &'a str) -> Cow<'a, IdNameSeg> {
+        Cow::Borrowed(IdNameSeg::from_str(id))
+    }
+    pub fn from_str_cow<'a>(id: &Cow<'a, str>) -> Cow<'a, IdNameSeg> {
+        match id {
+            Cow::Borrowed(id) => Cow::Borrowed(IdNameSeg::from_str(id)),
+            Cow::Owned(id) => Cow::Owned(IdNameBox::from(id)),
+        }
+    }
+    pub fn cow_to_str<'a>(id: &Cow<'a, IdNameSeg>) -> Cow<'a, str> {
+        match id {
+            Cow::Borrowed(id) => Cow::Borrowed(id.as_str()),
+            Cow::Owned(id) => Cow::Owned(id.as_str().into()),
+        }
     }
 }
 impl fmt::Display for IdNameSeg {
@@ -226,6 +258,21 @@ impl From<Box<str>> for Box<IdNameSeg> {
 impl<'a> From<&'a IdNameSeg> for &'a str {
     fn from(value: &'a IdNameSeg) -> Self {
         &value.segment
+    }
+}
+impl<'a> From<&'a IdNameSeg> for Cow<'a, IdNameSeg> {
+    fn from(value: &'a IdNameSeg) -> Self {
+        Cow::Borrowed(value)
+    }
+}
+impl<'a> From<&'a IdNameBox> for Cow<'a, IdNameSeg> {
+    fn from(value: &'a IdNameBox) -> Self {
+        Cow::Borrowed(value.as_id())
+    }
+}
+impl<'a> From<IdNameBox> for Cow<'a, IdNameSeg> {
+    fn from(value: IdNameBox) -> Self {
+        Cow::Owned(value)
     }
 }
 impl<'a> From<&'a IdNameSeg> for String {
@@ -367,7 +414,7 @@ impl<T: Sized + AsRef<IdStr>> CategoryId<T> {
     }
     /// panic!
     pub fn with_full_id<S: Into<T>>(full_id: S) -> Self {
-        Self::try_with_full_id(full_id).expect("category id")
+        Self::try_with_full_id(full_id).expect(Self::WITH_FULL_ID_ERR)
     }
     pub fn try_with_full_id<S: Into<T>>(full_id: S) -> Option<Self> {
         let full_id = full_id.into();
@@ -394,6 +441,8 @@ impl<T: Sized + AsRef<IdStr>> CategoryId<T> {
     }
 }
 impl<T: ?Sized> CategoryId<T> {
+    pub const WITH_FULL_ID_ERR: &'static str = "category ID empty or long";
+
     pub fn len(&self) -> usize {
         self.len.get() as usize
     }
@@ -481,6 +530,38 @@ where
                 Cow::Owned(s)
             },
         }
+    }
+}
+impl<T: AsRef<IdStr>> TryFrom<Cow<'_, str>> for CategoryId<T>
+where
+    for<'a> T: From<&'a str>,
+{
+    type Error = anyhow::Error;
+
+    fn try_from(id: Cow<str>) -> Result<Self, Self::Error> {
+        Self::try_with_full_id(&id[..]).ok_or_else(|| anyhow::Error::msg(Self::WITH_FULL_ID_ERR))
+    }
+}
+impl<'a, T: ?Sized> From<&'a CategoryId<T>> for Cow<'a, FullIdRef>
+where
+    T: AsFullId + AsRef<IdNameBox> + AsRef<IdStr>,
+{
+    #[inline]
+    fn from(id: &'a CategoryId<T>) -> Self {
+        match id {
+            #[cfg(todo)]
+            id => id.to_id_box(),
+            id => Cow::Borrowed(id.as_id()),
+        }
+    }
+}
+impl<'a, T> From<CategoryId<T>> for Cow<'a, FullIdRef>
+where
+    T: AsFullId + AsRef<IdNameBox> + AsRef<IdStr>,
+{
+    #[inline]
+    fn from(id: CategoryId<T>) -> Self {
+        Cow::Owned(id.to_id_box().into_owned())
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -700,6 +781,8 @@ impl<'i> IdRef<'i> {
     }
 }
 #[derive(Debug, Default, Copy, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 #[repr(transparent)]
 pub struct FullIdOf<T: ?Sized + AsFullId> {
     pub id: T,
@@ -858,28 +941,110 @@ impl<T: ?Sized + AsFullId> hash::Hash for FullIdOf<T> {
 
 /// case-insensitive comparisons
 #[derive(Debug, Default, Copy, Clone)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
 #[repr(transparent)]
 pub struct IdCmpRelaxed<T: ?Sized> {
     pub id: T,
 }
-impl<T: AsFullId> IdCmpRelaxed<T> {
+impl<T> IdCmpRelaxed<T> {
     pub const fn new(id: T) -> Self {
         Self { id }
     }
 }
 impl<T: ?Sized> IdCmpRelaxed<T> {
+    #[inline]
     pub const fn with_ref(id: &T) -> &Self {
         unsafe { mem::transmute(id) }
     }
 
+    #[inline]
     pub fn with_mut(id: &mut T) -> &mut Self {
         unsafe { mem::transmute(id) }
     }
 
-    pub fn cmp_with<R: ?Sized + AsFullId>(&self, rhs: &R) -> cmp::Ordering
+    #[inline]
+    pub fn id_ref<U: ?Sized>(&self) -> &IdCmpRelaxed<U>
     where
-        T: AsFullId,
+        T: AsRef<U>,
     {
+        IdCmpRelaxed::with_ref(self.id.as_ref())
+    }
+    #[inline]
+    pub fn id_mut<U: ?Sized>(&mut self) -> &mut IdCmpRelaxed<U>
+    where
+        T: AsMut<U>,
+    {
+        IdCmpRelaxed::with_mut(self.id.as_mut())
+    }
+    pub fn as_canon_id(&self) -> Option<&FullIdRef>
+    where
+        T: AsRef<FullIdRef> + AsFullId,
+    {
+        self.is_canon().then_some(self.id.as_ref())
+    }
+    pub fn to_id_box(&self) -> Cow<'_, FullIdRef>
+    where
+        T: AsRef<FullIdRef> + AsFullId,
+    {
+        let id = self.id_ref();
+        match self.is_canon() {
+            true => Cow::Borrowed(id.as_ref()),
+            false => Cow::Owned(IdNameBox::new_cloned(id)),
+        }
+    }
+    pub fn cow_from<'a>(id: Cow<'a, T>) -> Cow<'a, Self>
+    where
+        T: ToOwned,
+        Self: ToOwned,
+        <T as ToOwned>::Owned: Into<<Self as ToOwned>::Owned>,
+    {
+        match id {
+            Cow::Borrowed(id) => Cow::Borrowed(IdCmpRelaxed::with_ref(id)),
+            Cow::Owned(id) => Cow::Owned(id.into()),
+        }
+    }
+    pub fn cow_into<'a>(id: Cow<'a, Self>) -> Cow<'a, T>
+    where
+        T: ToOwned,
+        Self: ToOwned,
+        <Self as ToOwned>::Owned: Into<<T as ToOwned>::Owned>,
+    {
+        match id {
+            #[cfg(todo)]
+            id => Self::cow_of_into::<T>(id),
+            Cow::Borrowed(id) => Cow::Borrowed(&id.id),
+            Cow::Owned(id) => Cow::Owned(id.into()),
+        }
+    }
+    pub fn cow_of_into<'a, U: ?Sized>(id: Cow<'a, Self>) -> Cow<'a, U>
+    where
+        T: AsRef<U>,
+        U: ToOwned,
+        Self: ToOwned,
+        <Self as ToOwned>::Owned: Into<<U as ToOwned>::Owned>,
+    {
+        match id {
+            Cow::Borrowed(id) => Cow::Borrowed(id.id.as_ref()),
+            Cow::Owned(id) => Cow::Owned(id.into()),
+        }
+    }
+}
+
+impl<T: ?Sized + AsFullId> IdCmpRelaxed<T> {
+    pub fn as_canon(&self) -> Option<&T> {
+        self.is_canon().then_some(&self.id)
+    }
+    pub fn is_canon(&self) -> bool {
+        self.id.segments().into_iter().all(|seg| {
+            let seg = seg.as_ref();
+            seg.as_str()
+                .bytes()
+                .all(|c| !c.is_ascii_uppercase() /*&& c.is_ascii()*/)
+        })
+    }
+
+    pub fn cmp_with<R: ?Sized + AsFullId>(&self, rhs: &R) -> cmp::Ordering {
         let mut segs = self.id.segments().into_iter();
         let mut rhs = rhs.segments().into_iter();
         loop {
@@ -894,10 +1059,7 @@ impl<T: ?Sized> IdCmpRelaxed<T> {
             }
         }
     }
-    pub fn eq_with<R: ?Sized + AsFullId>(&self, rhs: &R) -> bool
-    where
-        T: AsFullId,
-    {
+    pub fn eq_with_or_prefix<R: ?Sized + AsFullId>(&self, rhs: &R) -> Option<bool> {
         let mut segs = self.id.segments().into_iter();
         let mut rhs = rhs.segments().into_iter();
         loop {
@@ -907,10 +1069,18 @@ impl<T: ?Sized> IdCmpRelaxed<T> {
                 seg.as_ref().map(AsRef::as_ref),
                 rhs.as_ref().map(AsRef::as_ref),
             );
-            if let Some(eq) = eq {
-                break eq
+            match eq {
+                Some(false) if seg.is_none() => break None,
+                Some(eq) => break Some(eq),
+                None => (),
             }
         }
+    }
+    pub fn eq_with<R: ?Sized + AsFullId>(&self, rhs: &R) -> bool {
+        self.eq_with_or_prefix(rhs).unwrap_or(false)
+    }
+    pub fn starts_with<I: ?Sized + AsFullId>(&self, prefix: &I) -> bool {
+        self.eq_with_or_prefix(prefix).unwrap_or(true)
     }
 }
 impl<T: ?Sized + AsFullId> AsFullId for IdCmpRelaxed<T> {
@@ -930,6 +1100,13 @@ impl<T: ?Sized + AsFullId> AsFullId for IdCmpRelaxed<T> {
     }
     fn id_to_str(&self) -> Cow<'_, str> {
         self.id.id_to_str()
+    }
+    fn id_starts_with(&self, prefix: impl AsRef<FullIdRef>) -> bool {
+        #[cfg(todo)]
+        if is_id::<T>() {
+            self.id_ref().starts_with(prefix)
+        }
+        self.starts_with(prefix.as_ref())
     }
 }
 /// TODO: `[u8]::split_inclusive` if ascii already guaranteed
@@ -1003,5 +1180,126 @@ where
 impl Borrow<IdCmpRelaxed<FullIdRef>> for IdCmpRelaxed<IdNameBox> {
     fn borrow(&self) -> &IdCmpRelaxed<FullIdRef> {
         IdCmpRelaxed::with_ref(self.id.borrow())
+    }
+}
+impl<U: ?Sized, T: ?Sized> AsRef<U> for IdCmpRelaxed<T>
+where
+    T: AsRef<U>,
+{
+    fn as_ref(&self) -> &U {
+        self.id.as_ref()
+    }
+}
+impl<'a> From<&'a FullIdRef> for &'a IdCmpRelaxed<FullIdRef> {
+    fn from(id: &'a FullIdRef) -> Self {
+        IdCmpRelaxed::with_ref(id)
+    }
+}
+impl<'a> From<&'a IdStr> for &'a IdCmpRelaxed<IdStr> {
+    fn from(id: &'a IdStr) -> Self {
+        IdCmpRelaxed::with_ref(id)
+    }
+}
+impl From<IdNameBox> for IdCmpRelaxed<IdNameBox> {
+    fn from(id: IdNameBox) -> Self {
+        IdCmpRelaxed::new(id)
+    }
+}
+impl From<IdCmpRelaxed<IdNameBox>> for IdNameBox {
+    fn from(id: IdCmpRelaxed<IdNameBox>) -> Self {
+        id.id
+    }
+}
+impl<T> From<CategoryId<T>> for IdCmpRelaxed<CategoryId<T>> {
+    fn from(id: CategoryId<T>) -> Self {
+        IdCmpRelaxed::new(id)
+    }
+}
+impl From<IdNameBox> for IdCmpRelaxed<CategoryId<IdNameBox>> {
+    fn from(id: IdNameBox) -> Self {
+        IdCmpRelaxed::new(CategoryId::with_full_id(id))
+    }
+}
+impl<T> From<IdCmpRelaxed<CategoryId<T>>> for CategoryId<T> {
+    fn from(id: IdCmpRelaxed<CategoryId<T>>) -> Self {
+        id.id
+    }
+}
+impl ToOwned for IdCmpRelaxed<IdNameSeg> {
+    type Owned = IdCmpRelaxed<<IdNameSeg as ToOwned>::Owned>;
+    fn to_owned(&self) -> Self::Owned {
+        IdCmpRelaxed::new(self.id.to_owned())
+    }
+}
+
+#[cfg(feature = "serde")]
+pub mod serde {
+    use {
+        super::{CategoryId, FullIdRef, IdNameBox, IdStr},
+        serde::{de, ser},
+        std::{borrow::Cow, sync::Arc},
+    };
+
+    impl<'de> de::Deserialize<'de> for IdNameBox {
+        #[inline]
+        fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            de::Deserialize::deserialize(d).map(|name| IdNameBox::with_arcbox(Arc::new(name)))
+        }
+    }
+    impl ser::Serialize for IdNameBox {
+        #[inline]
+        fn serialize<S: ser::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            ser::Serialize::serialize(&*self.name, s)
+        }
+    }
+
+    impl<T: ?Sized + AsRef<IdStr>> ser::Serialize for CategoryId<T> {
+        fn serialize<S: ser::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+            self.as_str().serialize(s)
+        }
+    }
+    impl<'de, T: AsRef<IdStr>> de::Deserialize<'de> for CategoryId<T>
+    where
+        Self: TryFrom<Cow<'de, str>>,
+    {
+        fn deserialize<D: de::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+            <Cow<str> as de::Deserialize>::deserialize(d)
+                .and_then(|id| Self::try_from(id).map_err(|_| de::Error::custom(Self::WITH_FULL_ID_ERR)))
+        }
+    }
+    pub fn deserialize_cow<'de, D: de::Deserializer<'de>>(d: D) -> Result<Cow<'de, FullIdRef>, D::Error> where
+    {
+        <Cow<str> as de::Deserialize>::deserialize(d).map(|id| FullIdRef::from_str_cow(&id))
+    }
+
+    pub mod relaxed {
+        use {
+            super::super::{FullIdRef, IdCmpRelaxed, IdStr},
+            serde::{de, ser},
+            std::borrow::Cow,
+        };
+
+        pub fn serialize<T, S>(id: &T, s: S) -> Result<S::Ok, S::Error>
+        where
+            S: ser::Serializer,
+            T: ?Sized + AsRef<IdStr>,
+        {
+            let id = IdCmpRelaxed::new(id.as_ref());
+            match id.as_canon_id() {
+                Some(id) => ser::Serialize::serialize(id, s),
+                None => ser::Serialize::serialize(&format_args!("{id}"), s),
+            }
+        }
+        pub fn deserialize<'de, T, D>(d: D) -> Result<T, D::Error>
+        where
+            T: AsRef<IdStr> + From<Cow<'de, FullIdRef>>,
+            D: de::Deserializer<'de>,
+        {
+            <Cow<str> as de::Deserialize>::deserialize(d)
+                .map(|id| FullIdRef::from_str_cow(&id))
+                .map(IdCmpRelaxed::cow_from)
+                .map(IdCmpRelaxed::cow_into)
+                .map(T::from)
+        }
     }
 }
