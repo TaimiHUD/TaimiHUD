@@ -4,6 +4,7 @@ use {
         category::{
             id::{CategoryId, FullIdRef, IdCmpRelaxed, IdNameBox, IdNameSeg},
             Category,
+            CategoryFlag,
         },
         loader::PackLoaderContext,
         poi::Poi,
@@ -345,6 +346,7 @@ impl<'a> PackBuilder<'a> {
             category.full_id = new_id;
         }
         if is_root {
+            category.flags.insert(CategoryFlag::Root.bit());
             self.pack
                 .categories
                 .root_categories
