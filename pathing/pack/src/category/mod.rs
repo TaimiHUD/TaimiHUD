@@ -19,7 +19,15 @@ use {
     },
     anyhow::{anyhow, Context},
     bitflags::bitflags,
-    std::{borrow::Cow, mem, sync::Arc},
+    core::{mem, ops},
+    std::{borrow::Cow, sync::Arc},
+    taimi_hoard::flags::{
+        set::{BitFlagForSet, FlagSet},
+        BitSlice,
+        BitVec,
+        BitView,
+        BitsNative,
+    },
 };
 
 pub use self::id::CategoryId;
@@ -475,6 +483,35 @@ impl FromIterator<CategoryFlag> for CategoryFlags {
 impl Extend<CategoryFlag> for CategoryFlags {
     fn extend<I: IntoIterator<Item = CategoryFlag>>(&mut self, iter: I) {
         self.extend(iter.into_iter().map(Self::from))
+    }
+}
+
+pub type CategoryFlagSet<V = BitVec<u8>> = FlagSet<CategoryFlags, V>;
+impl BitFlagForSet for CategoryFlags {
+    type Repr = u8;
+    const BIT_WIDTH: usize = CategoryFlag::INDEX_MAX as usize + 1;
+
+    fn as_bits(&self) -> &Self::Repr {
+        unsafe { &*(self as *const Self as *const u8) }
+    }
+    fn as_bits_mut(&mut self) -> &mut Self::Repr {
+        unsafe { &mut *(self as *mut Self as *mut u8) }
+    }
+    fn as_bitslice(&self) -> &BitSlice<Self::Repr, BitsNative> {
+        unsafe { self.as_bits().view_bits().get_unchecked(..Self::BIT_WIDTH) }
+    }
+    fn as_bitslice_mut(&mut self) -> &mut BitSlice<Self::Repr, BitsNative> {
+        unsafe {
+            self.as_bits_mut()
+                .view_bits_mut()
+                .get_unchecked_mut(..Self::BIT_WIDTH)
+        }
+    }
+
+    fn range_for(index: usize) -> ops::Range<usize> {
+        let start = index << 2;
+        let end = start + Self::BIT_WIDTH;
+        start..end
     }
 }
 
