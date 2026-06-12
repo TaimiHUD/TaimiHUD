@@ -1350,6 +1350,7 @@ fn panic_hook(info: &panic::PanicHookInfo) {
             log::error!("{backtrace:#}");
         }
     }
+    rt::log::TaimiLog::logger().flush_all();
 }
 
 fn setup_panic_hook() {

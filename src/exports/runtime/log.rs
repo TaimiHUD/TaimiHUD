@@ -279,7 +279,7 @@ pub fn log_record(logger: &TaimiLog, record: &Record) -> rt::RuntimeResult<()> {
         let file = match logger.log_file.get() {
             Some(f) => Some(f),
             None if matches!(res, Some(Ok(()))) && crate::built_info::is_release() => None,
-            #[cfg(not(debug_assertions))]
+            #[cfg(not(taimi_debug))]
             None if record.metadata().level() > log::Level::Warn => None,
             None => logger.open_file().ok(),
         };
