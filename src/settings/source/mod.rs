@@ -23,6 +23,7 @@ use {
     url::Url,
 };
 
+pub mod data;
 pub mod direct;
 pub mod github;
 pub mod sources;

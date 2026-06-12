@@ -48,5 +48,9 @@ bitflags::bitflags! {
     pub struct PathingEnables: u8 {
         const KATRENDER = 0x01;
         const API_BYPASS = 0x02;
+        #[cfg(feature = "paths-lua")]
+        const SCRIPTING_LUA = 0x04;
+        #[cfg(feature = "paths-lua")]
+        const SCRIPTING_UNSECURED = 0x08;
     }
 }

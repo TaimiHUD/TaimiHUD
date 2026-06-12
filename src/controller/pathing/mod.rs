@@ -16,7 +16,7 @@ use {
         settings::{Settings, SettingsLock, SourceKind},
         space::{
             engine::SpaceEvent,
-            pack::{LoaderBox, UnloadedReason},
+            pack::{LoaderBox, SharedLoader, UnloadedReason},
             Engine,
         },
         Interruption,
@@ -24,7 +24,10 @@ use {
     },
     anyhow::{anyhow, Context},
     futures::{FutureExt, StreamExt},
-    std::{path::PathBuf, sync::Arc},
+    std::{
+        path::PathBuf,
+        sync::{Arc, Mutex},
+    },
     strum_macros::Display,
     taimi_meta::ui::MapContext,
     taimi_pack::{attributes::Festivals, category::CategoryId, Pack},
@@ -39,6 +42,8 @@ pub use self::{
     festivals::FestivalFixup,
     shared::{PathingEnables, PathingReceiver, PathingSender},
 };
+#[cfg(feature = "scripts")]
+use crate::controller::script;
 
 mod festivals;
 mod shared;
@@ -48,7 +53,10 @@ pub type ExternalFilterState = (Festivals, Arc<RaidState>, Arc<AchievementState>
 #[cfg(feature = "space")]
 #[derive(Debug, Clone, Display)]
 pub(crate) enum PathingEvent {
-    VisibleToggle { context: Option<MapContext>, set: Option<bool> },
+    VisibleToggle {
+        context: Option<MapContext>,
+        set: Option<bool>,
+    },
     ReloadAll(bool),
     LoadAll,
     UnloadAll,
@@ -56,6 +64,8 @@ pub(crate) enum PathingEvent {
     PathingStateUpdate(CategoryId, bool),
     ToggleKatRender,
     ApiBypass(Option<bool>),
+    #[cfg(feature = "paths-lua")]
+    ScriptsEnable(Option<bool>),
     Exit(Interruption),
 }
 
@@ -81,6 +91,15 @@ impl PathingController {
         {
             let settings = self.settings.read().await;
             enables.set(PathingEnables::KATRENDER, settings.enable_katrender);
+            #[cfg(feature = "paths-lua")]
+            if let Some((enable, unsecure)) = settings
+                .pathing
+                .as_ref()
+                .map(|p| (p.scripting_enable, p.scripting_unsecured))
+            {
+                enables.set(PathingEnables::SCRIPTING_LUA, enable);
+                enables.set(PathingEnables::SCRIPTING_UNSECURED, unsecure);
+            }
         }
         self.rx.enables.send_replace(enables);
         let _interruption = loop {
@@ -130,7 +149,8 @@ impl PathingController {
             log::debug!("TODO: pack refresh rather than reload");
         }
         self.unload_all().await;
-        let res = Self::load_all_inner(self.settings.clone())
+        let enables = self.rx.enables.borrow().clone();
+        let res = Self::load_all_inner(self.settings.clone(), enables)
             .await
             .context("Reloading all paths");
         if let Err(e) = res {
@@ -139,7 +159,8 @@ impl PathingController {
     }
 
     async fn load_all(&self) {
-        let res = Self::load_all_inner(self.settings.clone())
+        let enables = self.rx.enables.borrow().clone();
+        let res = Self::load_all_inner(self.settings.clone(), enables)
             .await
             .context("Loading all paths");
         if let Err(e) = res {
@@ -147,7 +168,7 @@ impl PathingController {
         }
     }
 
-    async fn load_all_inner(settings: SettingsLock) -> anyhow::Result<()> {
+    async fn load_all_inner(settings: SettingsLock, enables: PathingEnables) -> anyhow::Result<()> {
         let _ = create_dir_all(SourceKind::Pathing.get_user_dir());
 
         let mut path_loads = tokio::task::JoinSet::new();
@@ -188,7 +209,8 @@ impl PathingController {
                     .context("Path load panicked");
                 match res {
                     Ok(Ok((pack, loader))) => {
-                        Self::pathing_load_pack(pack, loader, name).await;
+                        let loader = Arc::new(Mutex::new(loader));
+                        Self::pathing_load_pack(pack, loader, name, enables).await;
                         Ok(())
                     },
                     Err(e) | Ok(Err(e)) => {
@@ -262,6 +284,13 @@ impl PathingController {
             None => en.toggle(PathingEnables::API_BYPASS),
         });
     }
+    #[cfg(feature = "paths-lua")]
+    fn toggle_script_enable(&self, set: Option<bool>) {
+        self.rx.enables.send_modify(|en| match set {
+            Some(set) => en.set(PathingEnables::SCRIPTING_LUA, set),
+            None => en.toggle(PathingEnables::SCRIPTING_LUA),
+        });
+    }
 
     fn pathing_load_taco(path: PathBuf) -> anyhow::Result<(Pack, LoaderBox)> {
         use taimi_pack::loader::ZipLoader;
@@ -277,7 +306,12 @@ impl PathingController {
         Ok((pack, Box::new(loader)))
     }
 
-    async fn pathing_load_pack(mut pack: Pack, loader: LoaderBox, name: String) {
+    async fn pathing_load_pack(
+        mut pack: Pack,
+        loader: SharedLoader,
+        name: String,
+        enables: PathingEnables,
+    ) {
         let context = format!("Loading pack {name} onto engine");
         if pack.name.is_empty() {
             pack.name = name;
@@ -289,8 +323,47 @@ impl PathingController {
             }?;
             engine.packs.fixup_pack(&mut pack);
             let pack = Arc::new(pack);
-            let pack_idx = engine.packs.add_pack(pack, loader);
-            engine.packs.load_pack(&engine.render_backend.device, pack_idx)
+            #[cfg(feature = "paths-lua")]
+            let scripting_autostart = enables.contains(PathingEnables::SCRIPTING_LUA)
+                && engine
+                    .map_settings_ref(|s| s.map(|s| s.scripting_auto))
+                    .unwrap_or(false);
+            #[cfg(feature = "paths-lua")]
+            let loader_script = scripting_autostart
+                .then(|| {
+                    let entry = loader
+                        .lock()
+                        .ok()
+                        .and_then(|mut l| l.load_asset_dyn(script::pathing::PACK_ENTRYPOINT).ok());
+                    entry.map(|e| (loader.clone(), e))
+                })
+                .flatten();
+            #[cfg(feature = "paths-lua")]
+            let scriptable = !scripting_autostart
+                && loader
+                    .try_lock()
+                    .ok()
+                    .and_then(|l| l.contains_asset(script::pathing::PACK_ENTRYPOINT).ok())
+                    .unwrap_or(false);
+            let pack_idx = engine.packs.add_pack(pack.clone(), loader);
+            let res = engine.packs.load_pack(&engine.render_backend.device, pack_idx);
+            #[cfg(feature = "paths-lua")]
+            if res.is_ok() && (scriptable || loader_script.is_some()) {
+                if let Some((_, pack)) = engine.packs.loaded_packs.get_index_mut(pack_idx) {
+                    pack.script_capable = true;
+                }
+            }
+            #[cfg(feature = "paths-lua")]
+            if enables.contains(PathingEnables::SCRIPTING_LUA) {
+                // TODO: broadcast this via script controller instead
+                state.primary_window.plug_state.applicable = true;
+            }
+            #[cfg(feature = "paths-lua")]
+            if let (Some((loader, entry)), true) = (loader_script, res.is_ok()) {
+                script::LuaMessage::SpawnPack(pack, loader, entry, engine.packs.generation, pack_idx)
+                    .try_send();
+            }
+            res
         })
         .await;
         let res = res
@@ -368,6 +441,8 @@ impl PathingController {
             PathingStateUpdate(p, s) => self.pathing_state_update(p, s).await,
             ToggleKatRender => self.toggle_katrender().await,
             ApiBypass(set) => self.toggle_api_bypass(set),
+            #[cfg(feature = "paths-lua")]
+            ScriptsEnable(en) => self.toggle_script_enable(en),
             VisibleToggle { context, set } => self.set_visible(context, set).await,
         }
         None
@@ -438,6 +513,10 @@ impl PathingController {
         let pressed = state & changed;
         if pressed.contains(GameControl::Miscellaneous_Interact) {
             self.handle_press_interact().await;
+        }
+        #[cfg(feature = "scripts")]
+        if let Some(msg) = script::ScriptMessage::gameplay_keybind(state, changed) {
+            msg.try_send()
         }
     }
 

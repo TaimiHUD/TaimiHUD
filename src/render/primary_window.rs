@@ -22,6 +22,8 @@ use {
 use super::MarkerTabState;
 #[cfg(feature = "markers")]
 use super::PathingConfig;
+#[cfg(feature = "scripts")]
+use crate::render::plug::{PlugConfig, PlugConfigCache, PlugConfigDesc, PlugConfigState};
 
 pub struct PrimaryWindowState {
     pub config_tab: ConfigTabState,
@@ -39,6 +41,10 @@ pub struct PrimaryWindowState {
     pub(super) open: bool,
     pub(super) state: elem::window::WindowState,
     pub(super) scratch: elem::window::WindowScratch,
+    #[cfg(feature = "scripts")]
+    pub(crate) plug_state: PlugConfigState,
+    #[cfg(feature = "scripts")]
+    pub(super) plug_scratch: PlugConfigCache,
 }
 
 impl PrimaryWindowState {
@@ -58,6 +64,10 @@ impl PrimaryWindowState {
             open: false,
             state: Default::default(),
             scratch: Default::default(),
+            #[cfg(feature = "scripts")]
+            plug_state: Default::default(),
+            #[cfg(feature = "scripts")]
+            plug_scratch: Default::default(),
         }
     }
 
@@ -151,6 +161,26 @@ impl PrimaryWindowState {
             if let Some(_token) = ui.tab_item(fl!("data-sources-tab")) {
                 self.data_sources_tab.draw(ui, state_errors);
             }
+            #[cfg(feature = "scripts")]
+            let scripts = self
+                .plug_state
+                .applicable
+                .then(|| ui.tab_item("scripts"))
+                .flatten();
+            #[cfg(feature = "scripts")]
+            if let Some(_token) = scripts {
+                PlugConfig {
+                    desc: &PlugConfigDesc { ..Default::default() },
+                    state: &mut self.plug_state,
+                    scratch: &mut self.plug_scratch,
+                    #[cfg(feature = "paths")]
+                    engine: match slot {
+                        (Some(Ok(e)),) => Some(&mut *e),
+                        _ => None,
+                    },
+                }
+                .draw_on_window(ui, context);
+            }
             if let Some(_token) = ui.tab_item(fl!("api-tab")) {
                 self.api_tab.draw(ui, state_errors);
             }
@@ -168,6 +198,26 @@ impl PrimaryWindowState {
             }
             if let Some(_token) = ui.tab_item(fl!("data-sources-tab")) {
                 self.data_sources_tab.draw(ui, state_errors);
+            }
+            #[cfg(feature = "scripts")]
+            let scripts = self
+                .plug_state
+                .applicable
+                .then(|| ui.tab_item("scripts"))
+                .flatten();
+            #[cfg(feature = "scripts")]
+            if let Some(_token) = scripts {
+                PlugConfig {
+                    desc: &PlugConfigDesc { ..Default::default() },
+                    state: &mut self.plug_state,
+                    scratch: &mut self.plug_scratch,
+                    #[cfg(feature = "paths")]
+                    engine: match slot {
+                        (Some(Ok(e)),) => Some(&mut *e),
+                        _ => None,
+                    },
+                }
+                .draw_on_window(ui, context);
             }
             if let Some(_token) = ui.tab_item(fl!("api-tab")) {
                 self.api_tab.draw(ui, state_errors);
