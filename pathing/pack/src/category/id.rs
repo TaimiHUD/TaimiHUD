@@ -392,6 +392,12 @@ impl<T: ?Sized> CategoryId<T> {
     pub fn inner(&self) -> &T {
         &self.full_id
     }
+    pub fn into_inner(self) -> T
+    where
+        T: Sized,
+    {
+        self.full_id
+    }
 }
 impl<T: ?Sized + AsFullId> CategoryId<T> {
     pub fn is_full_id(&self) -> bool {
