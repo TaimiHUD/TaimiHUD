@@ -16,6 +16,7 @@ use {
     glamour::{Box2, Size2, TransformMap},
     std::{
         collections::{HashMap, HashSet},
+        fmt,
         mem,
         num::NonZeroU32,
         sync::Arc,
@@ -96,6 +97,12 @@ pub enum SpaceEvent {
     GogglesClearLens,
     #[cfg(feature = "goggles")]
     RefreshEdgeScale,
+}
+impl SpaceEvent {
+    #[inline]
+    pub fn try_send(self) {
+        Engine::try_send(self);
+    }
 }
 
 fn handle_marker_timings(mut commands: Commands, mut query: Query<(Entity, &Marker, &mut Render)>) {
@@ -1213,3 +1220,11 @@ impl Engine {
 }
 
 unsafe impl Send for Engine {}
+impl fmt::Debug for Engine {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Engine")
+            //.field("packs", &self.packs)
+            //.field("world", &self.world)
+            .finish()
+    }
+}
