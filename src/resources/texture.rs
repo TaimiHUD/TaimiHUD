@@ -202,6 +202,8 @@ impl Texture {
         self.view.generate_mips(device_context);
     }
 
+    /// *bytes* per pixel
+    ///
     /// TODO: this is implemented by arcffi, defer to that once it's used more
     fn format_bpp(format: dxgi::DXGI_FORMAT) -> usize {
         match DxgiFormat::try_from_d3d(format).map_err(|_| format) {
@@ -209,6 +211,7 @@ impl Texture {
             Ok(DxgiFormat::R32G32B32Float) => 12,
             Ok(DxgiFormat::R32G32Float) => 8,
             Ok(DxgiFormat::R8G8B8A8UNorm | DxgiFormat::B8G8R8A8UNorm | DxgiFormat::B8G8R8X8UNorm) => 4,
+            Ok(DxgiFormat::R8UNorm | DxgiFormat::A8UNorm) => 1,
             _f => {
                 log::debug!("unrecognized texture DXGI_FORMAT {_f:?}");
                 4
