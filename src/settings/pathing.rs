@@ -17,6 +17,21 @@ pub struct PathingSettings {
     pub space: SpaceSettings,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub festival_filter: Arc<BTreeMap<String, FestivalPreference>>,
+    #[cfg(feature = "paths-lua")]
+    #[serde(default, rename = "deleteme_script_enable")]
+    pub scripting_enable: bool,
+    #[cfg(feature = "paths-lua")]
+    #[serde(default, rename = "deleteme_script_auto")]
+    pub scripting_auto: bool,
+    #[cfg(feature = "paths-lua")]
+    #[serde(default, rename = "deleteme_script_unsecure")]
+    pub scripting_unsecured: bool,
+    #[cfg(feature = "paths-lua")]
+    #[serde(
+        default = "taimi_hoard::a_f32::<{1.0f32.to_bits()}>",
+        rename = "deleteme_script_tick_rate"
+    )]
+    pub scripting_tick_rate: f32,
 }
 
 impl PathingSettings {

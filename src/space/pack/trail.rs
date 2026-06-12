@@ -10,12 +10,19 @@ use {
     },
     anyhow::Context,
     core::f32,
-    glam::Vec3,
+    glam::{Vec3, Vec4},
     glamour::{Box3, Point2, Point3, Vec3Swizzles, Vector3},
     std::sync::Arc,
     taimi_d3d::dx11::{buffer::VertexBuffer, prelude::*},
-    taimi_meta::ui::LocalContext,
-    taimi_pack::Trail,
+    taimi_meta::ui::{LocalContext, MapContext},
+    taimi_pack::{
+        attributes::{
+            cell::{pack_attr, AttrKeyValue, GetAttrDyn, PackKeyId, PackValueCell, SetAttrDyn},
+            keys::{self, GetAttr},
+        },
+        trail::TrailData,
+        Trail,
+    },
 };
 
 pub struct ActiveTrail {
@@ -33,24 +40,52 @@ pub struct ActiveTrail {
     pub section_bookmarks: Vec<u32>,
 
     pub y_offset: f32,
+    pub vertex_colour: Vec3,
+
+    pub attr_tint: keys::Tint,
+    pub attr_tint_map: Option<keys::MapTint>,
+    pub attr_opacity: keys::Alpha,
+    pub attr_vis_space: keys::InGameVisibility,
+    pub attr_vis_map: keys::MapVisibility,
+    pub attr_vis_minimap: keys::MinimapVisibility,
 }
 
 impl ActiveTrail {
-    pub fn build(
+    pub fn build<A>(
         loader: &mut ActivePack,
-        trail: &Trail,
+        trail: Option<&Trail>,
+        attrs: &A,
         trail_idx: usize,
         category_idx: usize,
         params: &TrailParams,
-        render_bookmark: usize,
         device: &Dx11Device,
-    ) -> anyhow::Result<ActiveTrail> {
-        let colour = trail.attributes.render().tint().truncate();
+        render_bookmark: usize,
+    ) -> anyhow::Result<ActiveTrail>
+    where
+        A: GetAttr<keys::Guid>
+            + GetAttr<keys::Tint>
+            + GetAttr<keys::MapTint>
+            + GetAttr<keys::Alpha>
+            + GetAttr<keys::TrailScale>
+            + GetAttr<keys::InGameVisibility>
+            + GetAttr<keys::MapVisibility>
+            + GetAttr<keys::MinimapVisibility>
+            + GetAttr<keys::IsWall>
+            + GetAttr<keys::TextureFile>
+            + GetAttr<keys::TrailDataFile>
+            + GetAttr<keys::CategoryRef>,
+    {
+        let attr_tint = GetAttr::<keys::Tint>::get_attr_or_default(attrs).into_owned();
+        let attr_tint_map = GetAttr::<keys::MapTint>::get_attr(attrs).map(|v| v.into_owned());
+        let vertex_colour = Vec4::from(attr_tint).truncate();
         let trail_width = params.width();
         let resolution = params.resolution();
         let smoothing = params.smoothing();
-        let map_only = trail.attributes.in_game_visibility == Some(false);
-        let is_wall = trail.is_wall() && {
+        let attr_vis_space = GetAttr::<keys::InGameVisibility>::get_attr_or_default(attrs).into_owned();
+        let map_only = !bool::from(attr_vis_space);
+        let is_wall = bool::from(GetAttr::<keys::IsWall>::get_attr_or_default(attrs).into_owned());
+        let trail_scale = f32::from(GetAttr::<keys::TrailScale>::get_attr_or_default(attrs).into_owned());
+        let is_wall = is_wall && {
             // geometry is shared between space and maps, so a paper-thin
             // vertical wall is meaningless if not intended to show in-game
             // (heart boundaries sets this combo)
@@ -64,13 +99,25 @@ impl ActiveTrail {
             params.y_offset_for(pack_signature ^ (trail_idx.wrapping_mul(73)))
         };
 
-        let texture_handle = trail
-            .texture_name()
+        let texture_handle = GetAttr::<keys::TextureFile>::get_attr(attrs)
             .ok_or_else(|| anyhow::anyhow!("TODO: Add a fallback texture for trails"))?;
-        let texture_handle = loader.register_texture(texture_handle);
-        let trail_data = trail
-            .read_trl_data(loader.loader())
-            .context("Loading trail vertices")?;
+        let texture_handle = loader.register_texture(&texture_handle);
+        // TODO: check for override data provided
+        let trail_path = GetAttr::<keys::TrailDataFile>::get_attr(attrs)
+            .ok_or_else(|| anyhow::anyhow!("no .trl path specified"))?;
+        let mut trail_file = loader.with_loader(|l| {
+            let mut res = l.load_asset_dyn(&trail_path[..]);
+            let parent = trail.and_then(|t| t.parent_path.as_ref());
+            if let (Err(..), Some(parent)) = (&res, parent) {
+                if let Ok(fallback) = l.find_asset_near(parent, &trail_path[..]) {
+                    res = Ok(fallback);
+                }
+            }
+            res
+        })?;
+        let trail_data = TrailData::read_from_trl(&mut trail_file)
+            .with_context(|| format!("Loading trail vertices from {trail_path}"))?;
+
         let texture = loader
             .get_or_load_texture(texture_handle, device)
             .context("Loading trail texture")?;
@@ -132,9 +179,9 @@ impl ActiveTrail {
                 &mut vertices,
                 &points[..],
                 trail_width,
-                trail.scale(),
+                trail_scale,
                 is_wall,
-                colour,
+                vertex_colour,
             );
 
             section_bookmarks.push(vertices.len() as u32);
@@ -153,8 +200,12 @@ impl ActiveTrail {
             section_bounds.push(bounds);
         }
 
+        #[cfg(taimi_debug)]
         if vertices.is_empty() {
-            log::info!("Empty trail {}:{}", trail.category, trail.guid,);
+            if let Some(cat) = GetAttr::<keys::CategoryRef>::get_attr(attrs) {
+                let guid = GetAttr::<keys::Guid>::get_attr_or_default(attrs);
+                log::debug!("Empty trail {cat}:{guid}");
+            }
         }
 
         let model = Model::from_vertices(vertices);
@@ -171,6 +222,72 @@ impl ActiveTrail {
             section_bookmarks,
             render_bookmark,
             y_offset,
+            vertex_colour,
+            attr_tint,
+            attr_tint_map,
+            attr_opacity: GetAttr::<keys::Alpha>::get_attr_or_default(attrs).into_owned(),
+            attr_vis_space,
+            attr_vis_map: GetAttr::<keys::MapVisibility>::get_attr_or_default(attrs).into_owned(),
+            attr_vis_minimap: GetAttr::<keys::MinimapVisibility>::get_attr_or_default(attrs).into_owned(),
+        })
+    }
+    pub fn new_empty<A>(
+        loader: &mut ActivePack,
+        attrs: &A,
+        trail_idx: usize,
+        category_idx: usize,
+        device: &Dx11Device,
+        render_bookmark: usize,
+    ) -> anyhow::Result<ActiveTrail>
+    where
+        A: GetAttr<keys::Guid>
+            + GetAttr<keys::InGameVisibility>
+            + GetAttr<keys::MapVisibility>
+            + GetAttr<keys::MinimapVisibility>
+            + GetAttr<keys::TextureFile>
+            + GetAttr<keys::Alpha>
+            + GetAttr<keys::Tint>
+            + GetAttr<keys::MapTint>,
+    {
+        let texture_handle = GetAttr::<keys::TextureFile>::get_attr(attrs);
+        let texture = texture_handle
+            .map(|h| {
+                let texture_handle = loader.register_texture(&h);
+                loader
+                    .get_or_load_texture(texture_handle, device)
+                    .context("Loading trail texture")
+                    .cloned()
+            })
+            .unwrap_or_else(|| {
+                unsafe {
+                    Texture::new_raw(
+                        device,
+                        &vec![0u8; 32 * 32],
+                        [32, 32],
+                        32,
+                        taimi_d3d::DxgiFormat::A8_UNORM,
+                    )
+                }
+                .map(Arc::new)
+                .context("Preparing empty texture")
+            })?;
+        Ok(ActiveTrail {
+            trail_idx,
+            category_idx,
+            filtered: false,
+            texture,
+            section_vbuffer: VertexBuffer::new::<Vertex>(device, None, Default::default())?,
+            section_bounds: Default::default(),
+            section_bookmarks: Default::default(),
+            render_bookmark,
+            y_offset: 0.0,
+            vertex_colour: Vec3::ONE,
+            attr_opacity: GetAttr::<keys::Alpha>::get_attr_or_default(attrs).into_owned(),
+            attr_tint: GetAttr::<keys::Tint>::get_attr_or_default(attrs).into_owned(),
+            attr_tint_map: GetAttr::<keys::MapTint>::get_attr(attrs).map(|v| v.into_owned()),
+            attr_vis_space: GetAttr::<keys::InGameVisibility>::get_attr_or_default(attrs).into_owned(),
+            attr_vis_map: GetAttr::<keys::MapVisibility>::get_attr_or_default(attrs).into_owned(),
+            attr_vis_minimap: GetAttr::<keys::MinimapVisibility>::get_attr_or_default(attrs).into_owned(),
         })
     }
 
@@ -269,6 +386,58 @@ impl ActiveTrail {
                 ),
             }
         }
+    }
+
+    pub(crate) fn is_visible_for_map(&self, ctx: MapContext) -> bool {
+        match ctx {
+            MapContext::Global => self.attr_vis_map.into(),
+            MapContext::Minimap => self.attr_vis_minimap.into(),
+        }
+    }
+    pub fn tint(&self) -> Option<Vec4> {
+        let mut tint = Vec4::from(self.attr_tint);
+        tint.w *= f32::from(self.attr_opacity);
+        if tint.w >= 0.97 && self.vertex_colour == tint.truncate() {
+            return None
+        }
+        tint *= self.vertex_colour.recip().extend(1.0);
+        Some(tint)
+    }
+    pub fn tint_map(&self) -> Option<Vec4> {
+        self.attr_tint_map
+            .map(|tint| {
+                let mut tint = Vec4::from(tint);
+                #[cfg(todo)]
+                {
+                    tint.w *= f32::from(self.attr_opacity);
+                }
+                tint *= self.vertex_colour.recip().extend(1.0);
+                tint
+            })
+            .or_else(|| self.tint())
+    }
+
+    #[cfg(feature = "paths-lua")]
+    pub(crate) fn attr_dirties_vb(key: PackKeyId) -> bool {
+        pack_attr! { =id_is_in(key, [
+            //keys::Alpha,
+            //keys::Tint,
+            keys::TrailScale,
+            keys::IsWall,
+            keys::InGameVisibility,
+            keys::TrailDataFile,
+        ]) }
+    }
+    #[cfg(feature = "paths-lua")]
+    pub(crate) fn attr_dirties_render(key: PackKeyId) -> bool {
+        pack_attr! { =id_is_in(key, [
+            keys::Alpha,
+            keys::Tint,
+            keys::InGameVisibility,
+            keys::MapVisibility,
+            keys::MinimapVisibility,
+            keys::GameMap,
+        ]) }
     }
 }
 
@@ -408,5 +577,50 @@ impl TrailTextureMap {
 impl Default for TrailTextureMap {
     fn default() -> Self {
         Self::DEFAULT
+    }
+}
+
+pack_attr! {
+    impl Attr{keys::InGameVisibility} for &struct{ActiveTrail}.attr_vis_space {}
+    impl Attr{keys::MapVisibility} for &struct{ActiveTrail}.attr_vis_map {}
+    impl Attr{keys::MinimapVisibility} for &struct{ActiveTrail}.attr_vis_minimap {}
+    impl Attr{keys::Alpha} for &struct{ActiveTrail}.attr_opacity {}
+    impl Attr{keys::Tint} for &struct{ActiveTrail}.attr_tint {}
+    impl Attr{keys::MapTint} for &struct{ActiveTrail}.attr_tint_map? {}
+}
+impl GetAttrDyn for ActiveTrail {
+    fn holds_attr_dyn(key: PackKeyId) -> bool {
+        pack_attr! { =id_is_in(key, [
+            keys::InGameVisibility, keys::MapVisibility, keys::MinimapVisibility,
+            keys::Alpha, keys::Tint, keys::MapTint,
+        ]) }
+    }
+    fn has_attr_dyn(&self, key: PackKeyId) -> bool {
+        pack_attr! { imp GetAttrDyn::has_attr_dyn(self, key) in [
+            keys::InGameVisibility, keys::MapVisibility, keys::MinimapVisibility,
+            keys::Alpha, keys::Tint, keys::MapTint,
+        ] }
+        .unwrap_or(false)
+    }
+    fn get_attr_dyn_ref(&self, key: PackKeyId) -> Option<&dyn AttrKeyValue> {
+        pack_attr! { imp GetAttrDyn::get_attr_dyn_ref(self, key) in [
+            keys::InGameVisibility, keys::MapVisibility, keys::MinimapVisibility,
+            keys::Alpha, keys::Tint, keys::MapTint,
+        ] }
+        .flatten()
+    }
+    fn iter_attrs_dyn(&self) -> impl Iterator<Item = std::borrow::Cow<'_, dyn AttrKeyValue>> + '_ {
+        pack_attr! { imp GetAttrDyn::iter_attrs_dyn(self) in [
+            keys::InGameVisibility, keys::MapVisibility, keys::MinimapVisibility,
+            keys::Alpha, keys::Tint, keys::MapTint,
+        ] }
+    }
+}
+impl SetAttrDyn for ActiveTrail {
+    fn set_attr_dyn(&mut self, value: PackValueCell) -> bool {
+        pack_attr! { imp SetAttrDyn::set_attr_dyn(self, value) in [
+            keys::InGameVisibility, keys::MapVisibility, keys::MinimapVisibility,
+            keys::Alpha, keys::Tint, keys::MapTint,
+        ] }
     }
 }

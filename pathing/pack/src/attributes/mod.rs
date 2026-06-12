@@ -4,6 +4,7 @@ use {
     anyhow::{anyhow, Context},
     glam::{Vec3, Vec4},
     std::{borrow::Cow, fmt, str::FromStr, sync::Arc},
+    taimi_hoard::str_opt_ref,
     uuid::Uuid,
     xml::name::Name,
 };
@@ -157,24 +158,15 @@ impl MarkerAttributes {
                 },
             }
         } else if attr_name.eq_ignore_ascii_case("rotate-x") {
-            let x = (!value.is_empty())
-                .then_some(&value[..])
-                .map(f32::from_str)
-                .transpose()?;
+            let x = str_opt_ref(&value).map(f32::from_str).transpose()?;
             self.poi_mut().rotate.get_or_insert(PoiAttributes::ROTATE_UNSET).x =
                 x.unwrap_or(PoiAttributes::ROTATE_UNSET_AXIS);
         } else if attr_name.eq_ignore_ascii_case("rotate-y") {
-            let y = (!value.is_empty())
-                .then_some(&value[..])
-                .map(f32::from_str)
-                .transpose()?;
+            let y = str_opt_ref(&value).map(f32::from_str).transpose()?;
             self.poi_mut().rotate.get_or_insert(PoiAttributes::ROTATE_UNSET).y =
                 y.unwrap_or(PoiAttributes::ROTATE_UNSET_AXIS);
         } else if attr_name.eq_ignore_ascii_case("rotate-z") {
-            let z = (!value.is_empty())
-                .then_some(&value[..])
-                .map(f32::from_str)
-                .transpose()?;
+            let z = str_opt_ref(&value).map(f32::from_str).transpose()?;
             self.poi_mut().rotate.get_or_insert(PoiAttributes::ROTATE_UNSET).z =
                 z.unwrap_or(PoiAttributes::ROTATE_UNSET_AXIS);
         } else if attr_name.eq_ignore_ascii_case("text") || attr_name.eq_ignore_ascii_case("title") {
@@ -1235,6 +1227,7 @@ pub struct TrailAttributes {
     pub texture: Option<AttrString>,
     pub trail_scale: Option<f32>,
     pub is_wall: Option<bool>,
+    pub tint_map: Option<Vec4>,
 }
 impl TrailAttributes {
     pub fn merge(&mut self, base: &Self) {
@@ -1250,6 +1243,9 @@ impl TrailAttributes {
         if self.is_wall.is_none() {
             self.is_wall = base.is_wall;
         }
+        if self.tint_map.is_none() {
+            self.tint_map = base.tint_map;
+        }
     }
 }
 impl GetAttrDyn for TrailAttributes {
@@ -1259,6 +1255,7 @@ impl GetAttrDyn for TrailAttributes {
             keys::TextureFile,
             keys::TrailScale,
             keys::IsWall,
+            keys::MapTint,
         ]))
     }
     fn has_attr_dyn(&self, key: cell::PackKeyId) -> bool {
@@ -1267,6 +1264,7 @@ impl GetAttrDyn for TrailAttributes {
             keys::TextureFile,
             keys::TrailScale,
             keys::IsWall,
+            keys::MapTint,
         ] }
         .unwrap_or(false)
     }
@@ -1276,6 +1274,7 @@ impl GetAttrDyn for TrailAttributes {
             keys::TextureFile,
             keys::TrailScale,
             keys::IsWall,
+            keys::MapTint,
         ] }
         .flatten()
     }
@@ -1285,6 +1284,7 @@ impl GetAttrDyn for TrailAttributes {
             keys::TextureFile,
             keys::TrailScale,
             keys::IsWall,
+            keys::MapTint,
         ] }
     }
 }
@@ -1295,6 +1295,7 @@ impl cell::SetAttrDyn for TrailAttributes {
             keys::TextureFile,
             keys::TrailScale,
             keys::IsWall,
+            keys::MapTint,
         ] }
     }
 }
@@ -1303,11 +1304,13 @@ cell::pack_attr! {
     impl Attr{keys::TextureFile} for &struct{TrailAttributes}.texture? {}
     impl Attr{keys::TrailScale} for &struct{TrailAttributes}.trail_scale? {}
     impl Attr{keys::IsWall} for &struct{TrailAttributes}.is_wall? {}
+    impl Attr{keys::MapTint} for &struct{TrailAttributes}.tint_map? {}
 
     impl Attr{keys::AnimSpeed} in Internal{TrailAttributes} {}
     impl Attr{keys::TextureFile} in Internal{TrailAttributes} {}
     impl Attr{keys::TrailScale} in Internal{TrailAttributes} {}
     impl Attr{keys::IsWall} in Internal{TrailAttributes} {}
+    impl Attr{keys::MapTint} in Internal{TrailAttributes} {}
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]

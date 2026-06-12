@@ -1,5 +1,13 @@
 use {
-    super::{ArcSettings, PathingSettings, ProgressBarSettings, RemoteState, SourceKind, TimerSettings},
+    super::{
+        ArcSettings,
+        DataStorage,
+        PathingSettings,
+        ProgressBarSettings,
+        RemoteState,
+        SourceKind,
+        TimerSettings,
+    },
     crate::{
         controller::timers::ProgressBarStyleChange,
         exports::runtime::{self as rt, bindings::TaimiControls},
@@ -174,6 +182,8 @@ pub struct Settings {
     pub marker_autoplace: MarkerAutoPlaceSettings,
     #[serde(default)]
     pub disabled_paths: Arc<HashSet<String>>,
+    #[serde(default)]
+    pub data_storage: DataStorage,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub arc: Option<ArcSettings>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -477,6 +487,7 @@ impl Settings {
             quick_access_style: Default::default(),
             marker_autoplace: Default::default(),
             disabled_paths: Default::default(),
+            data_storage: Default::default(),
             pathing: Default::default(),
             arc: Default::default(),
             ui_state: Default::default(),
