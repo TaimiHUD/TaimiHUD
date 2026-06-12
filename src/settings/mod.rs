@@ -22,6 +22,7 @@ pub use {
         SquadCondition,
     },
     source::{
+        data::DataStorage,
         sources::{DeserializedSource, RemoteAssetForm, SourceKind, SourcesFile},
         DirectSource,
         GitHubSource,

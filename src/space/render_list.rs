@@ -1,5 +1,6 @@
 use {
     crate::{render::machine::RenderPosition, space::DrawSpace},
+    bitvec::vec::BitVec,
     glamour::{Box3, Intersection, Point3, Vector3, Vector4},
     std::ops::Range,
 };
@@ -55,6 +56,8 @@ impl RenderListBuilder {
             SpatialMap::build(&entities, shapes)
         };
         RenderList {
+            #[cfg(feature = "space-list")]
+            unpopulated: Default::default(),
             entities,
             #[cfg(feature = "space-list")]
             spatial_map,
@@ -67,9 +70,9 @@ impl RenderListBuilder {
 impl Default for RenderListBuilder {
     fn default() -> RenderListBuilder {
         RenderListBuilder {
-            entities: Vec::with_capacity(8192),
+            entities: Vec::new(),
             #[cfg(feature = "space-list")]
-            entity_shapes: Vec::with_capacity(8192),
+            entity_shapes: Vec::new(),
             #[cfg(feature = "space-list")]
             draw_order_heap: BinaryHeap::with_capacity(4096),
         }
@@ -82,9 +85,15 @@ pub struct RenderList {
     spatial_map: SpatialMap,
     #[cfg(feature = "space-list")]
     draw_order_heap: BinaryHeap<HeapEntity>,
+    #[cfg(feature = "space-list")]
+    unpopulated: BitVec,
 }
 
 impl RenderList {
+    pub const BOUNDS_NONE: Box3<DrawSpace> = Box3::new(
+        Point3::new(-9000.0, -9000.0, -9000.0),
+        Point3::new(-9001.0, -9001.0, -9001.0),
+    );
     pub fn rebuild(&mut self) -> RenderListBuilder {
         //std::mem::take(&mut self.spatial_map.bvh.nodes);
         let mut builder = RenderListBuilder {
@@ -98,6 +107,7 @@ impl RenderList {
         #[cfg(feature = "space-list")]
         {
             builder.entity_shapes.clear();
+            self.unpopulated.clear();
         }
         builder
     }
@@ -107,18 +117,60 @@ impl RenderList {
         #[cfg(feature = "space-list")]
         {
             self.draw_order_heap.clear();
-            self.spatial_map.bvh.nodes.clear();
+            self.spatial_map.bvh.nodes = Vec::new();
             self.spatial_map.shapes.clear();
+            self.unpopulated.clear();
         }
     }
 
-    pub fn update(&mut self, index: usize) {
+    pub fn update_bounds(&mut self, index: usize, bounds: Box3<DrawSpace>) {
+        let Some(e) = self.entities.get_mut(index) else { return };
+        e.bounds = bounds;
+
         #[cfg(feature = "space-list")]
-        {
-            self.spatial_map.shapes[index] = RenderEntityShape::new((index, &self.entities[index]));
-            self.spatial_map
-                .bvh
-                .update_shapes(Some(&index), &mut self.spatial_map.shapes);
+        if let Some(shape) = self.spatial_map.shape_for_entity_mut(index) {
+            let new_bounds = RenderEntityShape::new((index, &*e)).bounds;
+            if shape.bounds == new_bounds {
+                return
+            }
+
+            #[cfg(todo)]
+            if shape.bounds.contains(new_bounds.min) && shape.bounds.contains(new_bounds.max) {
+                // TODO: technically should compare with parent bvh node bounds...
+                shape.bounds = new_bounds;
+                return
+            } else {
+                #[cfg(todo)]
+                {
+                    // XXX: bvh has a tree depth limit that that makes in-place updates useless because they can unbalance the tree...
+                    shape.bounds = new_bounds;
+                    self.spatial_map
+                        .bvh
+                        .update_shapes(Some(&index), &mut self.spatial_map.shapes);
+                    return
+                }
+            }
+            shape.disable();
+        }
+        #[cfg(feature = "space-list")]
+        match self.unpopulated.get_mut(index).map(|mut b| *b = true) {
+            Some(()) => (),
+            None => {
+                self.unpopulated.resize(index + 1, false);
+                let mut b = unsafe { self.unpopulated.last_mut().unwrap_unchecked() };
+                *b = true;
+            },
+        }
+    }
+    #[cfg(todo)]
+    pub fn disable_shape(&mut self, entity_idx: usize) {
+        if let Some(s) = self.spatial_map.shape_for_entity_mut(entity_idx) {
+            s.disable();
+        }
+    }
+    pub fn disable(&mut self, index: usize) {
+        if let Some(e) = self.entities.get_mut(index) {
+            e.disable();
         }
     }
 
@@ -131,10 +183,17 @@ impl RenderList {
         match () {
             #[cfg(feature = "space-list")]
             () => {
+                let trailing = self
+                    .unpopulated
+                    .iter_ones()
+                    .filter_map(|i| match self.entities.get(i) {
+                        Some(e) if frustum.intersects(&e.bounds) => Some(i),
+                        _ => None,
+                    });
                 self.draw_order_heap.clear();
                 RenderOrderBuilder {
                     entities: &self.entities,
-                    bvh_iter: self.spatial_map.select_visible_entities(frustum),
+                    bvh_iter: self.spatial_map.select_visible_entities(frustum).chain(trailing),
                     draw_order_heap: &mut self.draw_order_heap,
                     cam_origin,
                     cam_dir,
@@ -157,9 +216,17 @@ impl RenderList {
             #[cfg(feature = "space-list")]
             () => {
                 let entities = &self.entities;
+                let trailing = self
+                    .unpopulated
+                    .iter_ones()
+                    .filter_map(|i| match self.entities.get(i) {
+                        Some(e) if frustum.intersects(&e.bounds) => Some(e),
+                        _ => None,
+                    });
                 self.spatial_map
                     .select_visible_entities(frustum)
                     .filter_map(move |i| entities.get(i))
+                    .chain(trailing)
             },
             #[cfg(not(feature = "space-list"))]
             () => {
@@ -185,10 +252,23 @@ impl RenderList {
     pub fn entities_mut_end(&mut self) {
         #[cfg(feature = "space-list")]
         {
+            let unpop = self.unpopulated.count_ones();
+            let pop_end = self.unpopulated.len().max(self.spatial_map.shapes.len());
+            let trailing = self.entities.len().saturating_sub(pop_end);
+            if unpop + trailing < 0x14 {
+                // for a small number of additions, keep them implicit for now...
+                // TODO: no need to populate these bits if you just append the trailing indices when iterating...
+                if self.unpopulated.len() < self.spatial_map.shapes.len() {
+                    self.unpopulated.resize(self.spatial_map.shapes.len(), false);
+                }
+                self.unpopulated.resize(self.entities.len(), true);
+                return
+            }
             let mut shapes = std::mem::take(&mut self.spatial_map.shapes);
             shapes.clear();
             shapes.reserve(self.entities.len());
             self.spatial_map = SpatialMap::build(&self.entities, shapes);
+            self.unpopulated.clear();
         };
     }
 
@@ -262,6 +342,13 @@ impl RenderEntityShape {
             bh_idx: 0,
         }
     }
+    fn disable(&mut self) {
+        self.entity_idx = usize::MAX;
+    }
+    #[inline]
+    pub fn is_disabled(&self) -> bool {
+        self.entity_idx == usize::MAX
+    }
 }
 
 #[cfg(feature = "space-list")]
@@ -290,6 +377,7 @@ struct SpatialMap {
 
 #[cfg(feature = "space-list")]
 impl SpatialMap {
+    /// TODO: filter out disabled entities, then [Self::shape_for_entity_mut] must binary search
     fn build(entities: &[RenderEntity], mut shapes: Vec<RenderEntityShape>) -> SpatialMap {
         shapes.extend(entities.iter().enumerate().map(RenderEntityShape::new));
         let bvh = Bvh::build(&mut shapes);
@@ -302,7 +390,11 @@ impl SpatialMap {
     ) -> impl Iterator<Item = usize> + 'a {
         self.bvh
             .traverse_iterator(frustum, &self.shapes)
-            .map(|shape| shape.entity_idx)
+            .filter_map(|shape| (!shape.is_disabled()).then_some(shape.entity_idx))
+    }
+    fn shape_for_entity_mut(&mut self, entity_idx: usize) -> Option<&mut RenderEntityShape> {
+        let shape = self.shapes.get_mut(entity_idx)?;
+        (!shape.is_disabled()).then_some(shape)
     }
 }
 
@@ -335,7 +427,7 @@ impl MapFrustum {
         let fov = data.fov();
         let p = data.pos;
         let d = data.front.normalize();
-        let right = d.cross(glam::Vec3::new(0.0, 1.0, 0.0)).normalize();
+        let right = d.cross(glam::Vec3::Y).normalize();
         let up = right.cross(d).normalize();
 
         let tan_fov2 = (fov / 2.0).tan();
@@ -349,7 +441,7 @@ impl MapFrustum {
         let up_far = up * h_far / 2.0;
         let right_far = right * w_far / 2.0;
         let up_near = up * h_near / 2.0;
-        let right_near = up * w_near / 2.0;
+        let right_near = right * w_near / 2.0;
 
         let ftr = fc + up_far + right_far;
         let ftl = fc + up_far - right_far;
@@ -511,7 +603,6 @@ impl IntersectsAabb<f32, 3> for MapFrustum {
     }
 }
 
-#[cfg(not(feature = "space-list"))]
 impl Intersection<Point3<DrawSpace>> for MapFrustum {
     type Intersection = bool;
 
@@ -531,19 +622,20 @@ impl Intersection<Point3<DrawSpace>> for MapFrustum {
     }
 }
 
-#[cfg(not(feature = "space-list"))]
 impl Intersection<Box3<DrawSpace>> for MapFrustum {
-    type Intersection = bool;
+    type Intersection = ();
 
     fn intersects(&self, thing: &Box3<DrawSpace>) -> bool {
-        self.intersection(thing) == Some(true)
+        self.intersection(thing).is_some()
     }
 
     fn intersection(&self, thing: &Box3<DrawSpace>) -> Option<Self::Intersection> {
-        if self.intersects(&thing.min) || self.intersects(&thing.max) {
-            Some(true)
-        } else {
-            Some(false)
-        }
+        let corners = thing.corners();
+        let corners = corners.iter().map(|c| c.to_raw().extend(1.0));
+        self.planes()
+            .iter()
+            .map(|p| glam::Vec4::from(*p))
+            .all(|p| corners.clone().any(|c| p.dot(c) >= 0.0))
+            .then_some(())
     }
 }

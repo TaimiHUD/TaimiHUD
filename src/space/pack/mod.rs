@@ -10,7 +10,7 @@ pub(crate) mod pack;
 
 pub use {
     self::{
-        pack::{ActivePack, LoaderBox, PackCollection, UnloadedReason},
+        pack::{ActivePack, LoaderBox, PackCollection, SharedLoader, UnloadedReason},
         poi::PoiScale,
         trail::{TrailScale, TrailTextureMap},
     },

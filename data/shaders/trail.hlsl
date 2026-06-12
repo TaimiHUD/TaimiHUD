@@ -23,6 +23,7 @@ struct VSInput
     float3 color: COLOR0;
     float3 normal: NORMAL;
     float2 tex: TEXCOORD0;
+    float4 tint: COLOUR;
 };
 
 Texture2D shaderTexture : register(t0);
@@ -62,7 +63,7 @@ VSOutput VSMain(VSInput input)
     output.tex = float2(input.tex.x, input.tex.y * Expand.w + Expand.z);
 
     float alpha = PlayerPos.w;
-    output.color = float4(input.color, alpha);
+    output.color = float4(input.tint.xyz * input.color, input.tint.w * alpha);
 
     return output;
 }
