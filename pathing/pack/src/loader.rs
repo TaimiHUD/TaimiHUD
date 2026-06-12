@@ -24,6 +24,7 @@ pub trait PackLoaderContext {
         Self: Sized;
 
     fn load_asset_dyn(&mut self, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>>;
+    fn contains_asset(&self, name: &str) -> anyhow::Result<bool>;
 
     /// check if an asset directly corresponds to a real file
     /// (only realistic when backed by [DirectoryLoader])
@@ -84,6 +85,9 @@ impl PackLoaderContext for &mut dyn PackLoaderContext {
     fn load_asset_dyn(&mut self, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>> {
         PackLoaderContext::load_asset_dyn(*self, name)
     }
+    fn contains_asset(&self, name: &str) -> anyhow::Result<bool> {
+        PackLoaderContext::contains_asset(*self, name)
+    }
 
     fn all_files_with_ext<'a>(&'a self, ext: &'static str) -> PackFilenameIter<'a> {
         PackLoaderContext::all_files_with_ext(*self, ext)
@@ -96,6 +100,9 @@ impl<L: PackLoaderContext> PackLoaderContext for &mut L {
 
     fn load_asset_dyn(&mut self, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>> {
         PackLoaderContext::load_asset_dyn(*self, name)
+    }
+    fn contains_asset(&self, name: &str) -> anyhow::Result<bool> {
+        PackLoaderContext::contains_asset(*self, name)
     }
 
     fn all_files_with_ext<'a>(&'a self, ext: &'static str) -> PackFilenameIter<'a> {
@@ -110,6 +117,9 @@ impl PackLoaderContext for Box<dyn PackLoaderContext + '_> {
     fn load_asset_dyn(&mut self, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>> {
         PackLoaderContext::load_asset_dyn(&mut **self, name)
     }
+    fn contains_asset(&self, name: &str) -> anyhow::Result<bool> {
+        PackLoaderContext::contains_asset(&**self, name)
+    }
     fn all_files_with_ext<'a>(&'a self, ext: &'static str) -> PackFilenameIter<'a> {
         PackLoaderContext::all_files_with_ext(&**self, ext)
     }
@@ -121,6 +131,9 @@ impl PackLoaderContext for Box<dyn PackLoaderContext + Send + '_> {
     fn load_asset_dyn(&mut self, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>> {
         PackLoaderContext::load_asset_dyn(&mut **self, name)
     }
+    fn contains_asset(&self, name: &str) -> anyhow::Result<bool> {
+        PackLoaderContext::contains_asset(&**self, name)
+    }
     fn all_files_with_ext<'a>(&'a self, ext: &'static str) -> PackFilenameIter<'a> {
         PackLoaderContext::all_files_with_ext(&**self, ext)
     }
@@ -131,6 +144,9 @@ impl PackLoaderContext for Box<dyn PackLoaderContext + Send + Sync + '_> {
     }
     fn load_asset_dyn(&mut self, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>> {
         PackLoaderContext::load_asset_dyn(&mut **self, name)
+    }
+    fn contains_asset(&self, name: &str) -> anyhow::Result<bool> {
+        PackLoaderContext::contains_asset(&**self, name)
     }
     fn all_files_with_ext<'a>(&'a self, ext: &'static str) -> PackFilenameIter<'a> {
         PackLoaderContext::all_files_with_ext(&**self, ext)
@@ -159,6 +175,14 @@ impl PackLoaderContext for DirectoryLoader {
 
     fn load_asset_dyn(&mut self, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>> {
         Ok(Box::new(self.load_asset(name)?))
+    }
+    fn contains_asset(&self, name: &str) -> anyhow::Result<bool> {
+        let path = self.root.join(name);
+        match fs::metadata(path).map(|p| !p.is_dir()) {
+            Ok(e) => Ok(e),
+            Err(e) if matches!(e.kind(), io::ErrorKind::NotFound) => Ok(false),
+            Err(e) => Err(e.into()),
+        }
     }
 
     fn all_files_with_ext<'a>(&'a self, ext: &'static str) -> PackFilenameIter<'a> {
@@ -266,6 +290,15 @@ impl PackLoaderContext for ZipLoader {
 
     fn load_asset_dyn(&mut self, name: &str) -> anyhow::Result<Box<dyn LoaderAssetReader>> {
         Ok(Box::new(self.load_asset(name)?))
+    }
+    fn contains_asset(&self, name: &str) -> anyhow::Result<bool> {
+        if self.archive.index_for_name(name).is_some() {
+            return Ok(true)
+        }
+        Ok(self
+            .archive
+            .file_names()
+            .any(|filename| file_path_eq(name, filename)))
     }
 
     fn all_files_with_ext<'a>(&'a self, ext: &'static str) -> PackFilenameIter<'a> {
