@@ -4,7 +4,6 @@
     "kind": "Vertex",
     "path": "trail.hlsl",
     "entrypoint": "VSMain",
-    "layout_type": "JustVertex",
   },
   {
     "identifier": "trail",

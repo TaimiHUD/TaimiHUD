@@ -1,5 +1,8 @@
+#[cfg(feature = "paths-lua")]
+use core::mem;
+
 use {
-    super::{ActivePack, PoiExt},
+    super::ActivePack,
     crate::{
         exports::runtime::Counter,
         render::machine::RenderMachine,
@@ -12,7 +15,11 @@ use {
     anyhow::Context,
     glam::{vec2, vec3, EulerRot, Mat4, Quat, Vec3, Vec3Swizzles, Vec4},
     glamour::{Box3, Point3, Vector2},
-    std::{f32::consts::FRAC_PI_2, sync::Arc},
+    std::{
+        borrow::{Borrow, Cow},
+        f32::consts::FRAC_PI_2,
+        sync::Arc,
+    },
     taimi_d3d::{
         dx11::{
             buffer::{BufferOf, VertexBuffer},
@@ -20,8 +27,11 @@ use {
         },
         state::PrimitiveTopology,
     },
-    taimi_meta::ui::LocalContext,
-    taimi_pack::Poi,
+    taimi_meta::ui::{LocalContext, MapContext},
+    taimi_pack::attributes::{
+        cell::{pack_attr, AttrKeyValue, GetAttrDyn, PackKeyId, PackValueCell, SetAttrDyn},
+        keys::{self, GetAttr, SetAttr},
+    },
 };
 
 pub struct PoiCommonRenderData {
@@ -173,41 +183,76 @@ pub struct ActivePoi {
     pub scale: f32,
     pub scale_map: f32,
     pub icon: Arc<Texture>,
+    pub render_bookmark: u32,
+    #[cfg(feature = "paths-lua")]
+    pub ibd_dirty_space: bool,
+    #[cfg(feature = "paths-lua")]
+    pub ibd_dirty_map: bool,
+
+    pub attr_vis_space: keys::InGameVisibility,
+    pub attr_vis_map: keys::MapVisibility,
+    pub attr_vis_minimap: keys::MinimapVisibility,
+    #[cfg(todo)]
+    pub attr_map_id: keys::GameMap,
 }
 
 impl ActivePoi {
-    pub fn build(
+    pub fn build<A>(
         loader: &mut ActivePack,
-        poi: &Poi,
+        attrs: &A,
         poi_idx: usize,
         category_idx: usize,
         device: &Dx11Device,
-    ) -> anyhow::Result<ActivePoi> {
-        let icon_handle = poi
-            .icon_name()
+        render_bookmark: usize,
+    ) -> anyhow::Result<ActivePoi>
+    where
+        A: GetAttr<keys::Guid>
+            + GetAttr<keys::CategoryRef>
+            + GetAttr<keys::Tint>
+            + GetAttr<keys::Alpha>
+            + GetAttr<keys::IconFile>
+            + GetAttr<keys::IconSize>
+            + GetAttr<keys::MapDisplaySize>
+            + GetAttr<keys::PositionX>
+            + GetAttr<keys::PositionY>
+            + GetAttr<keys::PositionZ>
+            + GetAttr<keys::RotateX>
+            + GetAttr<keys::RotateY>
+            + GetAttr<keys::RotateZ>
+            + GetAttr<keys::InGameVisibility>
+            + GetAttr<keys::MapVisibility>
+            + GetAttr<keys::MinimapVisibility>,
+    {
+        let icon_handle = GetAttr::<keys::IconFile>::get_attr(attrs)
             .ok_or_else(|| anyhow::anyhow!("POI is missing icon. TODO: default icon?"))?;
-        let icon_handle = loader.register_texture(icon_handle);
+        let icon_handle = loader.register_texture(&icon_handle);
         let icon = loader
             .get_or_load_texture(icon_handle, device)
             .context("Loading poi texture")?;
 
-        let position = poi.position();
-        let scale = poi.icon_scale();
-        let (scale_map, rotation) = {
-            let attrs = poi.attributes.poi();
-            (
-                attrs.map_display_size.unwrap_or(20.0),
-                attrs.rotate.map(Self::rotation_from_xyz),
-            )
+        let position = Point3::new(
+            f32::from(GetAttr::<keys::PositionX>::get_attr_or_default(attrs).into_owned()),
+            f32::from(GetAttr::<keys::PositionY>::get_attr_or_default(attrs).into_owned()),
+            f32::from(GetAttr::<keys::PositionZ>::get_attr_or_default(attrs).into_owned()),
+        );
+        let rotation = {
+            let x = GetAttr::<keys::RotateX>::get_attr(attrs).map(|v| f32::from(v.into_owned()));
+            let y = GetAttr::<keys::RotateY>::get_attr(attrs).map(|v| f32::from(v.into_owned()));
+            let z = GetAttr::<keys::RotateZ>::get_attr(attrs).map(|v| f32::from(v.into_owned()));
+            (x.is_some() | y.is_some() | z.is_some()).then(|| {
+                Self::rotation_from_xyz(Vec3::new(
+                    x.unwrap_or(0.0f32),
+                    y.unwrap_or(0.0f32),
+                    z.unwrap_or(0.0f32),
+                ))
+            })
         };
-        let (tint, opacity) = {
-            let render = poi.attributes.render();
-            (render.tint(), render.alpha())
-        };
+        let scale = f32::from(GetAttr::<keys::IconSize>::get_attr_or_default(attrs).into_owned());
+        let scale_map = f32::from(GetAttr::<keys::MapDisplaySize>::get_attr_or_default(attrs).into_owned());
+        let tint = Vec4::from(GetAttr::<keys::Tint>::get_attr_or_default(attrs).into_owned());
+        let opacity = f32::from(GetAttr::<keys::Alpha>::get_attr_or_default(attrs).into_owned());
 
-        let edge_len = scale * 2.0;
-        let max_diagonal = (edge_len.powi(2) * 2.0).sqrt();
-        let bounds = Box3::from_origin_and_size(position, glamour::size3!(max_diagonal));
+        let bounds = Self::bounds_for(position, scale);
 
         Ok(ActivePoi {
             poi_idx,
@@ -221,6 +266,108 @@ impl ActivePoi {
             scale,
             scale_map,
             icon: icon.clone(),
+            render_bookmark: render_bookmark as u32,
+            attr_vis_space: GetAttr::<keys::InGameVisibility>::get_attr_or_default(attrs).into_owned(),
+            attr_vis_map: GetAttr::<keys::MapVisibility>::get_attr_or_default(attrs).into_owned(),
+            attr_vis_minimap: GetAttr::<keys::MinimapVisibility>::get_attr_or_default(attrs).into_owned(),
+            #[cfg(feature = "paths-lua")]
+            ibd_dirty_space: true,
+            #[cfg(feature = "paths-lua")]
+            ibd_dirty_map: true,
+        })
+    }
+    pub fn new_empty<A>(
+        loader: &mut ActivePack,
+        attrs: &A,
+        poi_idx: usize,
+        category_idx: usize,
+        device: &Dx11Device,
+        render_bookmark: usize,
+    ) -> anyhow::Result<ActivePoi>
+    where
+        A: GetAttr<keys::Guid>
+            + GetAttr<keys::Tint>
+            + GetAttr<keys::Alpha>
+            + GetAttr<keys::IconFile>
+            + GetAttr<keys::IconSize>
+            + GetAttr<keys::MapDisplaySize>
+            + GetAttr<keys::PositionX>
+            + GetAttr<keys::PositionY>
+            + GetAttr<keys::PositionZ>
+            + GetAttr<keys::RotateX>
+            + GetAttr<keys::RotateY>
+            + GetAttr<keys::RotateZ>
+            + GetAttr<keys::InGameVisibility>
+            + GetAttr<keys::MapVisibility>
+            + GetAttr<keys::MinimapVisibility>,
+    {
+        let icon_handle = GetAttr::<keys::IconFile>::get_attr(attrs);
+        let icon = icon_handle
+            .map(|h| {
+                let icon_handle = loader.register_texture(&h);
+                loader
+                    .get_or_load_texture(icon_handle, device)
+                    .context("Loading poi icon")
+                    .cloned()
+            })
+            .unwrap_or_else(|| {
+                unsafe {
+                    Texture::new_raw(
+                        device,
+                        &vec![0u8; 32 * 32],
+                        [32, 32],
+                        32,
+                        taimi_d3d::DxgiFormat::A8_UNORM,
+                    )
+                }
+                .map(Arc::new)
+                .context("Preparing empty texture")
+            })?;
+
+        let position = Point3::new(
+            f32::from(GetAttr::<keys::PositionX>::get_attr_or_default(attrs).into_owned()),
+            f32::from(GetAttr::<keys::PositionY>::get_attr_or_default(attrs).into_owned()),
+            f32::from(GetAttr::<keys::PositionZ>::get_attr_or_default(attrs).into_owned()),
+        );
+        let rotation = {
+            let x = GetAttr::<keys::RotateX>::get_attr(attrs).map(|v| f32::from(v.into_owned()));
+            let y = GetAttr::<keys::RotateY>::get_attr(attrs).map(|v| f32::from(v.into_owned()));
+            let z = GetAttr::<keys::RotateZ>::get_attr(attrs).map(|v| f32::from(v.into_owned()));
+            (x.is_some() | y.is_some() | z.is_some()).then(|| {
+                Self::rotation_from_xyz(Vec3::new(
+                    x.unwrap_or(0.0f32),
+                    y.unwrap_or(0.0f32),
+                    z.unwrap_or(0.0f32),
+                ))
+            })
+        };
+        let scale = f32::from(GetAttr::<keys::IconSize>::get_attr_or_default(attrs).into_owned());
+
+        let bounds = match GetAttr::<keys::PositionX>::has_attr(attrs) {
+            true => Self::bounds_for(position, scale),
+            false => Self::DIRTY_BOUNDS,
+        };
+
+        Ok(ActivePoi {
+            poi_idx,
+            category_idx,
+            filtered: false,
+            bounds,
+            position,
+            tint: Vec4::from(GetAttr::<keys::Tint>::get_attr_or_default(attrs).into_owned()),
+            opacity: f32::from(GetAttr::<keys::Alpha>::get_attr_or_default(attrs).into_owned()),
+            scale,
+            scale_map: f32::from(GetAttr::<keys::MapDisplaySize>::get_attr_or_default(attrs).into_owned()),
+            icon: icon.clone(),
+            render_bookmark: render_bookmark as u32,
+            rotation,
+            attr_vis_space: GetAttr::<keys::InGameVisibility>::get_attr_or_default(attrs).into_owned(),
+            attr_vis_map: GetAttr::<keys::MapVisibility>::get_attr_or_default(attrs).into_owned(),
+            attr_vis_minimap: GetAttr::<keys::MinimapVisibility>::get_attr_or_default(attrs).into_owned(),
+            #[cfg(feature = "paths-lua")]
+            ibd_dirty_space: true,
+            #[cfg(feature = "paths-lua")]
+            ibd_dirty_map: true,
         })
     }
 
@@ -233,6 +380,10 @@ impl ActivePoi {
     pub fn is_billboard(&self) -> bool {
         self.rotation.is_none()
     }
+    #[inline]
+    pub fn rotation_xyz(&self) -> Vec3 {
+        self.rotation.map(Self::rotation_to_xyz).unwrap_or(Vec3::ZERO)
+    }
     pub(crate) fn rotation_from_xyz(rot: Vec3) -> Quat {
         Quat::from_euler(
             EulerRot::XZY,
@@ -240,6 +391,10 @@ impl ActivePoi {
             rot.y.to_radians(),
             -rot.z.to_radians(),
         )
+    }
+    pub(crate) fn rotation_to_xyz(rot: Quat) -> Vec3 {
+        let (x, y, z) = rot.to_euler(EulerRot::XZY);
+        Vec3::new(x + FRAC_PI_2, y, -z).map(f32::to_degrees)
     }
 
     pub fn instance_data(&self) -> InstanceBufferData {
@@ -266,9 +421,23 @@ impl ActivePoi {
         }
     }
 
-    pub fn update(pack: &mut ActivePack, poi_idx: usize) {
-        let _ = pack;
-        let _ = poi_idx;
+    #[cfg(feature = "paths-lua")]
+    pub fn update(pack: &mut ActivePack, active_poi_idx: usize) -> (bool, bool, bool) {
+        let poi = match pack.active_pois.get_index_mut(active_poi_idx) {
+            #[cfg(debug_assertions)]
+            None => unreachable!("poi#{active_poi_idx} missing"),
+            p => unsafe { p.unwrap_unchecked().1 },
+        };
+        let bounds_dirty = poi.bounds_dirty();
+        if bounds_dirty {
+            poi.regen_bounds()
+        }
+
+        (
+            bounds_dirty,
+            mem::take(&mut poi.ibd_dirty_space),
+            mem::take(&mut poi.ibd_dirty_map),
+        )
     }
 
     pub fn draw(&self, device_context: &Dx11Context, render_idx: usize, ctx: LocalContext) {
@@ -289,6 +458,45 @@ impl ActivePoi {
         unsafe {
             device_context.Draw(4, 0);
         }*/
+    }
+
+    pub(crate) fn is_visible_for_map(&self, ctx: MapContext) -> bool {
+        match ctx {
+            MapContext::Global => self.attr_vis_map.into(),
+            MapContext::Minimap => self.attr_vis_minimap.into(),
+        }
+    }
+
+    fn bounds_for(position: Point3<DrawSpace>, icon_scale: f32) -> Box3<DrawSpace> {
+        let edge_len = icon_scale * 2.0;
+        let max_diagonal = (edge_len.powi(2) * 2.0).sqrt();
+        Box3::from_origin_and_size(position, glamour::size3!(max_diagonal))
+    }
+    pub(crate) fn is_dirty(&self) -> bool {
+        let dirty = self.bounds_dirty();
+        #[cfg(feature = "paths-lua")]
+        let dirty = self.ibd_dirty_map | self.ibd_dirty_space | dirty;
+        dirty
+    }
+    pub(crate) fn bounds_dirty(&self) -> bool {
+        !self.bounds.max.x.is_finite()
+    }
+    const DIRTY_BOUNDS: Box3<DrawSpace> = Box3::new(Point3::NEG_INFINITY, Point3::INFINITY);
+    fn mark_bounds_dirty(&mut self) {
+        self.bounds = Self::DIRTY_BOUNDS;
+    }
+    fn regen_bounds(&mut self) {
+        self.bounds = Self::bounds_for(self.position, self.scale);
+    }
+
+    #[cfg(feature = "paths-lua")]
+    pub(crate) fn attr_dirties_render(key: PackKeyId) -> bool {
+        pack_attr! { =id_is_in(key, [
+            keys::InGameVisibility,
+            keys::MapVisibility,
+            keys::MinimapVisibility,
+            keys::GameMap,
+        ]) }
     }
 }
 
@@ -321,5 +529,361 @@ impl PoiScale {
 impl Default for PoiScale {
     fn default() -> Self {
         Self::DEFAULT
+    }
+}
+
+pack_attr! {
+    impl Attr{keys::InGameVisibility} for &struct{ActivePoi}.attr_vis_space {}
+    impl Attr{keys::MapVisibility} for &struct{ActivePoi}.attr_vis_map {}
+    impl Attr{keys::MinimapVisibility} for &struct{ActivePoi}.attr_vis_minimap {}
+}
+impl GetAttr<keys::PositionX> for ActivePoi {
+    #[inline]
+    fn has_attr(&self) -> bool {
+        true
+    }
+    #[inline]
+    fn get_attr_ref(&self) -> Option<&keys::PositionX> {
+        Some(keys::PositionX::from_ref(&self.position.x))
+    }
+}
+impl SetAttr<keys::PositionX> for ActivePoi {
+    fn set_attr(&mut self, value: keys::PositionX) {
+        let x = f32::from(value);
+        let dirty = self.position.x != x;
+        self.position.x = x;
+        if dirty {
+            #[cfg(feature = "paths-lua")]
+            {
+                self.ibd_dirty_space = true;
+            }
+            self.mark_bounds_dirty();
+        }
+    }
+}
+impl GetAttr<keys::PositionY> for ActivePoi {
+    #[inline]
+    fn has_attr(&self) -> bool {
+        true
+    }
+    #[inline]
+    fn get_attr_ref(&self) -> Option<&keys::PositionY> {
+        Some(keys::PositionY::from_ref(&self.position.y))
+    }
+}
+impl SetAttr<keys::PositionY> for ActivePoi {
+    fn set_attr(&mut self, value: keys::PositionY) {
+        let y = f32::from(value);
+        let dirty = self.position.y != y;
+        self.position.y = y;
+        if dirty {
+            #[cfg(feature = "paths-lua")]
+            {
+                self.ibd_dirty_space = true;
+            }
+            self.mark_bounds_dirty();
+        }
+    }
+}
+impl GetAttr<keys::PositionZ> for ActivePoi {
+    #[inline]
+    fn has_attr(&self) -> bool {
+        true
+    }
+    #[inline]
+    fn get_attr_ref(&self) -> Option<&keys::PositionZ> {
+        Some(keys::PositionZ::from_ref(&self.position.z))
+    }
+}
+impl SetAttr<keys::PositionZ> for ActivePoi {
+    fn set_attr(&mut self, value: keys::PositionZ) {
+        let z = f32::from(value);
+        let dirty = self.position.z != z;
+        self.position.z = z;
+        if dirty {
+            #[cfg(feature = "paths-lua")]
+            {
+                self.ibd_dirty_space = true;
+            }
+            self.mark_bounds_dirty();
+        }
+    }
+}
+impl GetAttr<keys::Rotate> for ActivePoi {
+    #[inline]
+    fn has_attr(&self) -> bool {
+        self.rotation.is_some()
+    }
+    #[inline]
+    fn get_attr(&self) -> Option<Cow<'_, keys::Rotate>> {
+        Some(Cow::Owned(keys::Rotate::from(self.rotation_xyz())))
+    }
+}
+impl SetAttr<keys::Rotate> for ActivePoi {
+    fn set_attr(&mut self, value: keys::Rotate) {
+        self.rotation = Some(Self::rotation_from_xyz(value.into()));
+        #[cfg(feature = "paths-lua")]
+        {
+            self.ibd_dirty_space = true;
+        }
+    }
+    fn unset_attr(&mut self) {
+        #[cfg(feature = "paths-lua")]
+        {
+            self.ibd_dirty_space = self.rotation.is_some();
+        }
+        self.rotation = None;
+    }
+}
+impl GetAttr<keys::RotateX> for ActivePoi {
+    #[inline]
+    fn has_attr(&self) -> bool {
+        self.rotation.is_some()
+    }
+    #[inline]
+    fn get_attr(&self) -> Option<Cow<'_, keys::RotateX>> {
+        Some(Cow::Owned(keys::RotateX::from(self.rotation_xyz().x)))
+    }
+}
+impl SetAttr<keys::RotateX> for ActivePoi {
+    fn set_attr(&mut self, value: keys::RotateX) {
+        let rot = self.rotation_xyz();
+        let x = f32::from(value);
+        let dirty = rot.x != x;
+        if dirty {
+            self.rotation = Some(Self::rotation_from_xyz(rot.with_x(x)));
+            #[cfg(feature = "paths-lua")]
+            {
+                self.ibd_dirty_space = true;
+            }
+        }
+    }
+    fn unset_attr(&mut self) {
+        self.set_attr(keys::RotateX::default());
+        if let Some(true) = self.rotation.map(|r| r.is_near_identity()) {
+            SetAttr::<keys::Rotate>::unset_attr(self)
+        }
+    }
+}
+impl GetAttr<keys::RotateY> for ActivePoi {
+    #[inline]
+    fn has_attr(&self) -> bool {
+        self.rotation.is_some()
+    }
+    #[inline]
+    fn get_attr(&self) -> Option<Cow<'_, keys::RotateY>> {
+        Some(Cow::Owned(keys::RotateY::from(self.rotation_xyz().y)))
+    }
+}
+impl SetAttr<keys::RotateY> for ActivePoi {
+    fn set_attr(&mut self, value: keys::RotateY) {
+        let rot = self.rotation_xyz();
+        let y = f32::from(value);
+        let dirty = rot.y != y;
+        if dirty {
+            self.rotation = Some(Self::rotation_from_xyz(rot.with_y(y)));
+            #[cfg(feature = "paths-lua")]
+            {
+                self.ibd_dirty_space = true;
+            }
+        }
+    }
+    fn unset_attr(&mut self) {
+        self.set_attr(keys::RotateY::default());
+        if let Some(true) = self.rotation.map(|r| r.is_near_identity()) {
+            SetAttr::<keys::Rotate>::unset_attr(self)
+        }
+    }
+}
+impl GetAttr<keys::RotateZ> for ActivePoi {
+    #[inline]
+    fn has_attr(&self) -> bool {
+        self.rotation.is_some()
+    }
+    #[inline]
+    fn get_attr(&self) -> Option<Cow<'_, keys::RotateZ>> {
+        Some(Cow::Owned(keys::RotateZ::from(self.rotation_xyz().z)))
+    }
+}
+impl SetAttr<keys::RotateZ> for ActivePoi {
+    fn set_attr(&mut self, value: keys::RotateZ) {
+        let rot = self.rotation_xyz();
+        let z = f32::from(value);
+        let dirty = rot.z != z;
+        if dirty {
+            self.rotation = Some(Self::rotation_from_xyz(rot.with_z(z)));
+            #[cfg(feature = "paths-lua")]
+            {
+                self.ibd_dirty_space = true;
+            }
+        }
+    }
+    fn unset_attr(&mut self) {
+        self.set_attr(keys::RotateZ::default());
+        if let Some(true) = self.rotation.map(|r| r.is_near_identity()) {
+            SetAttr::<keys::Rotate>::unset_attr(self)
+        }
+    }
+}
+impl GetAttr<keys::IconSize> for ActivePoi {
+    #[inline]
+    fn has_attr(&self) -> bool {
+        //self.scale_map != keys::IconSize::DEFAULT.0
+        true
+    }
+    #[inline]
+    fn get_attr_ref(&self) -> Option<&keys::IconSize> {
+        Some(keys::IconSize::from_ref(&self.scale))
+    }
+}
+impl SetAttr<keys::IconSize> for ActivePoi {
+    fn set_attr(&mut self, value: keys::IconSize) {
+        let scale = f32::from(value);
+        let dirty = self.scale != scale;
+        self.scale = scale;
+        if dirty {
+            self.mark_bounds_dirty();
+        }
+    }
+}
+impl GetAttr<keys::MapDisplaySize> for ActivePoi {
+    #[inline]
+    fn has_attr(&self) -> bool {
+        //self.scale_map != keys::MapDisplaySize::DEFAULT.0
+        true
+    }
+    #[inline]
+    fn get_attr_ref(&self) -> Option<&keys::MapDisplaySize> {
+        Some(keys::MapDisplaySize::from_ref(&self.scale_map))
+    }
+}
+impl SetAttr<keys::MapDisplaySize> for ActivePoi {
+    fn set_attr(&mut self, value: keys::MapDisplaySize) {
+        let scale_map = f32::from(value);
+        let _dirty = self.scale_map != scale_map;
+        self.scale_map = scale_map;
+        #[cfg(feature = "paths-lua")]
+        if _dirty {
+            self.ibd_dirty_map = true;
+        }
+    }
+}
+impl GetAttr<keys::Tint> for ActivePoi {
+    #[inline]
+    fn has_attr(&self) -> bool {
+        //self.tint.0 != keys::Colour::WHITE
+        true
+    }
+    #[inline]
+    fn get_attr_ref(&self) -> Option<&keys::Tint> {
+        Some(self.tint.borrow())
+    }
+}
+impl SetAttr<keys::Tint> for ActivePoi {
+    fn set_attr(&mut self, value: keys::Tint) {
+        let tint = Vec4::from(value);
+        #[cfg(todo = "unnecessary")]
+        let dirty = self.tint != tint;
+        #[cfg(feature = "paths-lua")]
+        let dirty = true;
+        self.tint = tint;
+        #[cfg(feature = "paths-lua")]
+        if dirty {
+            self.ibd_dirty_space = true;
+            self.ibd_dirty_map = true;
+        }
+    }
+}
+impl GetAttr<keys::Alpha> for ActivePoi {
+    #[inline]
+    fn has_attr(&self) -> bool {
+        //self.opacity < 1.0
+        true
+    }
+    #[inline]
+    fn get_attr_ref(&self) -> Option<&keys::Alpha> {
+        Some(keys::Alpha::from_ref(&self.opacity))
+    }
+}
+impl SetAttr<keys::Alpha> for ActivePoi {
+    fn set_attr(&mut self, value: keys::Alpha) {
+        let opacity = f32::from(value);
+        #[cfg(feature = "paths-lua")]
+        let dirty = self.opacity != opacity;
+        self.opacity = opacity;
+        #[cfg(feature = "paths-lua")]
+        if dirty {
+            self.ibd_dirty_space = true;
+            self.ibd_dirty_map = true;
+        }
+    }
+}
+impl GetAttrDyn for ActivePoi {
+    fn holds_attr_dyn(key: PackKeyId) -> bool {
+        pack_attr! { =id_is_in(key, [
+            keys::Alpha,
+            keys::Tint,
+            keys::IconSize,
+            keys::MapDisplaySize,
+            // keys::Position,
+            keys::PositionX, keys::PositionY, keys::PositionZ,
+            keys::Rotate, keys::RotateX, keys::RotateY, keys::RotateZ,
+            keys::InGameVisibility, keys::MapVisibility, keys::MinimapVisibility,
+        ]) }
+    }
+    fn has_attr_dyn(&self, key: PackKeyId) -> bool {
+        pack_attr! { imp GetAttrDyn::has_attr_dyn(self, key) in [
+            keys::Alpha,
+            keys::Tint,
+            keys::IconSize,
+            keys::MapDisplaySize,
+            keys::PositionX, keys::PositionY, keys::PositionZ,
+            keys::RotateX, keys::RotateY, keys::RotateZ,
+            keys::Rotate,
+            keys::InGameVisibility, keys::MapVisibility, keys::MinimapVisibility,
+        ] }
+        .unwrap_or(false)
+    }
+    fn get_attr_dyn_ref(&self, key: PackKeyId) -> Option<&dyn AttrKeyValue> {
+        pack_attr! { imp GetAttrDyn::get_attr_dyn_ref(self, key) in [
+            keys::Alpha,
+            keys::Tint,
+            keys::IconSize,
+            keys::MapDisplaySize,
+            keys::PositionX, keys::PositionY, keys::PositionZ,
+            keys::InGameVisibility, keys::MapVisibility, keys::MinimapVisibility,
+        ] }
+        .flatten()
+    }
+    fn get_attr_dyn(&self, key: PackKeyId) -> Option<Cow<'_, dyn AttrKeyValue>> {
+        pack_attr! { imp GetAttrDyn::get_attr_dyn(self, key) in [
+            keys::Rotate, keys::RotateX, keys::RotateY, keys::RotateZ,
+        ] }
+        .unwrap_or_else(|| self.get_attr_dyn_ref(key).map(Cow::Borrowed))
+    }
+    fn iter_attrs_dyn(&self) -> impl Iterator<Item = std::borrow::Cow<'_, dyn AttrKeyValue>> + '_ {
+        pack_attr! { imp GetAttrDyn::iter_attrs_dyn(self) in [
+            keys::Alpha,
+            keys::Tint,
+            keys::IconSize,
+            keys::MapDisplaySize,
+            keys::PositionX, keys::PositionY, keys::PositionZ,
+            keys::Rotate, keys::RotateX, keys::RotateY, keys::RotateZ,
+            keys::InGameVisibility, keys::MapVisibility, keys::MinimapVisibility,
+        ] }
+    }
+}
+impl SetAttrDyn for ActivePoi {
+    fn set_attr_dyn(&mut self, value: PackValueCell) -> bool {
+        pack_attr! { imp SetAttrDyn::set_attr_dyn(self, value) in [
+            keys::Alpha,
+            keys::Tint,
+            keys::IconSize,
+            keys::MapDisplaySize,
+            keys::PositionX, keys::PositionY, keys::PositionZ,
+            keys::RotateX, keys::RotateY, keys::RotateZ,
+            keys::Rotate,
+            keys::InGameVisibility, keys::MapVisibility, keys::MinimapVisibility,
+        ] }
     }
 }

@@ -20,6 +20,8 @@ pub mod menu;
 pub mod pathing_tab;
 #[cfg(feature = "space")]
 pub mod pathing_window;
+#[cfg(feature = "scripts")]
+pub mod plug;
 pub mod primary_window;
 pub mod state;
 pub mod timer_tab;

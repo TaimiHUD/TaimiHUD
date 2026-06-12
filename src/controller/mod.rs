@@ -68,6 +68,11 @@ pub(crate) mod pathing;
 #[cfg(feature = "space")]
 use pathing::{PathingController, PathingEvent, PathingReceiver, PathingSender};
 
+#[cfg(feature = "scripts")]
+pub(crate) mod script;
+#[cfg(feature = "scripts")]
+use script::{ScriptController, ScriptMessage, ScriptReceiver, ScriptSender};
+
 pub(crate) mod api;
 pub(crate) mod runtime;
 
@@ -179,6 +184,14 @@ impl Controller {
                     let mut api = ApiController::new(rx, settings.clone());
                     controllers.spawn(async move {
                         let res = api.run().await.context("API control loop");
+                        let _ = rt::log::error_ok(res);
+                    });
+                };
+                #[cfg(feature = "scripts")]
+                if let Some(rx) = receiver.scripting.take() {
+                    let mut api = ScriptController::new(rx);
+                    controllers.spawn(async move {
+                        let res = api.run().await.context("Script control loop");
                         let _ = rt::log::error_ok(res);
                     });
                 };
@@ -858,10 +871,17 @@ impl Controller {
             WindowState(window, state) => self.set_window_state(&window, state).await,
             LoadTexture(rel, base) => self.load_texture(rel, base).await,
             LoadTextureIntegrated(identifier, data) => self.load_texture_integrated(identifier, data).await,
-            UiTick(tick) => match tick.is_player() {
-                #[cfg(todo)]
-                false => (),
-                _ => self.mumblelink_tick().await?,
+            UiTick(tick) => {
+                #[cfg(feature = "scripts")]
+                if let Some(m) = script::LuaMessage::tick(Some(tick.ui_tick())) {
+                    m.try_send();
+                }
+
+                match tick.is_player() {
+                    #[cfg(todo)]
+                    false => (),
+                    _ => self.mumblelink_tick().await?,
+                }
             },
             Quit(reason) => return Ok(Some(reason)),
             // I forget why we needed this, but I think it's a holdover from the buttplug one o:
@@ -984,7 +1004,7 @@ enum GenericEvent {
 }
 */
 
-#[derive(Debug, Clone, Display)]
+#[derive(Debug, Display)]
 pub enum ControllerEvent {
     /*Generic(GenericEvent),*/
     #[cfg(feature = "timers")]
@@ -1050,6 +1070,8 @@ pub struct ControllerSender {
     pub mumble_identity: Option<watch::Sender<Option<MumbleIdentityUpdate>>>,
     pub generic: Option<Sender<ControllerEvent>>,
     pub api: Option<ApiSender>,
+    #[cfg(feature = "scripts")]
+    pub scripting: Option<ScriptSender>,
     #[cfg(feature = "space")]
     pub pathing: Option<PathingSender>,
 }
@@ -1062,6 +1084,8 @@ impl ControllerSender {
         mumble_identity: None,
         generic: None,
         api: None,
+        #[cfg(feature = "scripts")]
+        scripting: None,
         #[cfg(feature = "space")]
         pathing: None,
     };
@@ -1075,6 +1099,8 @@ impl ControllerSender {
         #[cfg(feature = "paths")]
         let (pathing, pathing_rx) =
             PathingSender::new(gameplay.subscribe(), mumble_identity_rx.clone(), &api.festivals);
+        #[cfg(feature = "scripts")]
+        let (scripting, scripting_rx) = ScriptSender::new();
 
         let receiver = ControllerReceiver {
             gameplay: Some(gameplay.subscribe()),
@@ -1082,6 +1108,8 @@ impl ControllerSender {
             mumble_identity: Some(mumble_identity_rx),
             generic: Some(generic_rx),
             api: Some(api_rx),
+            #[cfg(feature = "scripts")]
+            scripting: Some(scripting_rx),
             #[cfg(feature = "space")]
             pathing: Some(pathing_rx),
         };
@@ -1092,6 +1120,8 @@ impl ControllerSender {
             mumble_identity: Some(mumble_identity_tx),
             generic: Some(generic),
             api: Some(api),
+            #[cfg(feature = "scripts")]
+            scripting: Some(scripting),
             #[cfg(feature = "space")]
             pathing: Some(pathing),
         };
@@ -1103,6 +1133,10 @@ impl ControllerSender {
         #[cfg(feature = "space")]
         if let Some(sender) = self.pathing.take() {
             let _ = sender.command.try_send(PathingEvent::Exit(reason));
+        }
+        #[cfg(feature = "scripts")]
+        if let Some(sender) = self.scripting.take() {
+            let _ = sender.command.try_send(ScriptMessage::Exit(reason));
         }
         if let Some(sender) = self.api.take() {
             let _ = sender.command.try_send(ApiMessage::Exit(reason));
@@ -1189,4 +1223,6 @@ pub struct ControllerReceiver {
     pub api: Option<ApiReceiver>,
     #[cfg(feature = "space")]
     pub pathing: Option<PathingReceiver>,
+    #[cfg(feature = "scripts")]
+    pub scripting: Option<ScriptReceiver>,
 }
