@@ -1116,6 +1116,9 @@ impl Engine {
             .packs
             .load_map(&self.render_backend.device, device_context, map_id.get());
 
+        // clean up a buffer if the map isn't likely to use it...
+        let _ = self.render_backend.perspective_handler.constant_buffer_poi.take();
+
         self.goggles_enter(true);
 
         res

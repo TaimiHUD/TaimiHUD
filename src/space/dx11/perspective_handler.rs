@@ -9,6 +9,7 @@ use {
     },
     glam::{Mat4, Quat, Vec2, Vec3, Vec4},
     glamour::{Box2, Box3, Point3, Size2, TransformMap},
+    std::sync::OnceLock,
     taimi_d3d::{
         dx11::{
             buffer::{ConstantBufferP, ConstantBufferV},
@@ -45,6 +46,8 @@ pub struct PixelData {
 
 pub struct PerspectiveHandler {
     constant_buffer: ConstantBufferV,
+    /// POIs with static rotation should use this to avoid camera adjustment for billboards
+    pub(crate) constant_buffer_poi: OnceLock<ConstantBufferV>,
     pub constant_buffer_data: PerspectiveData,
     constant_buffer_pixel: ConstantBufferP,
     pub constant_buffer_pixel_data: PixelData,
@@ -68,6 +71,7 @@ impl PerspectiveHandler {
         Ok(Self {
             alpha: 1.0,
             constant_buffer,
+            constant_buffer_poi: Default::default(),
             constant_buffer_data,
             constant_buffer_pixel,
             constant_buffer_pixel_data,
@@ -120,9 +124,45 @@ impl PerspectiveHandler {
         self.constant_buffer_pixel_data.set_feather_scale(feather_scale);
     }
 
+    pub fn select_billboard_cb(&self, context: &Dx11Context, slot: u32, billboarding: bool) {
+        if billboarding {
+            self.constant_buffer.set(context, slot);
+            return
+        }
+        let cb_poi = self.constant_buffer_poi.get();
+        let cb_poi = if let Some(cb) = cb_poi {
+            cb
+        } else {
+            let norot = PerspectiveData {
+                billboard: Mat4::IDENTITY,
+                ..self.constant_buffer_data.clone()
+            };
+            let device = unsafe { context.GetDevice() }.map_err(anyhow::Error::from);
+            let cb = device.and_then(|device| ConstantBufferV::new_with_data(&device, &norot));
+            let cb_poi = match cb {
+                #[cfg(taimi_debug)]
+                v => crate::exports::runtime::log::error_ok(anyhow::Context::context(v, "un-billboarding")),
+                #[cfg(not(taimi_debug))]
+                v => v.ok(),
+            };
+            if let Some(cb_poi) = cb_poi {
+                self.constant_buffer_poi.get_or_init(move || cb_poi)
+            } else {
+                return
+            }
+        };
+        cb_poi.set(context, slot);
+    }
     pub fn update_cb_v(&self, device_context: &Dx11Context) {
         self.constant_buffer
             .update_singleton(device_context, &self.constant_buffer_data);
+        if let Some(cb_poi) = self.constant_buffer_poi.get() {
+            let norot = PerspectiveData {
+                billboard: Mat4::IDENTITY,
+                ..self.constant_buffer_data.clone()
+            };
+            cb_poi.update_singleton(device_context, &norot);
+        }
     }
     pub fn update_cb_p(&self, device_context: &Dx11Context) {
         self.constant_buffer_pixel

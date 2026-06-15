@@ -1321,6 +1321,7 @@ impl PackCollection {
         poi_common.set_primitive(device_context);
 
         let mut shader_state = ShaderState::None;
+        let mut poi_billboarding = true;
         let mut num_drawn = 0usize;
         for entity in entities {
             let render_id = match entity.render_id {
@@ -1371,6 +1372,14 @@ impl PackCollection {
                         shader_state = ShaderState::Poi;
                         poi_common.set(device_context);
                     }
+                    let was_billboarding = mem::replace(&mut poi_billboarding, poi.is_billboard());
+                    if was_billboarding != poi_billboarding {
+                        backend.perspective_handler.select_billboard_cb(
+                            device_context,
+                            0,
+                            poi_billboarding,
+                        );
+                    }
                     poi.draw(
                         device_context,
                         pack.render_poi_bookmark + poi_idx,
@@ -1379,6 +1388,11 @@ impl PackCollection {
                 },
             }
             num_drawn += 1;
+        }
+        if !poi_billboarding {
+            backend
+                .perspective_handler
+                .select_billboard_cb(device_context, 0, true);
         }
         STATS_ENTITY_DRAW.store(num_drawn, Ordering::Relaxed);
     }

@@ -10,9 +10,9 @@ use {
         },
     },
     anyhow::Context,
-    glam::{vec2, vec3, Mat4, Vec3, Vec3Swizzles, Vec4},
+    glam::{vec2, vec3, EulerRot, Mat4, Quat, Vec3, Vec3Swizzles, Vec4},
     glamour::{Box3, Point3, Vector2},
-    std::sync::Arc,
+    std::{f32::consts::FRAC_PI_2, sync::Arc},
     taimi_d3d::{
         dx11::{
             buffer::{BufferOf, VertexBuffer},
@@ -167,6 +167,7 @@ pub struct ActivePoi {
     pub filtered: bool,
     pub bounds: Box3<DrawSpace>,
     pub position: Point3<DrawSpace>,
+    pub rotation: Option<Quat>,
     pub tint: Vec4,
     pub opacity: f32,
     pub scale: f32,
@@ -192,7 +193,13 @@ impl ActivePoi {
 
         let position = poi.position();
         let scale = poi.icon_scale();
-        let scale_map = poi.attributes.poi().map_display_size.unwrap_or(20.0);
+        let (scale_map, rotation) = {
+            let attrs = poi.attributes.poi();
+            (
+                attrs.map_display_size.unwrap_or(20.0),
+                attrs.rotate.map(Self::rotation_from_xyz),
+            )
+        };
         let (tint, opacity) = {
             let render = poi.attributes.render();
             (render.tint(), render.alpha())
@@ -208,6 +215,7 @@ impl ActivePoi {
             filtered: false,
             bounds,
             position,
+            rotation,
             tint,
             opacity,
             scale,
@@ -221,10 +229,26 @@ impl ActivePoi {
         tint.w *= self.opacity;
         tint
     }
+    #[inline]
+    pub fn is_billboard(&self) -> bool {
+        self.rotation.is_none()
+    }
+    pub(crate) fn rotation_from_xyz(rot: Vec3) -> Quat {
+        Quat::from_euler(
+            EulerRot::XZY,
+            rot.x.to_radians() - FRAC_PI_2,
+            rot.y.to_radians(),
+            -rot.z.to_radians(),
+        )
+    }
 
     pub fn instance_data(&self) -> InstanceBufferData {
         InstanceBufferData {
-            world: Mat4::from_translation(self.position.into()) * Mat4::from_scale(Vec3::splat(self.scale)),
+            world: Mat4::from_scale_rotation_translation(
+                Vec3::splat(self.scale),
+                self.rotation.unwrap_or_default(),
+                self.position.into(),
+            ),
             colour: self.tint(),
         }
     }
