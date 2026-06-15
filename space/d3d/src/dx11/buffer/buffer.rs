@@ -178,7 +178,7 @@ impl Buffer {
     pub fn offset_box3(offset: Box3<u32>) -> D3D11_BOX {
         D3D11_BOX {
             left: offset.min.x,
-            right: offset.max.y,
+            right: offset.max.x,
             top: offset.min.y,
             bottom: offset.max.y,
             front: offset.min.z,
@@ -193,14 +193,16 @@ impl Buffer {
         offset: usize,
         subresource: u32,
     ) {
-        let (dst, row_pitch, depth_pitch) = match offset {
-            0 => (None, 0, 0),
-            offset => {
-                let offset = offset as u32;
-                let end = (offset + 1) as u32;
-                let stride = D::stride() as u32;
-                (Some(Self::offset_box1(offset..end)), stride, end * stride)
-            },
+        let (dst, row_pitch, depth_pitch) = {
+            let offset = offset as u32;
+            let start = offset * D::stride() as u32;
+            let end = (offset + 1) * D::stride() as u32;
+            #[cfg(todo = "unnecessary")]
+            let stride = (len * D::stride()) as u32;
+            let stride = end;
+            let depth = 0;
+
+            (Some(Self::offset_box1(start..end)), stride, depth)
         };
         unsafe {
             let dst = dst.as_ref().map(|d| d as *const _);
