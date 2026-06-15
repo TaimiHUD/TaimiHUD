@@ -842,7 +842,7 @@ fn fixup_xml_typos(pack_xml: &str) -> std::borrow::Cow<'_, str> {
         r#"\s*type="(?<type_typo>tw_guides\.tw_jw\.tw_jw_janthirsyntri\.tw_jw_lowlandshore_[a-z]*\.tw_jw_janthirsyntri)(?<type_rest>[^" ]+)""#,
         // reactif-en
         "|",
-        r#"\s+(?<attr_typo>nim[sS]ize|reset[lL]enght)\s*=\s*""#,
+        r#"\s+(?<attr_typo>nim[sS]ize|reset[lL]enght|triggerrRange)\s*=\s*""#,
         "|",
         r#""(?<attr_nospace>"#,
         // reactif-fr
@@ -928,6 +928,7 @@ fn fixup_xml_typos(pack_xml: &str) -> std::borrow::Cow<'_, str> {
             } else if let Some(attr_type) = caps.name("attr_typo") {
                 let replacement = match attr_type.as_str() {
                     "nimsize" | "nimSize" => " minsize=\"",
+                    "triggerrRange" => " triggerrange=\"",
                     "resetlenght" | "resetLenght" => " resetlength=\"",
                     typo => {
                         log::error!("unexpected typo {typo:?}");
