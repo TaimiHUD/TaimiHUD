@@ -451,6 +451,60 @@ where
     }
 }
 
+#[inline(always)]
+pub const fn display2debug<'a, T: fmt::Display + 'a>(v: T) -> impl fmt::Debug + 'a {
+    DisplayDebug(v)
+}
+#[inline(always)]
+pub const fn debug2display<'a, T: fmt::Debug + 'a>(v: T) -> impl fmt::Display + 'a {
+    DebugDisplay(v)
+}
+#[derive(Copy, Clone)]
+#[repr(transparent)]
+pub struct DisplayDebug<T: ?Sized>(pub T);
+impl<T: ?Sized> DisplayDebug<T> {
+    #[inline(always)]
+    pub const fn from_ref(v: &T) -> &Self {
+        unsafe { mem::transmute(v) }
+    }
+}
+impl<T> fmt::Display for DisplayDebug<T>
+where
+    T: ?Sized + fmt::Display,
+{
+    #[inline(always)]
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(&self.0, f)
+    }
+}
+impl<T> fmt::Debug for DisplayDebug<T>
+where
+    T: ?Sized + fmt::Display,
+{
+    #[inline(always)]
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Display::fmt(&self.0, f)
+    }
+}
+#[derive(Copy, Clone, Debug)]
+#[repr(transparent)]
+pub struct DebugDisplay<T: ?Sized>(pub T);
+impl<T: ?Sized> DebugDisplay<T> {
+    #[inline(always)]
+    pub const fn from_ref(v: &T) -> &Self {
+        unsafe { mem::transmute(v) }
+    }
+}
+impl<T> fmt::Display for DebugDisplay<T>
+where
+    T: ?Sized + fmt::Debug,
+{
+    #[inline(always)]
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Debug::fmt(&self.0, f)
+    }
+}
+
 #[macro_export]
 macro_rules! fmt_args {
     (dyn $($tt:tt)*) => {
