@@ -602,8 +602,15 @@ impl fmt::Debug for PackValueCell {
             Self::FLAG_EMPTY => {
                 f.field(&None::<()>);
             },
-            Self::FLAG_BOX | Self::FLAG_ARC => {
-                f.field(&self.ptr());
+            Self::FLAG_BOX => {
+                f.field(&taimi_hoard::lazyfmt::fmt_fn(|f| {
+                    f.debug_tuple("Box").field(&self.ptr()).finish()
+                }));
+            },
+            Self::FLAG_ARC => {
+                f.field(&taimi_hoard::lazyfmt::fmt_fn(|f| {
+                    f.debug_tuple("Arc").field(&self.ptr()).finish()
+                }));
             },
             _ => {
                 f.field(&(self.value as *const ()));
