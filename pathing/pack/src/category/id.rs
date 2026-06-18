@@ -14,6 +14,7 @@ use std::{
 
 pub const SEP_CHAR: char = '.';
 pub const SEP_STR: &'static str = ".";
+pub const SEP_LEN: usize = SEP_STR.len();
 
 pub trait AsFullId {
     type SegmentRef<'s>: AsRef<IdNameSeg> + 's
@@ -479,11 +480,15 @@ pub struct CategoryIdIterator<T> {
     inner: T,
     len: usize,
 }
-impl<T: Iterator> Iterator for CategoryIdIterator<T>
+impl<'a, T, I> Iterator for CategoryIdIterator<T>
 where
-    <T as Iterator>::Item: AsRef<IdNameSeg>,
+    T: Iterator<Item = &'a I>,
+    I: ?Sized + AsRef<IdNameSeg> + 'a,
+    // TODO: <T as Iterator>::Item: AsRef<IdNameSeg>,
 {
+    #[cfg(todo)]
     type Item = <T as Iterator>::Item;
+    type Item = &'a IdNameSeg;
     fn next(&mut self) -> Option<Self::Item> {
         if self.len == 0 {
             return None
@@ -495,9 +500,12 @@ where
                 return None
             },
         };
-        let len = seg.as_ref().as_str().len();
-        self.len = self.len.saturating_sub(len + 1);
-        Some(seg)
+        let id_seg = AsRef::<IdNameSeg>::as_ref(seg);
+        let len = id_seg.as_str().len();
+        let prev_len = self.len;
+        self.len = prev_len.saturating_sub(len + SEP_LEN);
+        let seg_len = len.min(prev_len);
+        Some(unsafe { IdNameSeg::from_str(id_seg.segment.get_unchecked(..seg_len)) })
     }
 }
 impl<T: iter::FusedIterator> iter::FusedIterator for CategoryIdIterator<T> where Self: Iterator {}
@@ -642,10 +650,11 @@ impl ops::Index<ops::RangeFull> for CategoryId {
     }
 }
 impl AsFullId for IdStr {
-    type SegmentRef<'s> = &'s IdNameSeg;
-    type SegmentIter<'s> = iter::Once<Self::SegmentRef<'s>>;
+    /// TODO: &IdNameSeg?
+    type SegmentRef<'s> = &'s str;
+    type SegmentIter<'s> = str::Split<'s, &'static str>;
     fn segments(&self) -> Self::SegmentIter<'_> {
-        iter::once(self.as_ref())
+        self.split(SEP_STR)
     }
     fn id_len(&self) -> usize {
         self.len()
