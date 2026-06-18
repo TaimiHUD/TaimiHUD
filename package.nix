@@ -23,7 +23,7 @@
   enableMarkers ? true,
   enablePaths ? true,
   enableSpace ? enablePaths,
-  enableLua ? false,
+  enableLua ? true,
   enableNexus ? true,
   enableArcdps ? true,
   source ? ./.,

@@ -493,7 +493,6 @@ fn load_nexus() {
     #[cfg(feature = "timers")]
     register_keybind(TaimiControls::TIMER_RESET, c"timer-key-reset", c"(null)");
 
-    #[cfg(todo)]
     register_keybind(TaimiControls::MENU_PRIMARY, c"context-menu-primary", c"(null)");
 
     const REQUEST_ACCOUNT_NAME: &'static str = "EV_REQUEST_ACCOUNT_NAME";
