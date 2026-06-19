@@ -43,7 +43,7 @@ pub enum SourceKind {
     Addon,
     /// Datasource repository
     ///
-    /// such as https://github.com/TaimiHUD/DataSources
+    /// such as <https://github.com/TaimiHUD/DataSources>
     DataSources,
     Unspecified,
 }

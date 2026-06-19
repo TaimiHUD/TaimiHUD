@@ -5,7 +5,7 @@ use {
 
 /// [map coordinates](MapSpace) are in ft and inches
 ///
-/// if we want [LocalSpace::to_local](local),
+/// if we want [local](LocalSpace::from_map),
 /// we have to convert ft to m
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct MapLocalScale {

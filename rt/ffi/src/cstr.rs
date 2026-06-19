@@ -1,4 +1,4 @@
-//! [null-terminated utf8](CStr0)
+//! [null-terminated utf8](Str0)
 //!
 //! TODO: move into ffi
 
@@ -33,7 +33,7 @@ pub use cstr;
 ///
 /// see also: [String0]
 ///
-/// TODO: Box<Str0> conversions, though kinda pointless since String0(CString) is already a `Box<[u8]>`
+/// TODO: `Box<Str0>` conversions, though kinda pointless since String0(CString) is already a `Box<[u8]>`
 ///
 /// TODO: generic storage so it can be a thin pointer too
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
