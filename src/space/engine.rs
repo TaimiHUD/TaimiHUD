@@ -723,7 +723,7 @@ impl Engine {
             Some(distance_max) => {
                 let depth = machine.depth_range();
                 let camera = machine.get_camera(camera_source);
-                let cull = MapFrustum::from_camera_data(
+                let cull = MapFrustum::from_camera_data_sloppy(
                     camera,
                     // TODO: machine.get_aspect_ratio(),
                     depth.start..depth.end.min(distance_max),

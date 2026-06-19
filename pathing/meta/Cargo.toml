@@ -15,6 +15,7 @@ workspace = true
 default = [
   "serde",
   #"mumblelink-nexus",
+  "spatial",
 ]
 map-cache = [
   "serde",
@@ -36,6 +37,10 @@ mumblelink-nexus = [
   # deprecated, juggling impls for multiple crate versions isn't worth it...
   "taimi_mumblelink",
   "nexus?/mumble",
+]
+spatial = [
+  "dep:bvh",
+  "dep:nalgebra",
 ]
 serde = [
   "dep:serde",
@@ -60,6 +65,9 @@ bitflags = { workspace = true }
 log = "0.4"
 glam = { workspace = true }
 glamour = { workspace = true }
+mint = { workspace = true }
+nalgebra = { workspace = true, optional = true }
+bvh = { workspace = true, optional = true }
 num-traits = { workspace = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
