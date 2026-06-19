@@ -66,6 +66,10 @@ impl Pack {
             _ => (),
         }
 
+        #[cfg(todo)]
+        {
+            builder.deduplicate_root_categories();
+        }
         builder.merge_category_attributes();
         builder.apply_marker_attributes();
 
@@ -405,6 +409,47 @@ impl<'a> PackBuilder<'a> {
     fn merge_category_attributes(&mut self) {
         for id in &self.pack.categories.root_categories {
             inner_merge_category_attributes(&mut self.pack.categories.all_categories, id);
+        }
+    }
+    /// TODO: is this ever a real issue in practice?
+    #[cfg(todo)]
+    fn deduplicate_root_categories(&mut self) {
+        let mut unroot = Vec::new();
+        for root_id in &self.pack.categories.root_categories {
+            let mut parent = root_id.parent();
+            let mut parent_id = None;
+            while let Some(p) = parent {
+                if let Some(canon_parent) = self.category_ids.get(IdCmpRelaxed::with_ref(p)) {
+                    parent_id = Some(canon_parent);
+                    break
+                } else {
+                    parent = p.parent();
+                }
+            }
+            let Some(parent_id) = parent_id else { continue };
+            if let Some(parent) = self.pack.categories.all_categories.get_mut(&parent_id.id) {
+                parent.append_children(iter::once(root_id.clone()));
+            } else {
+                #[cfg(debug_assertions)]
+                if self.warnings_missing.insert(parent_id.clone()) | true{
+                    log::warn!("parent `{parent_id}` missing for duplicate root category `{root_id}`");
+                }
+                continue
+            }
+            if let Some(root) = self.pack.categories.all_categories.get_mut(root_id) {
+                root.flags.remove(CategoryFlag::Root.bit());
+            } else {
+                #[cfg(debug_assertions)]
+                if self.warnings_missing.insert(parent_id.clone()) | true {
+                    log::warn!("missing duplicate root category `{root_id}`");
+                }
+            }
+            #[cfg(debug_assertions)]
+            log::debug!("deduplicating root category `{root_id}`");
+            unroot.push(root_id.clone());
+        }
+        for id in unroot {
+            self.pack.categories.root_categories.shift_remove(&id);
         }
     }
 

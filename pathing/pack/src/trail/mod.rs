@@ -109,7 +109,8 @@ impl Trail {
         let guid = guid.unwrap_or_default();
 
         // TODO: support bh features properly...
-        attributes.merge(&attributes_bh, false);
+        //attributes.merge(&attributes_bh, false);
+        attributes_bh.merge(&attributes, false); attributes = attributes_bh;
 
         if let Some(trail_path) = &mut trail_path {
             trail_path.parent_path = asset_parent.cloned();
