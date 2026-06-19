@@ -167,7 +167,7 @@ impl imw::InputText {
         sys::ImGuiInputTextFlags_EnterReturnsTrue as sys::ImGuiInputTextFlags;
     /// TODO: consider IsItemDeactivatedAfterEdit() instead of EnterReturnsTrue
     pub const IM180_FLAGS_PRESET: sys::ImGuiInputTextFlags_ = sys::ImGuiInputTextFlags_AutoSelectAll | sys::ImGuiInputTextFlags_EnterReturnsTrue
-        | sys::ImGuiInputTextFlags_AlwaysInsertMode
+        //| sys::ImGuiInputTextFlags_AlwaysInsertMode
         //| sys::ImGuiInputTextFlags_NoHorizontalScroll
         | sys::ImGuiInputTextFlags_NoUndoRedo;
     pub const IM180_FLAGS_READ_ONLY: sys::ImGuiInputTextFlags_ = sys::ImGuiInputTextFlags_ReadOnly;
