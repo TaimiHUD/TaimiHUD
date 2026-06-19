@@ -138,6 +138,7 @@ in {
         fetch-depth = 0;
         fetch-tags = true;
       };
+      checkoutVersion = "v7";
     };
     cache.cachix.taimihud = {
       enable = true;
