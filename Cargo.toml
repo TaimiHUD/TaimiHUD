@@ -79,6 +79,7 @@ space = [
   "space-list",
   #"space-ecs",
   "dep:taimi_meta",
+  "taimi_meta/spatial",
   "dep:taimi_pack",
   "dep:taimi_d3d",
 ]
@@ -309,8 +310,8 @@ tinystr = "0.8"
 unic-langid-impl = "0.9.6"
 rand = "0.9.1"
 ordered-float = { version = "5.0.0", features = [ "serde" ] }
-bvh = { version = "0.11.0", default-features = false, optional = true }
-nalgebra = { version = "0.33", default-features = false, features = [ "convert-mint" ], optional = true }
+bvh = { workspace = true, optional = true }
+nalgebra = { workspace = true, optional = true }
 semver = { version = "1", optional = true }
 uuid = { version = "1", features = ["v3", "v4", "serde"] }
 regex = "1"
@@ -373,7 +374,9 @@ nexus = { git = "https://codeberg.org/TaimiHUD/nexus-rs", branch = "0.11.x-taimi
 #gw2_mumble = { git = "https://codeberg.org/TaimiHUD/gw2-mumble-rs", branch = "0.3.x-taimi", default-features = false }
 glam = "0.30"
 glamour = "0.18"
+nalgebra = { version = "0.33", default-features = false, features = [ "convert-mint" ] }
 mint = "0.5"
+bvh = { version = "0.11", default-features = false }
 num-traits = { version = "0.2", default-features = false }
 bytemuck = { version = "1", default-features = false, features = ["extern_crate_std", "derive"] }
 rustc-hash = "2"
