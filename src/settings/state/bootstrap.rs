@@ -353,11 +353,7 @@ impl BootstrapState {
     }
 
     pub fn gh_api_token(&self) -> Option<&str> {
-        match &self.gh_api_token {
-            None => None,
-            Some(token) if token.is_empty() => None,
-            Some(token) => Some(token),
-        }
+        self.gh_api_token.as_deref().and_then(taimi_hoard::str_opt_ref)
     }
     pub fn anet_api_token<'a>(&'a self, acc: &str) -> Option<&'a SavedApiToken> {
         SavedApiToken::token_by_account_name(&self.anet_api_token, acc)
