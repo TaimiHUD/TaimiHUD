@@ -13,7 +13,7 @@ use {
         path::{Path, PathBuf},
         sync::LazyLock,
     },
-    strum_macros::Display,
+    strum::Display,
     tokio::{
         fs::{create_dir_all, read_to_string, File},
         io::AsyncWriteExt,

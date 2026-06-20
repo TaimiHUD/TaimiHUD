@@ -30,7 +30,7 @@ use {
     glam::f32::Vec3,
     relative_path::RelativePathBuf,
     std::{ffi::OsStr, future::Future, mem, path::PathBuf, sync::Arc, time::SystemTime},
-    strum_macros::Display,
+    strum::Display,
     taimi_meta::ui::gameplay::GameplayState,
     taimi_sync::watched,
     tokio::{

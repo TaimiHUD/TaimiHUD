@@ -27,7 +27,7 @@ use {
         path::PathBuf,
         sync::Arc,
     },
-    strum_macros::{Display, FromRepr},
+    strum::{Display, FromRepr},
     taimi_meta::{
         coords::{FakeSpace, LocalSpace, ScreenPoint, ScreenSpace},
         ui::{MapCalibration, MapOpen, UiMap, UiState},
