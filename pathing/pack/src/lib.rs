@@ -1,3 +1,4 @@
+//! Parser and data types for GW2 TacO pathing packs.
 pub mod attributes;
 pub mod category;
 pub mod loader;

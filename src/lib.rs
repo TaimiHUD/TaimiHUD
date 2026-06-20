@@ -1,3 +1,4 @@
+//! TaimiHUD addon — pathing, encounter timers, and squad markers.
 mod controller;
 mod exports;
 mod render;

@@ -1,3 +1,4 @@
+//! DirectX 11 abstractions and rendering primitives for TaimiHUD.
 pub mod blob;
 pub mod buffer;
 pub mod device;

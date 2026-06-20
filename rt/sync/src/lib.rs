@@ -1,3 +1,4 @@
+//! Synchronization primitives and async utilities for TaimiHUD.
 pub use std::sync::PoisonError as StdPoisonError;
 
 pub mod arcs;

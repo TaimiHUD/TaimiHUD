@@ -1,3 +1,4 @@
+//! Shared collection utilities, string helpers, and statistics for TaimiHUD.
 use std::{borrow::Cow, hash};
 
 pub mod cmp;

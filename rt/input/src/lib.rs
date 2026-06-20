@@ -1,3 +1,4 @@
+//! Input handling and keybind processing for TaimiHUD.
 #[cfg(feature = "windows")]
 pub mod win;
 
