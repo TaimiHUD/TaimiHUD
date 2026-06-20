@@ -13,6 +13,10 @@ use {
             },
             Controller,
         },
+        exports::{
+            runtime as rt,
+            runtime::statistics::{StatsDesc, StatsRef, StatsUnit},
+        },
         render::machine::RenderMachine,
         settings::{PathingSettings, Settings},
         space::{
@@ -20,20 +24,12 @@ use {
             pack::{self, PackRender, PackRenderList},
         },
         timer::{PhaseState, TimerDirection, TimerFile, TimerMarker},
-        exports::runtime::statistics::{StatsUnit, StatsRef, StatsDesc},
-        exports::runtime as rt,
     },
     anyhow::{anyhow, Context},
     bevy_ecs::prelude::*,
     glam::Vec3,
     glamour::{Box2, Size2, TransformMap},
-    std::{
-        collections::HashMap,
-        fmt,
-        mem,
-        num::NonZeroU32,
-        sync::Arc,
-    },
+    std::{collections::HashMap, fmt, mem, num::NonZeroU32, sync::Arc},
     taimi_d3d::dx11::prelude::*,
     taimi_meta::{
         coords::ScreenSpace,
@@ -690,7 +686,11 @@ impl Engine {
         Ok(())
     }
     /// TODO: anything related to frame-to-frame buffer setup (camera-dependent data mainly) goes here
-    pub fn prepare_frame(&mut self, _machine: &mut RenderMachine, _device_context: &Dx11Context) -> anyhow::Result<()> {
+    pub fn prepare_frame(
+        &mut self,
+        _machine: &mut RenderMachine,
+        _device_context: &Dx11Context,
+    ) -> anyhow::Result<()> {
         Ok(())
     }
 
@@ -699,11 +699,11 @@ impl Engine {
         if self.drawing {
             if super::goggles::FerretResource::get_ferret_draw() {
                 // SKIP!
-super::goggles::FerretResource::set_ferret_drawn(false);
+                super::goggles::FerretResource::set_ferret_drawn(false);
                 return Ok(())
             }
-            let device_context =
-                unsafe { self.render_backend.device.GetImmediateContext() }.context("I lost my context!")?;
+            let device_context = unsafe { self.render_backend.device.GetImmediateContext() }
+                .context("I lost my context!")?;
 
             self.prepare_frame(machine, &device_context)?;
             self.draw(machine, &device_context, false);
@@ -711,10 +711,14 @@ super::goggles::FerretResource::set_ferret_drawn(false);
         Ok(())
     }
     pub fn render_carefully(&mut self, machine: &mut RenderMachine, device_context: &Dx11Context) {
-        if !self.drawing { return }
+        if !self.drawing {
+            return
+        }
 
         let prep = self.prepare_frame(machine, &device_context);
-        if rt::log::error_ok(prep).is_none() { return }
+        if rt::log::error_ok(prep).is_none() {
+            return
+        }
 
         self.draw_carefully(machine, &device_context);
     }
@@ -730,7 +734,8 @@ super::goggles::FerretResource::set_ferret_drawn(false);
         let _shaderp = device_context.get_snapshot::<Option<dx11::ShaderP>>();
         let _shaderv = device_context.get_snapshot::<Option<dx11::ShaderV>>();
         let _shaderlayout = device_context.get_snapshot::<Option<dx11::shader::InputLayout>>();
-        let _rendertarget = device_context.get_snapshot::<dx11::RenderTargetViews<[Option<dx11::RenderTargetView>; 2]>>();
+        let _rendertarget =
+            device_context.get_snapshot::<dx11::RenderTargetViews<[Option<dx11::RenderTargetView>; 2]>>();
         let _viewport = device_context.get_snapshot::<Vec<dx11::Viewport>>();
         let _scissor = device_context.get_snapshot::<Vec<dx11::ScissorRect>>();
         #[cfg(todo = "unnecessary")]
@@ -749,26 +754,21 @@ super::goggles::FerretResource::set_ferret_drawn(false);
     }
     pub fn draw(&mut self, machine: &mut RenderMachine, device_context: &Dx11Context, inherit: bool) {
         let map_ctx = machine.is_map_visible();
-        let (
-            visible_space,
-            visible_map,
-            camera_source,
-            edge_feather_scale,
-            (_obscured_alpha,),
-        ) = self.map_settings(|s| {
-            (
-                s.space.visible_space().then_some(s.space.distance_max()),
-                map_ctx.map(|ctx| s.space.visible_map(ctx)),
-                s.space.camera_source(),
-                s.space.edge_feather_scale(),
-                match () {
-                    #[cfg(feature = "goggles")]
-                    _ => (s.space.goggles.obscured_alpha(),),
-                    #[cfg(not(feature = "goggles"))]
-                    _ => ((),),
-                },
-            )
-        });
+        let (visible_space, visible_map, camera_source, edge_feather_scale, (_obscured_alpha,)) = self
+            .map_settings(|s| {
+                (
+                    s.space.visible_space().then_some(s.space.distance_max()),
+                    map_ctx.map(|ctx| s.space.visible_map(ctx)),
+                    s.space.camera_source(),
+                    s.space.edge_feather_scale(),
+                    match () {
+                        #[cfg(feature = "goggles")]
+                        _ => (s.space.goggles.obscured_alpha(),),
+                        #[cfg(not(feature = "goggles"))]
+                        _ => ((),),
+                    },
+                )
+            });
 
         let render_map = match visible_map {
             Some(true) =>
@@ -1378,31 +1378,39 @@ super::goggles::FerretResource::set_ferret_drawn(false);
         const SEC3D: &'static str = "stats-space-engine-d3d";
         const SEC2D: &'static str = "stats-space-engine-textures";
         let stats_counters = &[
-            (StatsRef::with_counter(&pack::STATS_ENTITY_DRAW, StatsUnit::Count), StatsDesc::new(
-                SEC, "stats-engine-drawn",
-            )),
-            (StatsRef::with_counter(&pack::STATS_ENTITY_DRAW_MAP, StatsUnit::Count), StatsDesc::new(
-                SEC, "stats-engine-mapped",
-            )),
-            (StatsRef::with_counter(&pack::STATS_ENTITY_COUNT, StatsUnit::Count), StatsDesc::new(
-                SEC, "stats-engine-entities",
-            )),
-            (StatsRef::new(&pack::STATS_POI_INSTANCE_SIZE, StatsUnit::Size), StatsDesc::new(
-                SEC3D, "stats-engine-instance-poi",
-            )),
-            (StatsRef::new(&pack::STATS_TRAIL_VERTEX_SIZE, StatsUnit::Size), StatsDesc::new(
-                SEC3D, "stats-engine-vertex-trail",
-            )),
+            (
+                StatsRef::with_counter(&pack::STATS_ENTITY_DRAW, StatsUnit::Count),
+                StatsDesc::new(SEC, "stats-engine-drawn"),
+            ),
+            (
+                StatsRef::with_counter(&pack::STATS_ENTITY_DRAW_MAP, StatsUnit::Count),
+                StatsDesc::new(SEC, "stats-engine-mapped"),
+            ),
+            (
+                StatsRef::with_counter(&pack::STATS_ENTITY_COUNT, StatsUnit::Count),
+                StatsDesc::new(SEC, "stats-engine-entities"),
+            ),
+            (
+                StatsRef::new(&pack::STATS_POI_INSTANCE_SIZE, StatsUnit::Size),
+                StatsDesc::new(SEC3D, "stats-engine-instance-poi"),
+            ),
+            (
+                StatsRef::new(&pack::STATS_TRAIL_VERTEX_SIZE, StatsUnit::Size),
+                StatsDesc::new(SEC3D, "stats-engine-vertex-trail"),
+            ),
             //#[cfg(feature = "texture-loader")]
-            (StatsRef::new(&texture::STATS_TEXTURE_COUNT, StatsUnit::Count), StatsDesc::new(
-                SEC3D, "stats-engine-texture-count",
-            )),
-            (StatsRef::new(&texture::STATS_TEXTURE_SIZE, StatsUnit::Size), StatsDesc::new(
-                SEC2D, "stats-engine-texture-size",
-            )),
-            (StatsRef::new(&texture::STATS_TEXTURE_SIZE_CLONED, StatsUnit::Size), StatsDesc::new(
-                SEC2D, "stats-engine-texture-size-max",
-            )),
+            (
+                StatsRef::new(&texture::STATS_TEXTURE_COUNT, StatsUnit::Count),
+                StatsDesc::new(SEC3D, "stats-engine-texture-count"),
+            ),
+            (
+                StatsRef::new(&texture::STATS_TEXTURE_SIZE, StatsUnit::Size),
+                StatsDesc::new(SEC2D, "stats-engine-texture-size"),
+            ),
+            (
+                StatsRef::new(&texture::STATS_TEXTURE_SIZE_CLONED, StatsUnit::Size),
+                StatsDesc::new(SEC2D, "stats-engine-texture-size-max"),
+            ),
         ];
         for &(counter, desc) in stats_counters {
             counter.register(desc);

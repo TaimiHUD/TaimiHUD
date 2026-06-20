@@ -9,7 +9,12 @@ use {
     glamour::{Box3, Point3, Size3},
     taimi_meta::packs::{CategoryIndex, CategoryPath, PoiPath, VisibilityFlags},
     taimi_pack::{
-        attributes::{keys::{self, GetAttr}, PoiAttributes, RenderAttributes, InteractionAttributes},
+        attributes::{
+            keys::{self, GetAttr},
+            InteractionAttributes,
+            PoiAttributes,
+            RenderAttributes,
+        },
         Pack,
         Poi,
     },
@@ -140,7 +145,11 @@ impl LoadedPoi {
     }
 
     pub fn offset(&self) -> Point3<PackSpace> {
-        Point3::ZERO.with_y(GetAttr::<keys::HeightOffset>::get_attr_or_default(self.poi_attrs()).into_owned().into())
+        Point3::ZERO.with_y(
+            GetAttr::<keys::HeightOffset>::get_attr_or_default(self.poi_attrs())
+                .into_owned()
+                .into(),
+        )
     }
     pub fn marker_position_for(poi: &Poi) -> Point3<PackSpace> {
         Point3::from_raw(poi.position.into())

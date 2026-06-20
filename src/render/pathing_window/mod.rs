@@ -1,22 +1,32 @@
 use {
     crate::{
         controller::pathing::PathingEvent,
-        render::{element::prelude::*, machine::RenderMachine, PathingConfig, RenderState},
+        render::{
+            element::{pack::PackVisibility, prelude::*},
+            machine::RenderMachine,
+            PathingConfig,
+            RenderState,
+        },
         settings::{
-            state::ui::{AnchorPosition, WindowOpen, UiVec2, PathingWindowTab, PathingWindowState as UiState},
+            state::ui::{
+                AnchorPosition,
+                PathingWindowState as UiState,
+                PathingWindowTab,
+                UiVec2,
+                WindowOpen,
+            },
             Settings,
         },
         space::engine::Engine,
         with_i18n,
     },
-    crate::render::element::pack::PackVisibility,
-    taimi_sync::watched::Watched,
     std::mem,
+    taimi_sync::watched::Watched,
 };
-#[cfg(feature = "paths-interact")]
-use crate::controller::pathing::shared::interact::InteractMessage;
 
 pub use self::filter::PathingSearchState;
+#[cfg(feature = "paths-interact")]
+use crate::controller::pathing::shared::interact::InteractMessage;
 
 mod filter;
 mod menu;
@@ -45,7 +55,8 @@ impl PathingWindowState {
     pub fn pre_render(&mut self) {
         if !self.ui_state.is_watching() {
             if let Some(settings) = Settings::try_read() {
-                self.ui_state.restart_watching(settings.ui_state.pathing_window.sender());
+                self.ui_state
+                    .restart_watching(settings.ui_state.pathing_window.sender());
             }
         };
         if let Some(ui_state) = self.ui_state.try_read_if_changed() {
@@ -116,22 +127,22 @@ impl PathingWindowState {
         ));
         let visible = window.is_some();
         if let Some(_token) = window {
-                size = ui.window_size().into();
-                let appearing = ui.is_window_appearing();
-                if appearing && self.ui_tab_pending.is_none() {
-                    self.ui_tab_pending = Some(self.ui_state.tab.index());
-                }
-                pos = (!appearing).then_some(ui.window_pos().into());
-                #[cfg(todo = "unnecessary")]
-                {
-                    // XXX: imgui-rs abstracts this away from us and makes it impossible to discern .-.
-                    visible &= !ui.is_window_collapsed();
-                }
-                let pathing_dir = crate::ADDON_DIR.join("pathing");
-                RenderState::draw_open_path_button(ui, fl!("open-button", kind = "folder"), &pathing_dir);
-                ui.same_line();
-                ui.dummy([4.0; 2]);
-                self.draw_content(ui, machine, engine)
+            size = ui.window_size().into();
+            let appearing = ui.is_window_appearing();
+            if appearing && self.ui_tab_pending.is_none() {
+                self.ui_tab_pending = Some(self.ui_state.tab.index());
+            }
+            pos = (!appearing).then_some(ui.window_pos().into());
+            #[cfg(todo = "unnecessary")]
+            {
+                // XXX: imgui-rs abstracts this away from us and makes it impossible to discern .-.
+                visible &= !ui.is_window_collapsed();
+            }
+            let pathing_dir = crate::ADDON_DIR.join("pathing");
+            RenderState::draw_open_path_button(ui, fl!("open-button", kind = "folder"), &pathing_dir);
+            ui.same_line();
+            ui.dummy([4.0; 2]);
+            self.draw_content(ui, machine, engine)
         }
         let open = match opened {
             true if !visible => WindowOpen::Collapsed,
@@ -140,7 +151,8 @@ impl PathingWindowState {
         let ui_state = &mut *self.ui_state;
         if let Some(pos) = pos {
             ui_state.window.position_abs = pos;
-            ui_state.window.position_rel = ui_state.window.position_abs / UiVec2::from(ui.io().display_size);
+            ui_state.window.position_rel =
+                ui_state.window.position_abs / UiVec2::from(ui.io().display_size);
             ui_state.set_window_size(size);
         }
         let open_prev = mem::replace(&mut ui_state.window.open, open);
@@ -153,11 +165,8 @@ impl PathingWindowState {
     /// (edit should be a window anyway)
     ///
     /// XXX: beware https://github.com/ocornut/imgui/issues/6681 ?
-    fn draw_tab<'ui, U>(
-        &mut self,
-        ui: &mut U,
-        tab: usize,
-    ) -> Option<UiTokenDyn<'ui>> where
+    fn draw_tab<'ui, U>(&mut self, ui: &mut U, tab: usize) -> Option<UiTokenDyn<'ui>>
+    where
         U: ?Sized + ImDrawWindow<'ui>,
     {
         let prev = self.ui_state.tab.selected(tab);
@@ -212,11 +221,11 @@ impl PathingWindowState {
         let bookmark_tl = ui.item_rect_min();
         let bookmark_br = ui.item_rect_max();
         let draw_content = rendered_err.is_none() || machine.pack_ui_state.any_loaded();
-        let tabs = draw_content.then(|| {
-            ui.tab_bar("packs")
-        }).flatten();
+        let tabs = draw_content.then(|| ui.tab_bar("packs")).flatten();
         for &tab_index in Self::TABS {
-            let Some(_draw_tab) = tabs.as_ref().and_then(|_| self.draw_tab(ui, tab_index)) else { continue };
+            let Some(_draw_tab) = tabs.as_ref().and_then(|_| self.draw_tab(ui, tab_index)) else {
+                continue
+            };
             if let Some(e) = rendered_err.take() {
                 PathingConfig::draw_space_error(ui, machine, e.flatten());
             }
@@ -253,21 +262,19 @@ impl PathingWindowState {
         ui.set_cursor_screen_pos([bookmark_br[0], bookmark_tl[1]]);
         match self.ui_state.tab.index() {
             #[cfg(feature = "paths-interact")]
-            PathingWindowTab::INDEX_POIS => {
+            PathingWindowTab::INDEX_POIS =>
                 if ui.button("rebuild") {
                     if let Some(..) = machine.pathing.as_ref() {
                         PathingEvent::InteractControl(InteractMessage::RequestRebuild).try_send();
                     }
-                }
-            },
+                },
             #[cfg(feature = "paths-edit")]
-            PathingWindowTab::INDEX_EDIT => {
+            PathingWindowTab::INDEX_EDIT =>
                 if machine.pack_ui_state.pack_edit.is_open() {
                     if ui.button("close") {
                         machine.pack_ui_state.pack_edit.close();
                     }
-                }
-            },
+                },
             _ => {
                 self.draw_categories_header(ui, machine);
             },
@@ -275,11 +282,8 @@ impl PathingWindowState {
         ui.set_cursor_screen_pos(bookmark);
         drop(tabs);
     }
-    pub fn draw_categories_header<'ui, U>(
-        &mut self,
-        ui: &mut U,
-        machine: &mut RenderMachine,
-    ) where
+    pub fn draw_categories_header<'ui, U>(&mut self, ui: &mut U, machine: &mut RenderMachine)
+    where
         U: ?Sized + ImDrawWindow<'ui>,
     {
         let mut drawn = false;
@@ -303,7 +307,9 @@ impl PathingWindowState {
             if machine.pack_ui_state.can_expand() {
                 ui.same_line();
                 if ui.button(fl!("expand-all")) {
-                    machine.pack_ui_state.act_expand_all(!Self::FILTER_EXPAND_COLLAPSE);
+                    machine
+                        .pack_ui_state
+                        .act_expand_all(!Self::FILTER_EXPAND_COLLAPSE);
                 }
             }
         }
@@ -312,7 +318,9 @@ impl PathingWindowState {
                 ui.same_line();
             }
             if ui.button(fl!("collapse-all")) {
-                machine.pack_ui_state.act_collapse_all(!Self::FILTER_EXPAND_COLLAPSE);
+                machine
+                    .pack_ui_state
+                    .act_collapse_all(!Self::FILTER_EXPAND_COLLAPSE);
             }
             drawn = true;
         }
@@ -332,11 +340,8 @@ impl PathingWindowState {
         }
     }
     const FILTER_EXPAND_COLLAPSE: bool = true;
-    pub fn draw_categories_content<'ui, U>(
-        &mut self,
-        ui: &mut U,
-        machine: &mut RenderMachine,
-    ) where
+    pub fn draw_categories_content<'ui, U>(&mut self, ui: &mut U, machine: &mut RenderMachine)
+    where
         U: ?Sized + ImDrawWindow<'ui>,
     {
         let table_flags = match ui.imgui_version_num() {
@@ -355,7 +360,8 @@ impl PathingWindowState {
             _ => Default::default(),
         };
         let table_token = ui.begin_table_with_flags(c"pathing", 1, table_flags);
-        #[cfg(deleteme)] {
+        #[cfg(deleteme)]
+        {
             ui.table_next_column();
             for (name, reason) in &engine.packs.unloaded_packs {
                 let node = ui.begin_tree_leaf_wide(name, name, true);
@@ -407,11 +413,8 @@ impl PathingWindowState {
             });
         }
     }
-    pub fn draw_filter_content<'ui, U>(
-        &mut self,
-        ui: &mut U,
-        machine: &mut RenderMachine,
-    ) where
+    pub fn draw_filter_content<'ui, U>(&mut self, ui: &mut U, machine: &mut RenderMachine)
+    where
         U: ?Sized + ImDrawWindow<'ui>,
     {
         let filter_prev = self.ui_state.filter.flags;
@@ -428,11 +431,13 @@ impl PathingWindowState {
         if query_dirty || filter_dirty {
             self.ui_state_pending |= ui_state.search.flags != self.search_state.flags;
             ui_state.search.flags = self.search_state.flags;
-            machine.pack_ui_state.filter_query.set_flags(ui_state.filter.flags);
+            machine
+                .pack_ui_state
+                .filter_query
+                .set_flags(ui_state.filter.flags);
             match self.search_state.query_str() {
                 Some(Some(query)) if !query.is_empty() && search_dirty != Some(true) => (),
-                Some(query) =>
-                    ui_state.search.query = query.cloned().unwrap_or_default(),
+                Some(query) => ui_state.search.query = query.cloned().unwrap_or_default(),
                 _ => (),
             }
         }

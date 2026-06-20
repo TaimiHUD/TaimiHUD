@@ -48,9 +48,12 @@ impl<T: ?Sized> BvhQueryOf<T> {
 impl<T: ?Sized> ops::Deref for BvhQueryOf<T> {
     type Target = T;
     #[inline(always)]
-    fn deref(&self) -> &Self::Target { &self.0 }
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
-impl<T: ?Sized, const D: usize> BvhQuery<D> for BvhQueryOf<T> where
+impl<T: ?Sized, const D: usize> BvhQuery<D> for BvhQueryOf<T>
+where
     T: IntersectsAabb<f32, D>,
 {
     /// TODO?
@@ -59,7 +62,8 @@ impl<T: ?Sized, const D: usize> BvhQuery<D> for BvhQueryOf<T> where
         self.intersects_aabb(aabb)
     }
 }
-impl<T: ?Sized, const D: usize> IntersectsAabb<f32, D> for BvhQueryOf<T> where
+impl<T: ?Sized, const D: usize> IntersectsAabb<f32, D> for BvhQueryOf<T>
+where
     T: IntersectsAabb<f32, D>,
 {
     #[inline(always)]

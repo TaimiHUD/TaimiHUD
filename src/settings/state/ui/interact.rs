@@ -1,4 +1,5 @@
 use {
+    crate::settings::pathing::TriggerKind,
     bitflags::bitflags,
     core::{num::NonZero, str::FromStr},
     serde::{
@@ -6,7 +7,6 @@ use {
         ser,
     },
     taimi_hoard::flags::{BitFlagContainer, BitFlagDe, BitFlagSer},
-    crate::settings::pathing::TriggerKind,
 };
 
 bitflags! {
@@ -26,23 +26,19 @@ impl InteractSortFlags {
     /// bools that are typically more interesting when true
     /// (thus sort descending by default)
     pub const SORT_INVERTED: Self = Self::from_bits_retain(
-        Self::NEARBY.bits()
-        | Self::VISIBLE.bits()
-        | Self::INTERACTIVE.bits()
-        | Self::ENABLED.bits()
+        Self::NEARBY.bits() | Self::VISIBLE.bits() | Self::INTERACTIVE.bits() | Self::ENABLED.bits(),
     );
 
     pub const DEFAULT_UI: Self = Self::from_bits_retain(
-        Self::DISTANCE.bits()
-        | Self::NEARBY.bits()
-        //| Self::TITLE.bits()
+        Self::DISTANCE.bits() | Self::NEARBY.bits(), //| Self::TITLE.bits()
     );
     pub const DEFAULT_UI_DESC: Self = match Self::SORT_INVERTED {
         #[cfg(todo)]
         inv => inv,
         inv => Self::from_bits_retain(Self::DEFAULT_UI.bits() & inv.bits()),
     };
-    pub const INTERACTIVE_MASK: TriggerKind = TriggerKind::from_bits_retain(TriggerKind::SETTINGS_GUI.bits() & !TriggerKind::BOUNCE.bits());
+    pub const INTERACTIVE_MASK: TriggerKind =
+        TriggerKind::from_bits_retain(TriggerKind::SETTINGS_GUI.bits() & !TriggerKind::BOUNCE.bits());
 
     pub const fn interactive(flags: TriggerKind) -> Self {
         match flags.intersects(Self::INTERACTIVE_MASK) {
@@ -162,14 +158,9 @@ impl InteractFilterFlags {
     /// filters that are a direct negation ([Self::DISABLED] vs [InteractSortFlags::VISIBLE] for example)
     ///
     /// [Self::FILTERED] is the exception
-    pub const SORT_INVERTED: Self = Self::from_bits_truncate(
-        Self::DISABLED.bits()
-        | Self::STATIC.bits()
-        | Self::FAR.bits()
-    );
-    pub const SORT_INVERT_MASK: Self = Self::from_bits_truncate(
-        !Self::SORT_INVERTED.bits()
-    );
+    pub const SORT_INVERTED: Self =
+        Self::from_bits_truncate(Self::DISABLED.bits() | Self::STATIC.bits() | Self::FAR.bits());
+    pub const SORT_INVERT_MASK: Self = Self::from_bits_truncate(!Self::SORT_INVERTED.bits());
 
     pub const DEFAULT_UI: Self = Self::FILTERED;
 

@@ -1,7 +1,8 @@
-use crate::controller::pathing::{PathingController, PathingEvent};
-use crate::controller::pathing::registry::PackPath;
-use taimi_meta::packs::CategoryPath;
-use core::mem;
+use {
+    crate::controller::pathing::{registry::PackPath, PathingController, PathingEvent},
+    core::mem,
+    taimi_meta::packs::CategoryPath,
+};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CategoryAction {

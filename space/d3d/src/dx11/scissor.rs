@@ -1,6 +1,10 @@
 pub use windows::Win32::Foundation::RECT;
 use {
-    crate::{state::{D3dState, D3dStateSnapshot}, dx11::prelude::*, D3dContextBindable},
+    crate::{
+        dx11::prelude::*,
+        state::{D3dState, D3dStateSnapshot},
+        D3dContextBindable,
+    },
     glamour::{Box2, Point2, Rect, Size2, Unit},
     num_traits::AsPrimitive,
     std::{mem, slice},

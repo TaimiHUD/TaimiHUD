@@ -1,47 +1,103 @@
-use crate::controller::pathing::space::TrailGeometryRequests;
-use crate::util::PositionInput;
-use std::io::{self, Write, Seek};
-use std::fs;
-use std::borrow::Cow;
-use anyhow::{anyhow, Context};
-use taimi_meta::packs::SectionOfTrail;
-use crate::{controller::{pathing::{
-    info::MapPackInfo, registry::{PackRoot, PackCategoryInfo, LoadedMarkerPath, LoaderBox, PackFormat, PackIndex, PackInfo, PackInfoSignature, PackPath, PackRegistryNs, SharedLoaderBox}, shared::{PathingShared, SharedMapPackLoaded, SharedMapPackState, SharedPackConfig, SharedPackInfo, SharedPackLoad, SharedPackLoaded}, state::LoadedMapPack, PathingEvent, UnloadedReason
-}, Controller}, settings::SourceKind, TEXTURES};
-use crate::exports::runtime as rt;
-use glamour::Point3;
-use glam::Vec4;
-use taimi_hoard::{str_opt, str_opt_ref};
-use relative_path::PathExt;
-use uuid::Uuid;
-use std::mem;
-use std::fmt;
-use taimi_sync::watched::Watched;
-use std::hash::Hash;
-use std::iter;
-use std::sync::Arc;
-use tokio::sync::Mutex as TokioMutex;
-use taimi_hoard::loc::{indexed::IndexedList, LocationRef, LocationMut};
-use crate::render::element::im::prelude::*;
-use std::collections::BTreeMap;
-use crate::exports::runtime::textures::{TextureKey, TextureSlot};
-use taimi_meta::packs::{
-    id::{MarkerId, MarkerIndex},
-    CategoryPath,
-    MarkerPath, CategoryIndex,
-    PoiIndex, TrailIndex, TrailSectionIndex,
-    MapIndex,
-    PoiPath, TrailPath, TrailSectionPath,
+use {
+    super::{PackElement, PackVisibility},
+    crate::{
+        controller::{
+            pathing::{
+                info::MapPackInfo,
+                registry::{
+                    LoadedMarkerPath,
+                    LoaderBox,
+                    PackCategoryInfo,
+                    PackFormat,
+                    PackIndex,
+                    PackInfo,
+                    PackInfoSignature,
+                    PackPath,
+                    PackRegistryNs,
+                    PackRoot,
+                    SharedLoaderBox,
+                },
+                shared::{
+                    PathingShared,
+                    SharedMapPackLoaded,
+                    SharedMapPackState,
+                    SharedPackConfig,
+                    SharedPackInfo,
+                    SharedPackLoad,
+                    SharedPackLoaded,
+                },
+                space::TrailGeometryRequests,
+                state::LoadedMapPack,
+                PathingEvent,
+                UnloadedReason,
+            },
+            Controller,
+        },
+        exports::{
+            runtime as rt,
+            runtime::textures::{TextureKey, TextureSlot},
+        },
+        render::element::im::prelude::*,
+        settings::SourceKind,
+        util::PositionInput,
+        TEXTURES,
+    },
+    anyhow::{anyhow, Context},
+    glam::Vec4,
+    glamour::Point3,
+    imgui::TreeNode,
+    relative_path::PathExt,
+    std::{
+        borrow::Cow,
+        collections::BTreeMap,
+        fmt,
+        fs,
+        hash::Hash,
+        io::{self, Seek, Write},
+        iter,
+        mem,
+        path::{Path, PathBuf},
+        sync::Arc,
+    },
+    taimi_hoard::{
+        loc::{indexed::IndexedList, LocationMut, LocationRef},
+        str_opt,
+        str_opt_ref,
+    },
+    taimi_meta::{
+        coords::LocalSpace,
+        packs::{
+            id::{MarkerId, MarkerIndex},
+            CategoryIndex,
+            CategoryPath,
+            MapIndex,
+            MarkerPath,
+            PoiIndex,
+            PoiPath,
+            SectionOfTrail,
+            TrailIndex,
+            TrailPath,
+            TrailSectionIndex,
+            TrailSectionPath,
+        },
+    },
+    taimi_pack::{
+        attributes::{string_into, AttrString, MarkerAttributes},
+        category::{
+            id::{AsFullId, FullIdRef, IdNameBox},
+            Category,
+            CategoryFlags,
+            CategoryId,
+        },
+        loader::DirectoryLoader,
+        trail::{Trail, TrailData, TrailHeader, TrailSection, TrlPath},
+        Pack,
+        Poi,
+    },
+    taimi_sync::watched::Watched,
+    tokio::sync::Mutex as TokioMutex,
+    uuid::Uuid,
 };
-use taimi_meta::coords::LocalSpace;
-use taimi_pack::{category::{id::{IdNameBox, FullIdRef, AsFullId}, Category, CategoryFlags, CategoryId}, loader::DirectoryLoader, Poi, trail::{Trail, TrailSection, TrailHeader, TrailData},
-    attributes::{string_into, AttrString, MarkerAttributes},
-    trail::TrlPath,
-};
-use imgui::TreeNode;
-use taimi_pack::Pack;
-use std::path::{PathBuf, Path};
-use super::{PackElement, PackVisibility};
 
 pub struct PackEdit {
     pub pack_path: PackPath,
@@ -104,7 +160,9 @@ impl PackEdit {
         self.env.colour = Vec4::ONE;
     }
     pub fn pre_draw(&mut self, visibility: PackVisibility, latest_map: Option<MapIndex>) {
-        if visibility.is_closed() { return }
+        if visibility.is_closed() {
+            return
+        }
 
         let dirty_map = match &self.map_state {
             Some(map) if latest_map.is_some() => Some(map.map_id) != latest_map,
@@ -123,7 +181,8 @@ impl PackEdit {
         if self.cats_dirty || *self.pack.pack_info.categories != self.pack.pack.categories {
             let cats = PackCategoryInfo::from_pack(&self.pack.pack);
             self.pack.pack_info.categories = Arc::new(cats);
-            self.pack.pack_info.roots = PackRoot::from_category_collection(&self.pack.pack.categories).collect();
+            self.pack.pack_info.roots =
+                PackRoot::from_category_collection(&self.pack.pack.categories).collect();
         } else if self.markers_dirty {
             let categories = Arc::make_mut(&mut self.pack.pack_info.categories);
             categories.lonely.clear();
@@ -145,12 +204,17 @@ impl PackEdit {
             let Some(pack) = packs.lookup_mut(&self.pack_path) else { return false };
             // clobber with our dummy one
             if pack.info.is_dead() {
-                pack.info = Arc::new(SharedPackInfo::new_unloaded(self.pack_path, self.root_dir.clone().into(), None));
+                pack.info = Arc::new(SharedPackInfo::new_unloaded(
+                    self.pack_path,
+                    self.root_dir.clone().into(),
+                    None,
+                ));
             }
             let info = Arc::make_mut(&mut pack.info);
             info.sig = self.info_sig;
             info.info = Some(pack_info);
-            #[cfg(todo = "unnecessary")] {
+            #[cfg(todo = "unnecessary")]
+            {
                 pack.set_info(pack_info);
                 self.info_sig = pack.info.sig;
             }
@@ -183,31 +247,43 @@ impl PackEdit {
         let Some(map_id) = self.env.latest_map else { return false };
         let Some(shared) = &self.env.shared else { return false };
         let map_path = self.pack_path.rel(map_id);
-        let map_info = &*self.map_info.get_or_insert_with(||
-            Arc::new(MapPackInfo::with_pack(map_id, &self.pack.pack, &self.pack.pack_info))
-        );
-        let map_state = &*self.map_state.get_or_insert_with(||
-            LoadedMapPack::from_pack(map_id, map_info, &self.pack.pack)
-        );
+        let map_info = &*self.map_info.get_or_insert_with(|| {
+            Arc::new(MapPackInfo::with_pack(
+                map_id,
+                &self.pack.pack,
+                &self.pack.pack_info,
+            ))
+        });
+        let map_state = &*self
+            .map_state
+            .get_or_insert_with(|| LoadedMapPack::from_pack(map_id, map_info, &self.pack.pack));
         shared.gameplay.send_modify(|gameplay| {
             let (shared_info, shared_map) = gameplay.for_pack_mut(self.pack_path);
-            *shared_info = Some(SharedMapPackLoaded::with_loaded(map_path, map_info.clone(), map_state));
+            *shared_info = Some(SharedMapPackLoaded::with_loaded(
+                map_path,
+                map_info.clone(),
+                map_state,
+            ));
             *shared_map = Some(SharedMapPackState::with_static(map_path, map_state));
         });
         true
     }
     pub fn pack_alloc(&mut self) -> Result<(), ()> {
-        if self.env.pack_alloc_name.is_empty() { return Err(()) }
+        if self.env.pack_alloc_name.is_empty() {
+            return Err(())
+        }
         let Some(shared) = &self.env.shared else { return Err(()) };
-        self.root_dir = SourceKind::Pathing.get_user_dir()
-            .join(&self.env.pack_alloc_name);
+        self.root_dir = SourceKind::Pathing.get_user_dir().join(&self.env.pack_alloc_name);
         let _ = rt::log::error_ok(fs::create_dir_all(&self.root_dir));
-        self.loader = Some(Arc::new(TokioMutex::new(Box::new(DirectoryLoader::new(&self.root_dir)) as LoaderBox)));
+        self.loader = Some(Arc::new(TokioMutex::new(
+            Box::new(DirectoryLoader::new(&self.root_dir)) as LoaderBox,
+        )));
         self.pack.do_not_steal = true;
         self.pack.pack = Default::default();
         let mut cat = Category {
-            full_id: CategoryId::with_full_id(str_opt_ref(&self.env.pack_cat_id)
-                .unwrap_or(&self.env.pack_alloc_name)),
+            full_id: CategoryId::with_full_id(
+                str_opt_ref(&self.env.pack_cat_id).unwrap_or(&self.env.pack_alloc_name),
+            ),
             flags: CategoryFlags::ROOT,
             display_name: Some(str_opt_ref(&self.env.pack_cat_name).unwrap_or("packedit").into()),
             sub_categories: Default::default(),
@@ -220,8 +296,16 @@ impl PackEdit {
         self.env.pack_alloc_name.clear();
         self.env.apply_attrs(&mut cat.marker_attributes);
         self.cursor.category_path.path = 0;
-        self.pack.pack.categories.root_categories.insert(cat.full_id.clone());
-        self.pack.pack.categories.all_categories.insert(cat.full_id.clone(), cat);
+        self.pack
+            .pack
+            .categories
+            .root_categories
+            .insert(cat.full_id.clone());
+        self.pack
+            .pack
+            .categories
+            .all_categories
+            .insert(cat.full_id.clone(), cat);
         Ok(())
     }
     fn init_pack(&mut self, pack_path: PackPath) {
@@ -241,32 +325,47 @@ impl PackEdit {
         let packs = shared.packs.packs.borrow();
         let loader = self.loader.as_ref().map(|l| l.blocking_lock());
         if let Some(mut loader) = loader {
-            self.env.refresh_textures_dir(&mut *loader, &self.root_dir, self.pack_path);
+            self.env
+                .refresh_textures_dir(&mut *loader, &self.root_dir, self.pack_path);
         }
-        for pack in packs.values().filter(|pack| (pack.info.index != self.pack_path) | !self.pack.do_not_steal) {
+        for pack in packs
+            .values()
+            .filter(|pack| (pack.info.index != self.pack_path) | !self.pack.do_not_steal)
+        {
             self.env.refresh_textures(pack);
         }
         // dropping this too early could invalidate weak handles maybe...
         drop(prev);
     }
     fn asset_file_path<P: ?Sized + AsRef<Path>>(&self, asset: &P) -> Option<PathBuf> {
-        matches!(self.pack.pack_info.format, PackFormat::TacoDir).then(|| self.root_dir.join(asset.as_ref()))
+        matches!(self.pack.pack_info.format, PackFormat::TacoDir)
+            .then(|| self.root_dir.join(asset.as_ref()))
     }
     fn resolve_trl(&self, trl: Result<&TrlPath, TrailPath>) -> anyhow::Result<PathBuf> {
-        let trl = trl.or_else(|path| {
-            // TODO: read+copy from loader?
-            self.pack.pack.trails.get(path.path as usize).and_then(|trail| trail.trail_path.as_ref())
-                .ok_or(path)
-        }).ok();
+        let trl = trl
+            .or_else(|path| {
+                // TODO: read+copy from loader?
+                self.pack
+                    .pack
+                    .trails
+                    .get(path.path as usize)
+                    .and_then(|trail| trail.trail_path.as_ref())
+                    .ok_or(path)
+            })
+            .ok();
         match trl {
-            Some(trl) => self.asset_file_path(&trl.path[..])
+            Some(trl) => self
+                .asset_file_path(&trl.path[..])
                 .context("can't add file to zip"),
-            None => Err(
-                anyhow!("couldn't resolve trl path")
-            ),
+            None => Err(anyhow!("couldn't resolve trl path")),
         }
     }
-    fn write_to_trl(&self, trl: Result<&TrlPath, TrailPath>, trunc: bool, map_id: Option<i32>) -> anyhow::Result<fs::File> {
+    fn write_to_trl(
+        &self,
+        trl: Result<&TrlPath, TrailPath>,
+        trunc: bool,
+        map_id: Option<i32>,
+    ) -> anyhow::Result<fs::File> {
         let fpath = self.resolve_trl(trl)?;
         let op = match trunc {
             true => "clearing",
@@ -284,16 +383,15 @@ impl PackEdit {
                 // bad idea if you want to rewind or check pos for header...
                 open.create(true).append(true)
             },
-            false =>
-                open.create(true).write(true)
-        }.open(&fpath)
+            false => open.create(true).write(true),
+        }
+        .open(&fpath)
         .with_context(context)?;
         if let Some(map_id) = map_id {
             let TODO = trunc;
             let pos = match trunc {
                 true => Ok(0),
-                false =>
-                    file.seek(io::SeekFrom::End(0)),
+                false => file.seek(io::SeekFrom::End(0)),
             };
             if pos.ok() == Some(0) {
                 TrailHeader::with_map_id(map_id).write_header(&mut file)?;
@@ -311,7 +409,9 @@ impl fmt::Debug for PackEdit {
     }
 }
 impl Default for PackEdit {
-    fn default() -> Self { Self::empty() }
+    fn default() -> Self {
+        Self::empty()
+    }
 }
 #[derive(Debug)]
 pub struct PackData {
@@ -334,7 +434,9 @@ impl PackData {
     }
 }
 impl Default for PackData {
-    fn default() -> Self { Self::empty() }
+    fn default() -> Self {
+        Self::empty()
+    }
 }
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EditCursor {
@@ -350,7 +452,9 @@ impl EditCursor {
     }
 }
 impl Default for EditCursor {
-    fn default() -> Self { Self::empty() }
+    fn default() -> Self {
+        Self::empty()
+    }
 }
 #[derive(Debug, Default)]
 pub struct PackEditEnv {
@@ -374,13 +478,16 @@ impl PackEditEnv {
         let subresources = pack.info.shared_subresources();
         let Ok(subresources) = subresources.read() else { return };
         for (attr, key) in subresources.iter() {
-            let slot = TEXTURES.lookup_with(key, |slot| match slot {
-                #[cfg(todo = "unnecessary")]
-                slot => slot.clone(),
-                _ => None,
-            }).flatten();
+            let slot = TEXTURES
+                .lookup_with(key, |slot| match slot {
+                    #[cfg(todo = "unnecessary")]
+                    slot => slot.clone(),
+                    _ => None,
+                })
+                .flatten();
             let format = pack.info.info.as_ref().map(|i| i.format);
-            let file_path = matches!(format, Some(PackFormat::TacoDir)).then(|| pack.info.path.join(&attr[..]));
+            let file_path =
+                matches!(format, Some(PackFormat::TacoDir)).then(|| pack.info.path.join(&attr[..]));
             let file_path = match file_path {
                 Some(p) if !p.try_exists().unwrap_or(false) => None,
                 p => p,
@@ -398,22 +505,20 @@ impl PackEditEnv {
     }
     fn refresh_textures_dir(&mut self, loader: &mut LoaderBox, root_dir: &Path, source: PackPath) {
         let image_extensions = [
-            "png",
-            "jpg",
-            "jpeg",
-            "bmp",
-            "tiff",
+            "png", "jpg", "jpeg", "bmp", "tiff",
             //"webm",
         ];
         for ext in image_extensions {
-            let paths = loader.all_files_with_ext(ext)
+            let paths = loader
+                .all_files_with_ext(ext)
                 .filter_map(move |path| match path.context("search for textures") {
                     Ok(path) => Some(path.into_owned()),
                     Err(e) => {
                         log::debug!("{e:#}");
                         None
                     },
-                }).collect::<Vec<_>>();
+                })
+                .collect::<Vec<_>>();
             for path in paths {
                 let file_path = match path.to_str().and_then(|p| loader.asset_absolute_path(p)) {
                     Some(p) => p,
@@ -457,35 +562,37 @@ impl PackEditEnv {
     }
     fn tex_attr(&mut self, root_dir: &Path) -> Option<AttrString> {
         let tex = self.avail_textures.get(str_opt_ref(&self.tex_selected)?);
-        let tex_source = tex.as_ref()
-            .and_then(|tex|
-                tex.source.marker_path::<PackPath>()
-                .and_then(|source| tex.source_attr.as_ref().map(|attr|
-                        (source, &attr[..])
-                    )
-                )
-            );
+        let tex_source = tex.as_ref().and_then(|tex| {
+            tex.source
+                .marker_path::<PackPath>()
+                .and_then(|source| tex.source_attr.as_ref().map(|attr| (source, &attr[..])))
+        });
         let file_path = tex
             .and_then(|tex| (!tex.file_path.as_os_str().is_empty()).then_some(&tex.file_path))
             .and_then(|file_path| file_path.relative_to(&root_dir).ok());
         let attrkey = match (file_path, tex_source) {
             (Some(p), _) => Some(string_into(p.as_str())),
             (_, Some((source, attr))) => {
-                let loaded = self.shared.as_ref().and_then(|shared|
-                    shared.packs.packs.borrow().lookup_ref(&source.root)
+                let loaded = self.shared.as_ref().and_then(|shared| {
+                    shared
+                        .packs
+                        .packs
+                        .borrow()
+                        .lookup_ref(&source.root)
                         .map(|pack| pack.loaded.clone())
-                );
+                });
                 let loaded = loaded.as_ref().map(|l| l.borrow());
-                let mut loader = loaded.as_ref().and_then(|l| l.loader.as_ref()
-                    .map(|loader| loader.blocking_lock())
-                );
+                let mut loader = loaded
+                    .as_ref()
+                    .and_then(|l| l.loader.as_ref().map(|loader| loader.blocking_lock()));
                 let context = || format!("copying {}/{attr}", source);
-                let asset = loader.as_mut().map(|loader| loader.load_asset_dyn(
-                        attr
-                    ).with_context(context));
+                let asset = loader
+                    .as_mut()
+                    .map(|loader| loader.load_asset_dyn(attr).with_context(context));
                 match asset {
                     Some(Ok(mut asset)) => {
-                        let new_asset = rt::log::error_ok(PackEditEnv::setup_asset(root_dir, &mut asset, attr));
+                        let new_asset =
+                            rt::log::error_ok(PackEditEnv::setup_asset(root_dir, &mut asset, attr));
                         if let Some(new_asset) = &new_asset {
                             self.tex_selected.clear();
                             self.tex_selected.push_str(&new_asset[..]);
@@ -500,7 +607,10 @@ impl PackEditEnv {
                 }
             },
             _ => {
-                log::warn!("TODO: copy texture file into {}", rt::relative_path(&root_dir).display());
+                log::warn!(
+                    "TODO: copy texture file into {}",
+                    rt::relative_path(&root_dir).display()
+                );
                 tex.and_then(|tex| tex.file_path.file_name())
                     .map(|fname| string_into(fname.to_string_lossy()))
             },
@@ -519,7 +629,11 @@ impl PackEditEnv {
             attrs.trail_mut().texture = Some(string_into("taimi"));
         }
     }
-    fn setup_asset<R: io::Read>(root_dir: &Path, asset: &mut R, sourcename: &str) -> anyhow::Result<AttrString> {
+    fn setup_asset<R: io::Read>(
+        root_dir: &Path,
+        asset: &mut R,
+        sourcename: &str,
+    ) -> anyhow::Result<AttrString> {
         let mut outpath = root_dir.join(PackEdit::CONTENT_DIR_MARKERS);
         let _ = rt::log::warn_ok(fs::create_dir_all(&outpath));
         outpath.push(Path::new(sourcename).file_name().unwrap_or(sourcename.as_ref()));
@@ -539,7 +653,7 @@ impl PackEditEnv {
         io::copy(asset, &mut out)
             .map_err(Into::into)
             .map(|_| outattr())
-        .map(string_into)
+            .map(string_into)
     }
 }
 #[derive(Debug)]
@@ -599,7 +713,8 @@ pub struct DrawPe<'a, 's, 'ui> {
     act_trl_boop: Option<TrlBoop>,
 }
 impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
-    pub fn new(ui: &'a Ui<'ui>,
+    pub fn new(
+        ui: &'a Ui<'ui>,
         state: &'s mut PackEdit,
         packs: &'a IndexedList<PackRegistryNs, PackIndex, [PackElement]>,
     ) -> Self {
@@ -641,13 +756,13 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
 
         {
             let _id = self.ui.push_id("pecat");
-            let is_new_cat = self.state.env.pack_cat_id.is_empty() || !self.state.env.pack_cat_id.ends_with(".");
+            let is_new_cat =
+                self.state.env.pack_cat_id.is_empty() || !self.state.env.pack_cat_id.ends_with(".");
             if is_new_cat {
                 if self.ui.button("cat") && !self.state.env.pack_cat_id.is_empty() {
                     let mut cat = Category {
                         full_id: CategoryId::with_full_id(&self.state.env.pack_cat_id),
-                        display_name: str_opt_ref(&self.state.env.pack_cat_name)
-                            .map(|n| n.into()),
+                        display_name: str_opt_ref(&self.state.env.pack_cat_name).map(|n| n.into()),
                         flags: Default::default(),
                         sub_categories: Default::default(),
                         marker_attributes: Default::default(),
@@ -657,21 +772,39 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                     self.state.env.pack_cat_id.push_str(".");
                 }
             } else {
-                let id = str_opt_ref(self.state.env.pack_cat_id[..].strip_suffix(".").unwrap_or(&self.state.env.pack_cat_id)).map(FullIdRef::from_str);
+                let id = str_opt_ref(
+                    self.state.env.pack_cat_id[..]
+                        .strip_suffix(".")
+                        .unwrap_or(&self.state.env.pack_cat_id),
+                )
+                .map(FullIdRef::from_str);
                 if let Some(id) = id {
                     let mut wants_id = false;
-                    let cat_info = self.state.pack.pack_info.categories.info_of(self.state.cursor.category_path);
-                    let sibling = cat_info.and_then(|i|
-                        i.sibling()
-                        .or_else(|| {
+                    let cat_info = self
+                        .state
+                        .pack
+                        .pack_info
+                        .categories
+                        .info_of(self.state.cursor.category_path);
+                    let sibling = cat_info.and_then(|i| {
+                        i.sibling().or_else(|| {
                             let itself = self.state.cursor.category_path.path;
-                            let sib = i.parent().and_then(|p| self.state.pack.pack_info.categories.firstborn_of(CategoryPath::with_path(p))).map(|s| s.path);
+                            let sib = i
+                                .parent()
+                                .and_then(|p| {
+                                    self.state
+                                        .pack
+                                        .pack_info
+                                        .categories
+                                        .firstborn_of(CategoryPath::with_path(p))
+                                })
+                                .map(|s| s.path);
                             match sib {
                                 Some(sib) if sib == itself => None,
                                 sib => sib,
                             }
                         })
-                    );
+                    });
                     let mut buttoned = false;
                     if let Some(sibling) = sibling {
                         if self.ui.button("cycle") {
@@ -697,7 +830,14 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                             trunc_parent_len = parent_id.as_str().len() + 1;
                             if let Some(parent) = cat_info.and_then(|i| i.parent()) {
                                 self.state.cursor.category_path.path = parent;
-                            } else if let Some(idx) = self.state.pack.pack.categories.all_categories.get_index_of(parent_id) {
+                            } else if let Some(idx) = self
+                                .state
+                                .pack
+                                .pack
+                                .categories
+                                .all_categories
+                                .get_index_of(parent_id)
+                            {
                                 self.state.cursor.category_path.path = idx as CategoryIndex;
                             }
                         }
@@ -709,7 +849,14 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                     if wants_id {
                         self.state.env.pack_cat_name.clear();
                         self.state.env.pack_cat_id.clear();
-                        if let Some((_id, cat)) = self.state.pack.pack.categories.all_categories.get_index(self.state.cursor.category_path.path as usize) {
+                        if let Some((_id, cat)) = self
+                            .state
+                            .pack
+                            .pack
+                            .categories
+                            .all_categories
+                            .get_index(self.state.cursor.category_path.path as usize)
+                        {
                             self.state.env.pack_cat_id.push_str(cat.full_id.as_str());
                         }
                     }
@@ -718,13 +865,17 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
             self.ui.same_line();
             let width = self.ui.content_region_avail()[0] * 0.45;
             self.ui.set_next_item_width(width);
-            self.ui.input_text("##catid", &mut self.state.env.pack_cat_id).hint("id")
+            self.ui
+                .input_text("##catid", &mut self.state.env.pack_cat_id)
+                .hint("id")
                 .chars_noblank(true)
                 .build();
             if is_new_cat {
                 self.ui.same_line();
                 self.ui.set_next_item_width(width);
-                self.ui.input_text("##catname", &mut self.state.env.pack_cat_name).hint("name")
+                self.ui
+                    .input_text("##catname", &mut self.state.env.pack_cat_name)
+                    .hint("name")
                     .build();
             }
         }
@@ -757,7 +908,8 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
             let tex_selected = &self.state.env.tex_selected[..];
             if !tex_selected.is_empty() | true {
                 let label = if let Some(poi_path) = poi_path {
-                    self.ui.display_with_font(&(), &format_args!("poi#{}", poi_path.path));
+                    self.ui
+                        .display_with_font(&(), &format_args!("poi#{}", poi_path.path));
                     "save"
                 } else {
                     "poipoi"
@@ -769,14 +921,22 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
             }
             let width = self.ui.content_region_avail()[0] * 0.8;
             self.ui.set_next_item_width(width);
-            let texs = self.ui.begin_combo("##texs", str_opt_ref(tex_selected).unwrap_or("img"));
+            let texs = self
+                .ui
+                .begin_combo("##texs", str_opt_ref(tex_selected).unwrap_or("img"));
             if let Some(_token) = texs {
                 let width = self.ui.content_region_avail()[0];
                 self.ui.set_next_item_width(width);
-                let selected = self.state.env.avail_textures.get(tex_selected)
+                let selected = self
+                    .state
+                    .env
+                    .avail_textures
+                    .get(tex_selected)
                     .map(|tex| tex.key.clone());
                 self.ui.set_item_default_focus();
-                let manual_entry = self.ui.input_text("##tex", &mut self.state.env.tex_selected)
+                let manual_entry = self
+                    .ui
+                    .input_text("##tex", &mut self.state.env.tex_selected)
                     .auto_select_all(true)
                     .enter_returns_true(true)
                     .hint("image path")
@@ -791,12 +951,15 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                         Some(sel) if &sel[..] == &key[..] => true,
                         _ => false,
                     };
-                    let display = (!tex.file_path.as_os_str().is_empty()).then(||
-                        rt::relative_path(&tex.file_path).to_string_lossy()
-                    ).or_else(||
-                        tex.source_attr.as_ref().and_then(|s| str_opt(&s[..]))
-                            .map(Cow::Borrowed)
-                    ).unwrap_or(Cow::Borrowed(&key[..]));
+                    let display = (!tex.file_path.as_os_str().is_empty())
+                        .then(|| rt::relative_path(&tex.file_path).to_string_lossy())
+                        .or_else(|| {
+                            tex.source_attr
+                                .as_ref()
+                                .and_then(|s| str_opt(&s[..]))
+                                .map(Cow::Borrowed)
+                        })
+                        .unwrap_or(Cow::Borrowed(&key[..]));
                     if Selectable::new(&display).selected(selected).build(self.ui) {
                         selection = Some(&key[..]);
                         selection_source = Some(tex.source);
@@ -805,10 +968,13 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                             None => None,
                             Some(p) if p.root == self.state.pack_path =>
                                 Some(self.state.root_dir.to_string_lossy()),
-                            Some(pack_path) =>
-                                self.state.env.shared.as_ref().and_then(|p| p.packs.packs.borrow()
+                            Some(pack_path) => self.state.env.shared.as_ref().and_then(|p| {
+                                p.packs
+                                    .packs
+                                    .borrow()
                                     .lookup_ref(&pack_path.root)
-                                    .map(|p| Cow::Owned(p.info.to_string()))),
+                                    .map(|p| Cow::Owned(p.info.to_string()))
+                            }),
                         };
                         if let Some(source_pack) = source_pack {
                             self.ui.tooltip_text(&source_pack);
@@ -869,7 +1035,10 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                 self.ui.same_line();
                 let width = self.ui.content_region_avail()[0] * 0.95;
                 self.ui.set_next_item_width(width);
-                commit |= self.ui.input_text("##trl", &mut self.state.env.trl_name).hint("trl")
+                commit |= self
+                    .ui
+                    .input_text("##trl", &mut self.state.env.trl_name)
+                    .hint("trl")
                     .chars_noblank(true)
                     .enter_returns_true(true)
                     .build();
@@ -881,18 +1050,24 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                 if self.ui.button("clear TRL") {
                     self.act_trl_clear = Some((Err(trail_path), map_id.get() as i32));
                 } else if self.ui.is_item_hovered() {
-                    self.ui.tooltip_text("CLICKING HERE WILL PROBABLY NUKE A TRL FILE FROM THE PACK");
+                    self.ui
+                        .tooltip_text("CLICKING HERE WILL PROBABLY NUKE A TRL FILE FROM THE PACK");
                 }
             }
         }
-        self.ui.input_text("##tip", &mut self.state.env.tip_name).hint("tip")
+        self.ui
+            .input_text("##tip", &mut self.state.env.tip_name)
+            .hint("tip")
             .build();
     }
     pub fn draw_alloc(&mut self) {
         let _id = self.ui.push_id("pe-alloc");
         let mut commit = self.ui.button("allocate new");
         self.ui.same_line();
-        commit |= self.ui.input_text("##dir", &mut self.state.env.pack_alloc_name).hint("dir")
+        commit |= self
+            .ui
+            .input_text("##dir", &mut self.state.env.pack_alloc_name)
+            .hint("dir")
             .chars_noblank(true)
             .enter_returns_true(true)
             .build();
@@ -904,12 +1079,16 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
         } else if !self.state.env.pack_alloc_name.is_empty() {
             let width = self.ui.content_region_avail()[0] * 0.45;
             self.ui.set_next_item_width(width);
-            self.ui.input_text("##packid", &mut self.state.env.pack_cat_id).hint("id")
+            self.ui
+                .input_text("##packid", &mut self.state.env.pack_cat_id)
+                .hint("id")
                 .chars_noblank(true)
                 .build();
             self.ui.same_line();
             self.ui.set_next_item_width(width);
-            self.ui.input_text("##catname", &mut self.state.env.pack_cat_name).hint("name")
+            self.ui
+                .input_text("##catname", &mut self.state.env.pack_cat_name)
+                .hint("name")
                 .build();
         }
         self.draw_alloc_open();
@@ -955,19 +1134,29 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                 #[cfg(todo)]
                 None => self.state.env.latest_pos.map(Point3::to_untyped),
                 pos => pos.map(Point3::from_raw),
-            }.unwrap_or(Point3::<f32>::ZERO);
+            }
+            .unwrap_or(Point3::<f32>::ZERO);
             {
-                let poi = if let Some(poi) = poi_path.and_then(|p| self.state.pack.pack.pois.get_mut(p.path as usize)) {
+                let poi = if let Some(poi) =
+                    poi_path.and_then(|p| self.state.pack.pack.pois.get_mut(p.path as usize))
+                {
                     poi.position = position;
                     map_id = None;
                     poi
                 } else {
                     poi.insert(Poi {
-                        category: IdNameBox::new_cloned(self.state.pack.pack.categories.all_categories.get_index(self.state.cursor.category_path.path as usize)
-                            .map(|(_, c)| &c.full_id)
-                            .or(self.state.pack.pack.categories.root_categories.get_index(0))
-                            .cloned()
-                            .unwrap_or_else(|| self.state.env.fallback_category_id())),
+                        category: IdNameBox::new_cloned(
+                            self.state
+                                .pack
+                                .pack
+                                .categories
+                                .all_categories
+                                .get_index(self.state.cursor.category_path.path as usize)
+                                .map(|(_, c)| &c.full_id)
+                                .or(self.state.pack.pack.categories.root_categories.get_index(0))
+                                .cloned()
+                                .unwrap_or_else(|| self.state.env.fallback_category_id()),
+                        ),
                         guid: Uuid::new_v4(),
                         map_id: map_id.unwrap_or(0),
                         position,
@@ -977,7 +1166,9 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                 };
                 self.state.env.apply_attrs(&mut poi.attributes);
                 self.state.env.apply_render_attrs(&mut poi.attributes);
-                self.state.env.apply_poi_attrs(&self.state.root_dir, &mut poi.attributes);
+                self.state
+                    .env
+                    .apply_poi_attrs(&self.state.root_dir, &mut poi.attributes);
             }
             let added = poi.is_some();
             if let Some(poi) = poi {
@@ -1000,10 +1191,15 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
             let mut map_id = self.state.env.latest_map.map(|m| m.get() as i32);
             let mut trail = None;
             {
-                let trl = str_opt_ref(&self.state.env.trl_name)
-                    .map(|p| TrlPath::new(string_into(p)));
-                    let existing = trail_path.and_then(|p| self.state.pack.pack.trails.get_mut(p.path as usize)
-                        .map(|trail| (p, trail)));
+                let trl = str_opt_ref(&self.state.env.trl_name).map(|p| TrlPath::new(string_into(p)));
+                let existing = trail_path.and_then(|p| {
+                    self.state
+                        .pack
+                        .pack
+                        .trails
+                        .get_mut(p.path as usize)
+                        .map(|trail| (p, trail))
+                });
                 let mut open_sec = None;
                 let trail = if let Some((trail_path, trail)) = existing {
                     self.state.cursor.id.path = trail_path.into();
@@ -1015,14 +1211,24 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                     map_id = None;
                     trail
                 } else {
-                    let trail_path: SectionOfTrail = SectionOfTrail::with_parts(TrailPath::with_path(self.state.pack.pack.trails.len() as TrailIndex), TrailSectionPath::with_path(0 as TrailSectionIndex));
+                    let trail_path: SectionOfTrail = SectionOfTrail::with_parts(
+                        TrailPath::with_path(self.state.pack.pack.trails.len() as TrailIndex),
+                        TrailSectionPath::with_path(0 as TrailSectionIndex),
+                    );
                     self.state.cursor.id.path = trail_path.map_path(|p| p.path).into();
                     trail.insert(Trail {
-                        category: IdNameBox::new_cloned(self.state.pack.pack.categories.all_categories.get_index(self.state.cursor.category_path.path as usize)
-                            .map(|(_, c)| &c.full_id)
-                            .or(self.state.pack.pack.categories.root_categories.get_index(0))
-                            .cloned()
-                            .unwrap_or_else(|| self.state.env.fallback_category_id())),
+                        category: IdNameBox::new_cloned(
+                            self.state
+                                .pack
+                                .pack
+                                .categories
+                                .all_categories
+                                .get_index(self.state.cursor.category_path.path as usize)
+                                .map(|(_, c)| &c.full_id)
+                                .or(self.state.pack.pack.categories.root_categories.get_index(0))
+                                .cloned()
+                                .unwrap_or_else(|| self.state.env.fallback_category_id()),
+                        ),
                         guid: Uuid::new_v4(),
                         map_id,
                         attributes: MarkerAttributes::default(),
@@ -1032,9 +1238,13 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                 };
                 self.state.env.apply_attrs(&mut trail.attributes);
                 self.state.env.apply_render_attrs(&mut trail.attributes);
-                self.state.env.apply_trail_attrs(&self.state.root_dir, &mut trail.attributes);
+                self.state
+                    .env
+                    .apply_trail_attrs(&self.state.root_dir, &mut trail.attributes);
                 if let (Some(trl), Some(map_id)) = (trail.trail_path.clone(), map_id) {
-                    let trail_exists = self.state.resolve_trl(Ok(&trl))
+                    let trail_exists = self
+                        .state
+                        .resolve_trl(Ok(&trl))
                         .and_then(|p| p.try_exists().context("trl exists"));
                     if rt::log::warn_ok(trail_exists) == Some(false) {
                         self.act_trl_clear = Some((Ok(trl), map_id));
@@ -1042,17 +1252,19 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                 }
                 if let Some((trail_path, trl)) = open_sec {
                     // TODO: determine from map state instead?
-                    let section_count = self.state.asset_file_path(&trl.path[..])
+                    let section_count = self
+                        .state
+                        .asset_file_path(&trl.path[..])
                         .context("trl sec count")
-                        .and_then(|path| fs::File::open(path)
-                            .map_err(anyhow::Error::from)
-                        ).and_then(|mut f| match TrailData::read_from_trl(&mut f) {
+                        .and_then(|path| fs::File::open(path).map_err(anyhow::Error::from))
+                        .and_then(|mut f| match TrailData::read_from_trl(&mut f) {
                             Err(e) /*if e.kind() == io::ErrorKind::UnexpectedEof*/ => Ok(Default::default()),
                             res => res,
                         })
                         .map(|trl| trl.sections.len());
                     if let Some(count) = rt::log::info_ok(section_count) {
-                        let sec_path: SectionOfTrail = trail_path.rel(TrailSectionPath::with_path(count.saturating_sub(1) as TrailIndex));
+                        let sec_path: SectionOfTrail = trail_path
+                            .rel(TrailSectionPath::with_path(count.saturating_sub(1) as TrailIndex));
                         self.state.cursor.id.path = sec_path.map_path(|p| p.path).into();
                     }
                 }
@@ -1081,7 +1293,8 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
             let trail_path = match self.state.cursor.id.path.namespace() {
                 MarkerIndex::NS_TRAIL => Some(self.state.cursor.id.path.index_trail_section_unchecked()),
                 _ => None,
-            }.context("trl cursor invalid");
+            }
+            .context("trl cursor invalid");
             match boop {
                 TrlBoop::Refresh => {
                     self.state.markers_dirty = true;
@@ -1091,25 +1304,30 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                     }
                     self.state.update_loaded();
                     self.state.update_gameplay();
-                    let trail_path: anyhow::Result<TrailPath> = trail_path.map(|(traili, _seci)|
-                        TrailPath::with_path(traili)
-                    );
-                    let res = trail_path.and_then(|trail_path| match map_id.and_then(|id| MapIndex::new(id as _)) {
-                        Some(map_id) => {
-                            let map_path = self.state.pack_path.rel(map_id);
-                            let trail_geo = self.state.env.shared.as_ref().map(|shared| TrailGeometryRequests::subscribed_to(&shared.space.trail_geometry));
-                            trail_geo.and_then(|geo| geo.request(map_path.rel(trail_path.path), false).ok())
-                                .context("trl refresh")
-                        },
-                        map_id => map_id.context("map required for refresh").map(drop),
+                    let trail_path: anyhow::Result<TrailPath> =
+                        trail_path.map(|(traili, _seci)| TrailPath::with_path(traili));
+                    let res = trail_path.and_then(|trail_path| {
+                        match map_id.and_then(|id| MapIndex::new(id as _)) {
+                            Some(map_id) => {
+                                let map_path = self.state.pack_path.rel(map_id);
+                                let trail_geo = self.state.env.shared.as_ref().map(|shared| {
+                                    TrailGeometryRequests::subscribed_to(&shared.space.trail_geometry)
+                                });
+                                trail_geo
+                                    .and_then(|geo| geo.request(map_path.rel(trail_path.path), false).ok())
+                                    .context("trl refresh")
+                            },
+                            map_id => map_id.context("map required for refresh").map(drop),
+                        }
                     });
                     rt::log::error_ok(res);
                 },
                 boop => {
                     let trl = trail_path.and_then(|(traili, seci)| {
                         let trail_path = TrailPath::with_path(traili);
-                        self.state.write_to_trl(Err(trail_path), false, map_id)
-                        .map(|trl| (trl, trail_path.rel(seci)))
+                        self.state
+                            .write_to_trl(Err(trail_path), false, map_id)
+                            .map(|trl| (trl, trail_path.rel(seci)))
                     });
                     let trl = rt::log::error_ok(trl);
                     let next_point = match boop {
@@ -1120,7 +1338,8 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                                 #[cfg(todo)]
                                 None => self.state.env.latest_pos.map(Point3::to_untyped),
                                 pos => pos.map(Point3::from_raw),
-                            }.map(|pos| Some(pos))
+                            }
+                            .map(|pos| Some(pos))
                         },
                         TrlBoop::Refresh => None,
                     };
@@ -1135,7 +1354,9 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                                     },
                                     res => res.map(drop),
                                 }
-                            } else { Ok(()) };
+                            } else {
+                                Ok(())
+                            };
                             let res = res.and_then(|()| trl.write_all(&data));
                             if rt::log::error_ok(res).is_some() {
                                 // see results immediately
@@ -1147,22 +1368,37 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
             }
         }
         if let Some(cat) = self.act_new_cat.take() {
-            let parent = cat.full_id.parent().and_then(|pid| self.state.pack.pack.categories.all_categories.get_index_of(pid));
+            let parent = cat
+                .full_id
+                .parent()
+                .and_then(|pid| self.state.pack.pack.categories.all_categories.get_index_of(pid));
             let pidx = match parent {
                 Some(pidx) => {
-                    if let Some((_, parent)) = self.state.pack.pack.categories.all_categories.get_index_mut(pidx) {
+                    if let Some((_, parent)) =
+                        self.state.pack.pack.categories.all_categories.get_index_mut(pidx)
+                    {
                         parent.append_children(iter::once(cat.full_id.clone()));
                     }
                     Some(pidx)
                 },
                 None => {
-                    self.state.pack.pack.categories.root_categories.insert(cat.full_id.clone());
+                    self.state
+                        .pack
+                        .pack
+                        .categories
+                        .root_categories
+                        .insert(cat.full_id.clone());
                     None
                 },
             };
             let newidx = self.state.pack.pack.categories.all_categories.len() as CategoryIndex;
             self.state.cursor.category_path.path = newidx;
-            self.state.pack.pack.categories.all_categories.insert(cat.full_id.clone(), cat);
+            self.state
+                .pack
+                .pack
+                .categories
+                .all_categories
+                .insert(cat.full_id.clone(), cat);
             self.state.cats_dirty = true;
             log::debug!("TODO: update cat#{pidx:?} and whatnot");
             self.state.populate_info();
@@ -1176,14 +1412,19 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
         PathingEvent::PackLock { path: path.index }.try_send();
     }
     pub fn pack_alloc(&mut self) {
-        if let Err(()) = self.state.pack_alloc() { return }
+        if let Err(()) = self.state.pack_alloc() {
+            return
+        }
         self.state.init_pack(self.packs.end_path());
-        let mut info = SharedPackInfo::new_unloaded(self.state.pack_path, self.state.root_dir.clone().into(), None);
+        let mut info =
+            SharedPackInfo::new_unloaded(self.state.pack_path, self.state.root_dir.clone().into(), None);
         info.info = Some(Arc::new(self.state.pack.pack_info.clone()));
         info.sig = self.state.info_sig;
         let pack = SharedPackLoad::new_preload(Arc::new(info));
         let Some(shared) = &self.state.env.shared else { return };
-        let Some(realpath) = shared.packs.update_packs_extend(&mut iter::once(pack)).next() else { return };
+        let Some(realpath) = shared.packs.update_packs_extend(&mut iter::once(pack)).next() else {
+            return
+        };
         if realpath != self.state.pack_path {
             log::error!("I don't like this number");
         }

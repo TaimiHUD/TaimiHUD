@@ -1,7 +1,9 @@
-use core::{cmp, fmt, mem, time::Duration};
-use std::time::{Instant, SystemTime, SystemTimeError};
 #[cfg(feature = "serde")]
-use serde::{ser, de};
+use serde::{de, ser};
+use {
+    core::{cmp, fmt, mem, time::Duration},
+    std::time::{Instant, SystemTime, SystemTimeError},
+};
 
 /// Unix timestamp
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -22,9 +24,7 @@ impl Timestamp {
         #[cfg(todo = "unnecessary")]
         53 => 0x1f_ffff_ffff_ffff,
     });
-    pub const MAX_F32_INT: Self = Self::with_timestamp(
-        2u64.pow(f32::MANTISSA_DIGITS) - 1
-    );
+    pub const MAX_F32_INT: Self = Self::with_timestamp(2u64.pow(f32::MANTISSA_DIGITS) - 1);
 
     pub const SECOND: Duration = Duration::from_secs(1);
     pub const MINUTE: Duration = Duration::from_secs(60);
@@ -236,18 +236,14 @@ impl Timestamp {
     }
     pub fn signed_duration_system_time(amt: SignedDuration, to: &SystemTime) -> Option<SystemTime> {
         match amt {
-            Ok(amt) =>
-                to.checked_add(amt),
-            Err(amt) =>
-                to.checked_sub(amt),
+            Ok(amt) => to.checked_add(amt),
+            Err(amt) => to.checked_sub(amt),
         }
     }
     pub fn signed_duration_instant(amt: SignedDuration, to: &Instant) -> Option<Instant> {
         match amt {
-            Ok(amt) =>
-                to.checked_add(amt),
-            Err(amt) =>
-                to.checked_sub(amt),
+            Ok(amt) => to.checked_add(amt),
+            Err(amt) => to.checked_sub(amt),
         }
     }
     pub fn signed_duration_saturating_sub(lhs: SignedDuration, rhs: SignedDuration) -> SignedDuration {
@@ -258,14 +254,11 @@ impl Timestamp {
             (Err(l), Err(r)) => l > r,
         };
         let amt = match (lhs, rhs, neg) {
-            | (Ok(p), Err(n), _)
-            | (Err(n), Ok(p), _)
-            => p.saturating_add(n),
+            | (Ok(p), Err(n), _) | (Err(n), Ok(p), _) => p.saturating_add(n),
             | (Ok(s), Ok(b), true)
             | (Err(s), Err(b), false)
             | (Ok(b), Ok(s), false)
-            | (Err(b), Err(s), true)
-                => b.saturating_sub(s),
+            | (Err(b), Err(s), true) => b.saturating_sub(s),
         };
         Self::signed_duration_new(amt, neg)
     }
@@ -326,8 +319,7 @@ impl Timestamp {
     /// [SystemTime::duration_since]
     #[inline]
     pub fn try_from_system_time(time: &SystemTime) -> Result<Self, SystemTimeError> {
-        time.duration_since(SystemTime::UNIX_EPOCH)
-            .map(Self::after_epoch)
+        time.duration_since(SystemTime::UNIX_EPOCH).map(Self::after_epoch)
     }
     /// [Self::try_from_system_time] or clamp to [Self::EPOCH]
     pub fn from_system_time(time: &SystemTime) -> Self {

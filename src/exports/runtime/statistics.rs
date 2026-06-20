@@ -1,15 +1,19 @@
-use core::fmt;
-use taimi_hoard::lazyfmt;
-use std::sync::RwLock;
-use std::collections::BTreeMap;
-use core::time::Duration;
-use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
-
 pub use taimi_hoard::statistics::Counter as StatsCounter;
 #[cfg(feature = "statistics")]
 pub use taimi_hoard::statistics::Counter;
 #[cfg(not(feature = "statistics"))]
 pub use taimi_hoard::statistics::Dummy as Counter;
+use {
+    core::{fmt, time::Duration},
+    std::{
+        collections::BTreeMap,
+        sync::{
+            atomic::{AtomicUsize, Ordering as AtomicOrdering},
+            RwLock,
+        },
+    },
+    taimi_hoard::lazyfmt,
+};
 
 #[derive(Debug, Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub struct StatsDesc {
@@ -18,10 +22,7 @@ pub struct StatsDesc {
     pub detailed: bool,
 }
 impl StatsDesc {
-    pub const fn new(
-        section: &'static str,
-        name: &'static str,
-    ) -> Self {
+    pub const fn new(section: &'static str, name: &'static str) -> Self {
         Self { section, name, detailed: false }
     }
 }
@@ -41,10 +42,7 @@ impl StatsRef {
         }
     }
     pub const fn with_counter(counter: &'static StatsCounter, unit: StatsUnit) -> Self {
-        Self {
-            counter: Some(counter),
-            unit,
-        }
+        Self { counter: Some(counter), unit }
     }
 
     pub const fn registry() -> &'static StatsRegistry {
@@ -53,19 +51,20 @@ impl StatsRef {
     }
 
     pub fn register(self, desc: StatsDesc) {
-        if self.is_empty() { return }
+        if self.is_empty() {
+            return
+        }
         if let Ok(mut reg) = Self::registry().write() {
             reg.insert(desc, self);
         }
     }
 
     pub const fn empty(unit: StatsUnit) -> Self {
-        Self {
-            counter: None,
-            unit,
-        }
+        Self { counter: None, unit }
     }
-    pub fn is_empty(&self) -> bool { self.counter.is_none() }
+    pub fn is_empty(&self) -> bool {
+        self.counter.is_none()
+    }
     pub fn read(&self) -> u64 {
         self.counter.map(|c| c.get() as usize as u64).unwrap_or(0)
     }
@@ -125,18 +124,19 @@ impl StatsUnit {
     pub fn time(span: Duration) -> u64 {
         span.as_micros() as u64
     }
-    pub fn bytes(amt: u64) -> u64 { amt }
+    pub fn bytes(amt: u64) -> u64 {
+        amt
+    }
 
     pub fn display_value(self, value: u64) -> impl fmt::Display {
         lazyfmt::MaybeFmt::new(move |f| match self {
             Self::Count => fmt::Display::fmt(&value, f),
-            Self::Size => {
+            Self::Size =>
                 if value <= Self::SIZE_MB {
                     write!(f, "{:.03}KB", value as f64 / Self::SIZE_KB as f64)
                 } else {
                     write!(f, "{:.03}MB", value as f64 / Self::SIZE_MB as f64)
-                }
-            },
+                },
             Self::Time => {
                 if value <= Self::TIME_MS * 32 {
                     return write!(f, "0.{value:03}ms")

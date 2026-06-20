@@ -1,8 +1,10 @@
 pub use taimi_api_client::model::achievements::AchievementId;
 use {
     bitvec::array::BitArray,
-    std::collections::{BTreeMap, BTreeSet},
-    std::hash::{Hash, Hasher},
+    std::{
+        collections::{BTreeMap, BTreeSet},
+        hash::{Hash, Hasher},
+    },
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]

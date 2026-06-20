@@ -1,10 +1,14 @@
-use futures_util::ready;
-use futures_core::stream::Stream;
-use tokio::time::{sleep_until, Instant, Sleep};
-use core::task::{Context, Poll};
-use core::pin::Pin;
-use core::future::Future;
-use core::mem;
+use {
+    core::{
+        future::Future,
+        mem,
+        pin::Pin,
+        task::{Context, Poll},
+    },
+    futures_core::stream::Stream,
+    futures_util::ready,
+    tokio::time::{sleep_until, Instant, Sleep},
+};
 
 #[derive(Default, Debug)]
 pub struct ScheduledStream<E: ?Sized> {
@@ -13,25 +17,21 @@ pub struct ScheduledStream<E: ?Sized> {
 }
 
 impl<E> ScheduledStream<E> {
-    pub fn empty() -> Self where
+    pub fn empty() -> Self
+    where
         E: Default,
     {
         Self::new(E::default())
     }
 
     pub fn new(events: E) -> Self {
-        Self {
-            events,
-            pending: None,
-        }
+        Self { events, pending: None }
     }
 
     pub fn set_pending(&mut self, sleep: Sleep) {
         match &mut self.pending {
-            pending @ None =>
-                *pending = Some(Box::pin(sleep)),
-            Some(pending) =>
-                pending.set(sleep),
+            pending @ None => *pending = Some(Box::pin(sleep)),
+            Some(pending) => pending.set(sleep),
         }
     }
     pub fn next_scheduled(&self) -> Option<Instant> {
@@ -51,8 +51,7 @@ impl<E> ScheduledStream<E> {
     pub fn poll_ready(&mut self, cx: &mut Context) -> Poll<()> {
         match &mut self.pending {
             None => Poll::Pending,
-            Some(ref mut pending) =>
-                pending.as_mut().poll(cx),
+            Some(ref mut pending) => pending.as_mut().poll(cx),
         }
     }
 }
@@ -62,25 +61,24 @@ use std::collections::{btree_map, BTreeMap};
 impl<V> ScheduledStream<BTreeMap<Instant, V>> {
     pub fn schedule_set(&mut self, when: Instant, what: V) -> Option<V> {
         let replaced = self.events.insert(when, what);
-        let reschedule = replaced.is_none().then(||
-            self.next_scheduled().map(|next| next > when)
-                .unwrap_or(true)
-            );
+        let reschedule = replaced
+            .is_none()
+            .then(|| self.next_scheduled().map(|next| next > when).unwrap_or(true));
         if let Some(true) = reschedule {
             self.reschedule(when);
         }
         replaced
     }
     /// TODO: could return mut ref to entry, just check time beforehand?
-    pub fn schedule_append<T>(&mut self, when: Instant, what: T) where
+    pub fn schedule_append<T>(&mut self, when: Instant, what: T)
+    where
         T: IntoIterator,
         V: Extend<T::Item> + FromIterator<T::Item>,
     {
         let reschedule = match self.events.entry(when) {
             btree_map::Entry::Vacant(e) => {
                 e.insert(what.into_iter().collect());
-                self.next_scheduled().map(|next| next > when)
-                    .unwrap_or(true)
+                self.next_scheduled().map(|next| next > when).unwrap_or(true)
             },
             btree_map::Entry::Occupied(mut e) => {
                 e.get_mut().extend(what);
@@ -93,8 +91,7 @@ impl<V> ScheduledStream<BTreeMap<Instant, V>> {
     }
     pub fn cancel_if<F: FnOnce(&mut V) -> bool>(&mut self, when: &Instant, f: F) -> Option<V> {
         let mut entry = match self.events.entry(*when) {
-            btree_map::Entry::Vacant(..) =>
-                return None,
+            btree_map::Entry::Vacant(..) => return None,
             btree_map::Entry::Occupied(e) => e,
         };
         let cancelled = f(entry.get_mut());
@@ -188,34 +185,30 @@ pub struct InfiniteScheduledStream<T: ?Sized>(pub ScheduledStream<T>);
 impl<T: ?Sized> InfiniteScheduledStream<T> {
     #[inline]
     pub const fn from_ref(stream: &ScheduledStream<T>) -> &Self {
-        unsafe {
-            mem::transmute(stream)
-        }
+        unsafe { mem::transmute(stream) }
     }
     #[inline]
     pub fn from_mut(stream: &mut ScheduledStream<T>) -> &mut Self {
-        unsafe {
-            mem::transmute(stream)
-        }
+        unsafe { mem::transmute(stream) }
     }
     #[inline]
-    pub fn from_pin(stream: Pin<&mut ScheduledStream<T>>) -> Pin<&mut Self> where
+    pub fn from_pin(stream: Pin<&mut ScheduledStream<T>>) -> Pin<&mut Self>
+    where
         T: Sized,
     {
-        unsafe {
-            stream.map_unchecked_mut(Self::from_mut)
-        }
+        unsafe { stream.map_unchecked_mut(Self::from_mut) }
     }
 
     #[inline]
-    pub fn stream(&self) -> &ScheduledStream<T> { &self.0 }
+    pub fn stream(&self) -> &ScheduledStream<T> {
+        &self.0
+    }
     #[inline]
-    pub fn stream_mut<'a>(self: Pin<&'a mut Self>) -> Pin<&'a mut ScheduledStream<T>> where
+    pub fn stream_mut<'a>(self: Pin<&'a mut Self>) -> Pin<&'a mut ScheduledStream<T>>
+    where
         T: Sized,
     {
-        unsafe {
-            self.map_unchecked_mut(|this| &mut this.0)
-        }
+        unsafe { self.map_unchecked_mut(|this| &mut this.0) }
     }
 }
 impl<V> Stream for InfiniteScheduledStream<BTreeMap<Instant, V>> {

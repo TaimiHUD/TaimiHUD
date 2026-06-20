@@ -70,8 +70,6 @@ impl D3dStateSnapshot<Dx11Context> for PrimitiveTopology {
         Ok(Self::Undefined)
     }
     fn snapshot_state(device_context: &Dx11Context) -> Self {
-        Self::from_d3d(unsafe {
-            device_context.IAGetPrimitiveTopology()
-        })
+        Self::from_d3d(unsafe { device_context.IAGetPrimitiveTopology() })
     }
 }

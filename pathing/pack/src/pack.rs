@@ -431,7 +431,7 @@ impl<'a> PackBuilder<'a> {
                 parent.append_children(iter::once(root_id.clone()));
             } else {
                 #[cfg(debug_assertions)]
-                if self.warnings_missing.insert(parent_id.clone()) | true{
+                if self.warnings_missing.insert(parent_id.clone()) | true {
                     log::warn!("parent `{parent_id}` missing for duplicate root category `{root_id}`");
                 }
                 continue

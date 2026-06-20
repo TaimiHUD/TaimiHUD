@@ -40,8 +40,6 @@ pub use {
         settings::pathing::HiddenGuids,
     },
 };
-#[cfg(feature = "paths-interact")]
-pub use self::interact::{InteractSender, InteractShared, InteractReceiver};
 use {
     crate::{
         controller::{
@@ -60,6 +58,9 @@ use {
     taimi_sync::watched::{self, Watched},
     tokio::sync::mpsc,
 };
+
+#[cfg(feature = "paths-interact")]
+pub use self::interact::{InteractReceiver, InteractSender, InteractShared};
 
 mod display;
 #[cfg(feature = "paths-interact")]
@@ -181,7 +182,8 @@ impl PathingReceiver {
         self.enables().contains(PathingEnables::ENGINE)
     }
     pub(super) fn is_online(&self) -> bool {
-        self.enables().contains(PathingEnables::KATRENDER | PathingEnables::ENGINE)
+        self.enables()
+            .contains(PathingEnables::KATRENDER | PathingEnables::ENGINE)
     }
 }
 

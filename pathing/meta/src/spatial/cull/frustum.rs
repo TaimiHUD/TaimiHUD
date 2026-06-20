@@ -1,15 +1,15 @@
-use glamour::{Box3, Intersection};
 use {
-    crate::coords::LocalSpace as DrawSpace,
-    crate::spatial::{
-        aabb3box,
-        cull::BvhQuery,
-        MintConv,
+    crate::{
+        coords::LocalSpace as DrawSpace,
+        spatial::{aabb3box, cull::BvhQuery, MintConv},
     },
     bvh::aabb::{Aabb, IntersectsAabb},
-    core::{mem, ops::{self, Range}},
-    glamour::{Point3, Vector3},
+    core::{
+        mem,
+        ops::{self, Range},
+    },
     glam::{Vec3A, Vec4},
+    glamour::{Box3, Intersection, Point3, Vector3},
 };
 
 #[cfg(todo)]
@@ -47,10 +47,7 @@ impl MapFrustum {
         Self::from_camera_data3a(tan_fov22, p, d, right, up, aspect_ratio, depth)
     }
     #[cfg(todo)]
-    pub fn from_look(
-        look: glam::Mat4,
-    ) -> Self {
-    }
+    pub fn from_look(look: glam::Mat4) -> Self {}
     pub fn from_camera_data3a(
         tan_fov22: f32,
         p: Vec3A,
@@ -82,12 +79,15 @@ impl MapFrustum {
         let nbr = nc - up_near + right_near;
         let nbl = nc - up_near - right_near;
 
-        let corners @ [
-            ftr, ftl, fbr, fbl,
-            ntr, ntl, nbr, nbl,
-        ] = [
-            ftr.extend(1.0), ftl.extend(1.0), fbr.extend(1.0), fbl.extend(1.0),
-            ntr.extend(1.0), ntl.extend(1.0), nbr.extend(1.0), nbl.extend(1.0),
+        let corners @ [ftr, ftl, fbr, fbl, ntr, ntl, nbr, nbl] = [
+            ftr.extend(1.0),
+            ftl.extend(1.0),
+            fbr.extend(1.0),
+            fbl.extend(1.0),
+            ntr.extend(1.0),
+            ntl.extend(1.0),
+            nbr.extend(1.0),
+            nbl.extend(1.0),
         ];
 
         let near_plane = points_to_plane4(ntl, ntr, nbl);
@@ -135,11 +135,7 @@ impl MapFrustum {
         let near_topright = near_topleft + near_w * 2.0;
         let near_bottomleft = near_topleft - near_h * 2.0;
         let near_bottomright = near_bottomleft + near_w * 2.0;
-        let near_plane = points_to_plane(
-            near_topleft,
-            near_topright,
-            near_bottomleft,
-        );
+        let near_plane = points_to_plane(near_topleft, near_topright, near_bottomleft);
 
         let far_focal_point = pos + camera_far;
         let far_width2 = far * fov_ratio;
@@ -150,29 +146,13 @@ impl MapFrustum {
         let far_topright = far_topleft + far_w * 2.0;
         let far_bottomright = far_topright - far_h * 2.0;
         let far_bottomleft = far_topleft - far_h * 2.0;
-        let far_plane = points_to_plane(
-            far_topright,
-            far_topleft,
-            far_bottomright,
-        );
+        let far_plane = points_to_plane(far_topright, far_topleft, far_bottomright);
 
-        let left_plane = points_to_plane(
-            far_topleft,
-            near_topleft,
-            far_bottomleft,
-        );
-        let right_plane = points_to_plane(
-            far_topright,
-            far_bottomright,
-            near_topright,
-        );
+        let left_plane = points_to_plane(far_topleft, near_topleft, far_bottomleft);
+        let right_plane = points_to_plane(far_topright, far_bottomright, near_topright);
 
         let up_plane = points_to_plane(far_topleft, far_topright, near_topleft);
-        let down_plane = points_to_plane(
-            far_bottomright,
-            far_bottomleft,
-            near_bottomright,
-        );
+        let down_plane = points_to_plane(far_bottomright, far_bottomleft, near_bottomright);
 
         Self {
             near: near_plane.into(),
@@ -182,8 +162,14 @@ impl MapFrustum {
             up: up_plane.into(),
             down: down_plane.into(),
             corners: [
-                far_topright.extend(1.0), far_topleft.extend(1.0), far_bottomright.extend(1.0), far_bottomleft.extend(1.0),
-                near_topright.extend(1.0), near_topleft.extend(1.0), near_bottomright.extend(1.0), near_bottomleft.extend(1.0),
+                far_topright.extend(1.0),
+                far_topleft.extend(1.0),
+                far_bottomright.extend(1.0),
+                far_bottomleft.extend(1.0),
+                near_topright.extend(1.0),
+                near_topleft.extend(1.0),
+                near_bottomright.extend(1.0),
+                near_bottomleft.extend(1.0),
             ],
             camera_up: camera_dir_up,
             camera_right: camera_dir_right,
@@ -206,36 +192,58 @@ impl MapFrustum {
         Self::planes_intersect_all(self.planes().iter().copied(), aabb_corners(aabb))
     }
     #[inline(always)]
-    fn planes_intersect_all<P, C>(planes: P, corners: C) -> bool where
+    fn planes_intersect_all<P, C>(planes: P, corners: C) -> bool
+    where
         P: IntoIterator<Item = Vec4>,
         C: IntoIterator<Item = Vec4> + Clone,
     {
         planes.into_iter().all(|plane|
             // If any corner is inside this plane, move to the next.
-            corners.clone().into_iter().any(|corner| plane.dot(corner) >= 0.0)
-        )
+            corners.clone().into_iter().any(|corner| plane.dot(corner) >= 0.0))
     }
     #[cfg(todo = "unnecessary")]
     pub fn aabb_axis_intersection_filter(&self, aabb: &Aabb<f32, 3>) -> bool {
-        if self.corners.iter().all(|corner| corner.x < aabb.min.x) { return false }
-        if self.corners.iter().all(|corner| corner.x > aabb.max.x) { return false }
-        if self.corners.iter().all(|corner| corner.y < aabb.min.y) { return false }
-        if self.corners.iter().all(|corner| corner.y > aabb.max.y) { return false }
-        if self.corners.iter().all(|corner| corner.z < aabb.min.z) { return false }
-        if self.corners.iter().all(|corner| corner.z > aabb.max.z) { return false }
+        if self.corners.iter().all(|corner| corner.x < aabb.min.x) {
+            return false
+        }
+        if self.corners.iter().all(|corner| corner.x > aabb.max.x) {
+            return false
+        }
+        if self.corners.iter().all(|corner| corner.y < aabb.min.y) {
+            return false
+        }
+        if self.corners.iter().all(|corner| corner.y > aabb.max.y) {
+            return false
+        }
+        if self.corners.iter().all(|corner| corner.z < aabb.min.z) {
+            return false
+        }
+        if self.corners.iter().all(|corner| corner.z > aabb.max.z) {
+            return false
+        }
         true
     }
     /// all corners of our frustum are outside any plane of the aabb...
     pub fn aabb_axis_intersection_filter(&self, aabb: &Aabb<f32, 3>) -> bool {
         let aabb = aabb3box::<f32>(*aabb);
         let min = aabb.min.to_vec3a();
-        let below = self.corners.iter().map(|&corner| Vec3A::from_vec4(corner).cmpge(min))
+        let below = self
+            .corners
+            .iter()
+            .map(|&corner| Vec3A::from_vec4(corner).cmpge(min))
             .fold(glam::BVec3A::FALSE, |prev, cmp| prev | cmp);
-        if !below.any() { return false }
+        if !below.any() {
+            return false
+        }
         let max = aabb.max.to_vec3a();
-        let above = self.corners.iter().map(|&corner| Vec3A::from_vec4(corner).cmple(max))
+        let above = self
+            .corners
+            .iter()
+            .map(|&corner| Vec3A::from_vec4(corner).cmple(max))
             .fold(glam::BVec3A::FALSE, |prev, cmp| prev | cmp);
-        if !above.any() { return false }
+        if !above.any() {
+            return false
+        }
         true
     }
 }
@@ -278,11 +286,7 @@ impl BvhQuery<3> for MapFrustum {
 
 #[inline(always)]
 fn points_to_plane4(p0: Vec4, p1: Vec4, p2: Vec4) -> Vec4 {
-    points_to_plane(
-        Vec3A::from_vec4(p0),
-        Vec3A::from_vec4(p1),
-        Vec3A::from_vec4(p2),
-    )
+    points_to_plane(Vec3A::from_vec4(p0), Vec3A::from_vec4(p1), Vec3A::from_vec4(p2))
 }
 fn points_to_plane(p0: Vec3A, p1: Vec3A, p2: Vec3A) -> Vec4 {
     let v = p1 - p0;
@@ -325,16 +329,11 @@ fn aabb_corners(aabb: &Aabb<f32, 3>) -> [FrustumPlane; 8] {
 pub struct LazyFrustum(pub MapFrustum);
 impl LazyFrustum {
     pub const fn from_ref(frustum: &MapFrustum) -> &Self {
-        unsafe {
-            mem::transmute(frustum)
-        }
+        unsafe { mem::transmute(frustum) }
     }
     #[inline]
     pub fn min_planes(&self) -> [&FrustumPlane; 2] {
-        [
-            &self.near,
-            &self.left,
-        ]
+        [&self.near, &self.left]
     }
 }
 impl ops::Deref for LazyFrustum {

@@ -122,9 +122,7 @@ where
     }
 }
 
-pub unsafe trait D3dContextBindableIndexBuffer<D3DC: D3dContext>:
-    D3dContextBindable<D3DC>
-{
+pub unsafe trait D3dContextBindableIndexBuffer<D3DC: D3dContext>: D3dContextBindable<D3DC> {
     fn index_buffer_ptr(&self) -> *mut ffi::c_void;
     fn index_buffer_format(&self) -> dxgi::DXGI_FORMAT;
     fn index_buffer_offset(&self) -> u32;
@@ -153,28 +151,31 @@ unsafe impl<D3DC: D3dContext, B: ?Sized + D3dContextBindableIndexBuffer<D3DC>>
         D3dContextBindableIndexBuffer::index_buffer_buffer(*self)
     }
 }
-unsafe impl<D3DC: D3dContext, B: D3dContextBindableIndexBuffer<D3DC>>
-    D3dContextBindableIndexBuffer<D3DC> for Option<B> where
+unsafe impl<D3DC: D3dContext, B: D3dContextBindableIndexBuffer<D3DC>> D3dContextBindableIndexBuffer<D3DC>
+    for Option<B>
+where
     Self: D3dContextBindable<D3DC>,
 {
     fn index_buffer_ptr(&self) -> *mut ffi::c_void {
-        self.as_ref().map(D3dContextBindableIndexBuffer::index_buffer_ptr)
+        self.as_ref()
+            .map(D3dContextBindableIndexBuffer::index_buffer_ptr)
             .unwrap_or(ptr::null_mut())
     }
     fn index_buffer_format(&self) -> dxgi::DXGI_FORMAT {
-        self.as_ref().map(D3dContextBindableIndexBuffer::index_buffer_format)
+        self.as_ref()
+            .map(D3dContextBindableIndexBuffer::index_buffer_format)
             .unwrap_or(crate::dxgi::DXGI_FORMAT_R32_UINT)
     }
     fn index_buffer_offset(&self) -> u32 {
-        self.as_ref().map(D3dContextBindableIndexBuffer::index_buffer_offset)
+        self.as_ref()
+            .map(D3dContextBindableIndexBuffer::index_buffer_offset)
             .unwrap_or(0)
     }
     unsafe fn index_buffer_buffer(
         &self,
     ) -> Option<InterfaceRef<'_, <D3DC::IDevice as D3dDevice>::IBuffer>> {
-        self.as_ref().and_then(|b| unsafe {
-            D3dContextBindableIndexBuffer::index_buffer_buffer(b)
-        })
+        self.as_ref()
+            .and_then(|b| unsafe { D3dContextBindableIndexBuffer::index_buffer_buffer(b) })
     }
 }
 

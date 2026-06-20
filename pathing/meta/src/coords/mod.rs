@@ -1,3 +1,5 @@
+#[deprecated]
+pub use taimi_hoard::vec::{vec32_bits as vec_bits, vec32_eq as vec_eq};
 use {
     crate::ui::MinimapPlacement,
     glamour::{
@@ -19,8 +21,6 @@ use {
         Vector4,
     },
 };
-#[deprecated]
-pub use taimi_hoard::vec::{vec32_eq as vec_eq, vec32_bits as vec_bits};
 
 mod macros;
 mod obtainer;

@@ -206,7 +206,8 @@ where
 impl_d3d! {
     impl{D3DC, V, D} D3dState<D3DC> for RenderTargetViews<V, D>;
 }
-impl<V, D> D3dStateSnapshot<Dx11Context> for RenderTargetViews<V, D> where
+impl<V, D> D3dStateSnapshot<Dx11Context> for RenderTargetViews<V, D>
+where
     V: ID3D11ResourceOf<ID3D11RenderTargetView> + Default + AsMut<[Option<RenderTargetView>]>,
     D: AsRef<DepthView> + From<d3d11::ID3D11DepthStencilView>,
 {

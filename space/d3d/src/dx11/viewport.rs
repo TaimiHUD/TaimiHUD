@@ -1,5 +1,9 @@
 use {
-    crate::{dx11::prelude::*, state::{D3dState, D3dStateSnapshot}, D3dContextBindable},
+    crate::{
+        dx11::prelude::*,
+        state::{D3dState, D3dStateSnapshot},
+        D3dContextBindable,
+    },
     num_traits::AsPrimitive,
     std::{mem, ops, slice},
 };

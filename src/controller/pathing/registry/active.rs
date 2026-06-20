@@ -107,9 +107,9 @@ impl PackActivateContext {
                     let legacy_disabled_paths: Arc<_> = settings.disabled_paths.clone();
                     drop(settings);
                     let mut config = PackConfig::default();
-                    SaveState::read_with(|save|
+                    SaveState::read_with(|save| {
                         config.fill_settings(&pack, &save.pathing(), &legacy_disabled_paths)
-                    );
+                    });
                     config
                 });
                 Ok(PackActivateLoaded { pack, loader, info, config })

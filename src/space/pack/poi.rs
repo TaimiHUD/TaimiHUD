@@ -330,7 +330,11 @@ pub struct PoiRender {
 }
 impl PoiRender {
     pub fn empty() -> Self {
-        Self { icon_handle: None, icon: None, static_rotation: false }
+        Self {
+            icon_handle: None,
+            icon: None,
+            static_rotation: false,
+        }
     }
 
     pub fn update(
@@ -379,7 +383,11 @@ impl PoiRender {
         let attrs = poi.poi_attrs();
         InstanceBufferData {
             world: Mat4::from_scale_rotation_translation(
-                Vec3::splat(GetAttr::<keys::IconSize>::get_attr_or_default(&**attrs).into_owned().into()),
+                Vec3::splat(
+                    GetAttr::<keys::IconSize>::get_attr_or_default(&**attrs)
+                        .into_owned()
+                        .into(),
+                ),
                 attrs.rotate.map(Self::rotation_from_xyz).unwrap_or_default(),
                 poi.lpoi().position.into(),
             ),
@@ -389,7 +397,9 @@ impl PoiRender {
 
     pub fn instance_data_map(&self, lpoi: &LoadedPoiRef, machine: &RenderMachine) -> InstanceBufferData {
         // pixels at 1.0 map scale, translated to local space, but quad is 2.0x2.0...
-        let scale_map = f32::from(GetAttr::<keys::MapDisplaySize>::get_attr_or_default(&**lpoi.poi_attrs()).into_owned());
+        let scale_map = f32::from(
+            GetAttr::<keys::MapDisplaySize>::get_attr_or_default(&**lpoi.poi_attrs()).into_owned(),
+        );
         let size = Vector2::splat(scale_map / 2.0);
 
         // TODO: DPI/UI scaling is irrelevant here right?
@@ -707,7 +717,6 @@ impl ActivePoi {
     fn regen_bounds(&mut self) {
         self.bounds = Self::bounds_for(self.position, self.scale);
     }
-
 }
 #[cfg(deleteme)]
 pack_attr! {

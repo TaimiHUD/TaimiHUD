@@ -1,5 +1,7 @@
-use core::{cmp, mem};
-use std::borrow::Cow;
+use {
+    core::{cmp, mem},
+    std::borrow::Cow,
+};
 
 pub trait TraversalOrder {}
 
@@ -27,23 +29,30 @@ pub trait TreeTraversal<O: TraversalOrder>: Iterator {
 
     /// use [PeekableTreeExt::from_mut] directly if unsized thanks
     #[inline]
-    fn peekable_ext_mut(&mut self) -> &mut PeekableTreeExt<Self> where
+    fn peekable_ext_mut(&mut self) -> &mut PeekableTreeExt<Self>
+    where
         Self: Sized + PeekableTreeTraversal<PreOrder>,
     {
         PeekableTreeExt::from_mut(self)
     }
     #[inline]
-    fn peekable_ext(self) -> PeekableTreeExt<Self> where
+    fn peekable_ext(self) -> PeekableTreeExt<Self>
+    where
         Self: Sized + PeekableTreeTraversal<PreOrder>,
     {
         PeekableTreeExt(self)
     }
 }
 pub trait PeekableTreeTraversal<O: TraversalOrder>: TreeTraversal<O> {
-    fn peek_node(&mut self) -> Option<Cow<'_, Self::Item>> where Self::Item: Clone;
+    fn peek_node(&mut self) -> Option<Cow<'_, Self::Item>>
+    where
+        Self::Item: Clone;
     fn peek_depth(&mut self) -> Option<usize>;
 
-    fn peek_node_depth(&mut self) -> Option<(Cow<'_, Self::Item>, usize)> where Self::Item: Clone {
+    fn peek_node_depth(&mut self) -> Option<(Cow<'_, Self::Item>, usize)>
+    where
+        Self::Item: Clone,
+    {
         let depth = self.peek_depth()?;
         self.peek_node().map(move |node| (node, depth))
     }
@@ -83,7 +92,11 @@ pub trait PeekableDfsPre: DfsPre + PeekableTreeTraversal<PreOrder> {
         Some(consumed)
     }
     /// TODO: adapter with impls .-.
-    fn node_skip_to_sibling_while<F: FnMut(Cow<Self::Item>, usize) -> bool>(&mut self, mut filter: F) -> Option<usize> where
+    fn node_skip_to_sibling_while<F: FnMut(Cow<Self::Item>, usize) -> bool>(
+        &mut self,
+        mut filter: F,
+    ) -> Option<usize>
+    where
         Self::Item: Clone,
     {
         let mut next = self.peek_node_depth()?;
@@ -108,35 +121,53 @@ impl<I: ?Sized> PeekableTreeExt<I> {
     }
 }
 /// TODO: use macro!
-impl<I: ?Sized> Iterator for PeekableTreeExt<I> where
+impl<I: ?Sized> Iterator for PeekableTreeExt<I>
+where
     I: Iterator,
 {
     type Item = I::Item;
-    fn next(&mut self) -> Option<Self::Item> { self.0.next() }
+    fn next(&mut self) -> Option<Self::Item> {
+        self.0.next()
+    }
 }
 
 /// TODO: provide macro!
-impl<O: TraversalOrder, I: ?Sized> TreeTraversal<O> for PeekableTreeExt<I> where
+impl<O: TraversalOrder, I: ?Sized> TreeTraversal<O> for PeekableTreeExt<I>
+where
     I: TreeTraversal<O>,
 {
-    fn next_node(&mut self) -> Option<Self::Item> { self.0.next_node() }
-    fn node_depth(&self) -> Option<usize> { self.0.node_depth() }
-    fn node_advance_by(&mut self, amt: usize) { self.0.node_advance_by(amt) }
+    fn next_node(&mut self) -> Option<Self::Item> {
+        self.0.next_node()
+    }
+    fn node_depth(&self) -> Option<usize> {
+        self.0.node_depth()
+    }
+    fn node_advance_by(&mut self, amt: usize) {
+        self.0.node_advance_by(amt)
+    }
 }
-impl<I: ?Sized> DfsPre for PeekableTreeExt<I> where
+impl<I: ?Sized> DfsPre for PeekableTreeExt<I>
+where
     I: DfsPre,
 {
-    fn node_next_sibling(&mut self) -> Option<Result<Self::Item, Self::Item>> { self.0.node_next_sibling() }
+    fn node_next_sibling(&mut self) -> Option<Result<Self::Item, Self::Item>> {
+        self.0.node_next_sibling()
+    }
 }
-impl<O: TraversalOrder, I: ?Sized> PeekableTreeTraversal<O> for PeekableTreeExt<I> where
+impl<O: TraversalOrder, I: ?Sized> PeekableTreeTraversal<O> for PeekableTreeExt<I>
+where
     I: PeekableTreeTraversal<O>,
 {
     #[inline]
-    fn peek_node(&mut self) -> Option<Cow<'_, Self::Item>> where Self::Item: Clone { self.0.peek_node() }
+    fn peek_node(&mut self) -> Option<Cow<'_, Self::Item>>
+    where
+        Self::Item: Clone,
+    {
+        self.0.peek_node()
+    }
     #[inline]
-    fn peek_depth(&mut self) -> Option<usize> { self.0.peek_depth() }
+    fn peek_depth(&mut self) -> Option<usize> {
+        self.0.peek_depth()
+    }
 }
-impl<I: ?Sized> PeekableDfsPre for PeekableTreeExt<I> where
-    I: DfsPre + PeekableTreeTraversal<PreOrder>,
-{
-}
+impl<I: ?Sized> PeekableDfsPre for PeekableTreeExt<I> where I: DfsPre + PeekableTreeTraversal<PreOrder> {}

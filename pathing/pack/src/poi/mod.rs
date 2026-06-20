@@ -109,7 +109,8 @@ impl Poi {
 
         // TODO: support bh features properly...
         //attributes.merge(&attributes_bh, false);
-        attributes_bh.merge(&attributes, false); attributes = attributes_bh;
+        attributes_bh.merge(&attributes, false);
+        attributes = attributes_bh;
 
         Ok(Poi {
             category: category.into(),

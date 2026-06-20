@@ -1,14 +1,17 @@
 use {
     crate::controller::pathing::{
         info::{MapPackInfo, EMPTY_RENDER_ATTRS},
-        registry::{PackInfo, PackInfoSignature, LoadedMarkerPath},
+        registry::{LoadedMarkerPath, PackInfo, PackInfoSignature},
         shared::{SharedPackInfo, SharedPackLoad, SharedPackLoaded},
         UnloadedReason,
     },
     std::{collections::BTreeMap, iter, ops, sync::Arc},
     taimi_hoard::{
-        collections::{lru::RecentlyUsed, traits::{TaimiDictMut as _, TaimiSet}},
-        iters::{IterExt as _, all_zipped},
+        collections::{
+            lru::RecentlyUsed,
+            traits::{TaimiDictMut as _, TaimiSet},
+        },
+        iters::{all_zipped, IterExt as _},
         loc::{indexed::IndexedList, LocationMut, LocationRef},
     },
     taimi_meta::packs::{
@@ -127,39 +130,49 @@ impl LoadedMapInfo {
     }
 
     /// prefer [Self::iter_all] if map_id is known to be None
-    pub fn iter(&self, map_id: Option<MapIndex>) -> impl Iterator<Item = (&PackMapPath, &LoadedMapInfoStorage)> + '_ {
-        self.map_info.iter().filter(move |(p, _i)|
-            map_id.map(|id| p.path == id).unwrap_or(true)
-        )
+    pub fn iter(
+        &self,
+        map_id: Option<MapIndex>,
+    ) -> impl Iterator<Item = (&PackMapPath, &LoadedMapInfoStorage)> + '_ {
+        self.map_info
+            .iter()
+            .filter(move |(p, _i)| map_id.map(|id| p.path == id).unwrap_or(true))
     }
     pub fn iter_all(&self) -> impl Iterator<Item = (PackMapPath, &Arc<MapPackInfo>)> + '_ {
-        self.map_info.iter().lazy_map(|(p, map_info)| (*p, &map_info.info))
+        self.map_info
+            .iter()
+            .lazy_map(|(p, map_info)| (*p, &map_info.info))
     }
 
     pub fn find_marker_path(&self, lpath: MarkerPath<PackMapPath>) -> Option<MarkerPath<PackPath>> {
         let root = lpath.root.root;
-        self.lookup_ref(&lpath.root).and_then(move |map_info| {
-            map_info.marker_path(lpath.unscope()).map(|i| i.pivot(root))
-        })
+        self.lookup_ref(&lpath.root)
+            .and_then(move |map_info| map_info.marker_path(lpath.unscope()).map(|i| i.pivot(root)))
     }
-    pub fn find_loaded_marker(&self, path: MarkerPath<PackPath>, map_id: MapIndex) -> Option<MarkerPath<PackMapPath>> {
+    pub fn find_loaded_marker(
+        &self,
+        path: MarkerPath<PackPath>,
+        map_id: MapIndex,
+    ) -> Option<MarkerPath<PackMapPath>> {
         #[cfg(todo = "unnecessary")]
         return self.find_loaded_markers(path).find(|m| m.root.path == map_id);
         let root = path.root.rel(map_id);
         let index: MarkerPath = MarkerPath::with_path(path.path);
-        self.lookup_ref(&root).and_then(|map_info| {
-            map_info.marker_index(index).map(|li| li.pivot(root))
-        })
+        self.lookup_ref(&root)
+            .and_then(|map_info| map_info.marker_index(index).map(|li| li.pivot(root)))
     }
-    pub fn find_loaded_markers(&self, path: MarkerPath<PackPath>) -> impl Iterator<Item = MarkerPath<PackMapPath>> + '_ {
+    pub fn find_loaded_markers(
+        &self,
+        path: MarkerPath<PackPath>,
+    ) -> impl Iterator<Item = MarkerPath<PackMapPath>> + '_ {
         let root = path.root;
         let index: MarkerPath = MarkerPath::with_path(path.path);
-        self.map_info.iter()
+        self.map_info
+            .iter()
             .filter(move |(p, _)| p.root == root)
             .filter_map(move |(p, map_info)| {
                 let root = root.rel(p.path);
-                map_info.marker_index(index)
-                    .map(|li| li.pivot(root))
+                map_info.marker_index(index).map(|li| li.pivot(root))
             })
     }
 }
@@ -336,12 +349,8 @@ impl LoadedMaps {
     }
     /// TODO: a real iter type might deprecate need for this over [Self::iter],
     /// since it could just impl size_hint/nth conditionally
-    pub fn iter_all<'a>(
-        &'a self,
-    ) -> impl Iterator<Item = (PackMapPath, &'a LoadedMapPack)> {
-        self.maps.iter().lazy_map(move |(path, map)|
-            (*path, map)
-        )
+    pub fn iter_all<'a>(&'a self) -> impl Iterator<Item = (PackMapPath, &'a LoadedMapPack)> {
+        self.maps.iter().lazy_map(move |(path, map)| (*path, map))
     }
     pub fn iter_mut<'a>(
         &'a mut self,
@@ -379,15 +388,15 @@ impl LoadedMaps {
         &'a self,
         map_info: &'i LoadedMapInfo,
         map_id: Option<MapIndex>,
-    ) -> impl Iterator<Item = (MarkerPath, LoadedMarkerPath<PackMapPath>, &'a Guid)> + 'i where
+    ) -> impl Iterator<Item = (MarkerPath, LoadedMarkerPath<PackMapPath>, &'a Guid)> + 'i
+    where
         'a: 'i,
     {
         self.iter_with_info(map_info, map_id)
-            .flat_map(move |(map_path, map, info)|
+            .flat_map(move |(map_path, map, info)| {
                 map.marker_guids(info)
-                .lazy_map(move |(p, lp, guid)|
-                    (p, map_path.rel(lp.path), guid)
-                ))
+                    .lazy_map(move |(p, lp, guid)| (p, map_path.rel(lp.path), guid))
+            })
     }
 }
 impl LocationRef<PackPath, MapIndex> for LoadedMaps {
@@ -574,9 +583,9 @@ impl LoadedPacks {
     }
 
     pub fn expired_packs(&self) -> impl Iterator<Item = (PackPath, &LoadedPackInfo)> {
-        self.packs.iter().filter(|(_, i)|
-            i.used.is_elderly(Self::USED_THRESHOLD) && i.is_loaded()
-        )
+        self.packs
+            .iter()
+            .filter(|(_, i)| i.used.is_elderly(Self::USED_THRESHOLD) && i.is_loaded())
     }
 
     pub fn clear(&mut self) {

@@ -15,14 +15,6 @@ use {
     anyhow::Context,
     std::{mem, ops},
     taimi_d3d::dx11::{buffer::VertexBuffer, prelude::*},
-    taimi_pack::{
-        attributes::{
-            cell::{pack_attr, AttrKeyValue, GetAttrDyn, PackKeyId, PackValueCell, SetAttrDyn},
-            keys::{self, GetAttr},
-        },
-        trail::TrailData,
-        Trail,
-    },
     taimi_hoard::loc::Locator,
     taimi_meta::{
         packs::{
@@ -31,6 +23,14 @@ use {
             TrailSectionPath,
         },
         ui::{LocalContext, MapContext},
+    },
+    taimi_pack::{
+        attributes::{
+            cell::{pack_attr, AttrKeyValue, GetAttrDyn, PackKeyId, PackValueCell, SetAttrDyn},
+            keys::{self, GetAttr},
+        },
+        trail::TrailData,
+        Trail,
     },
 };
 
@@ -531,7 +531,6 @@ impl ActiveTrail {
             texture: glam::vec2(0.0, distance / trail_width - 1.0),
         });
     }
-
 }
 #[cfg(deleteme)]
 pack_attr! {

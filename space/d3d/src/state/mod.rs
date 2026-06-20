@@ -15,7 +15,9 @@ pub trait D3dState<D3DC: D3dContext> {
 
 #[cfg(todo)]
 pub trait D3dStateMut<D3DC: D3dContext>: D3dState<D3DC> {
-    fn is_state_empty(&self) -> bool { false }
+    fn is_state_empty(&self) -> bool {
+        false
+    }
 
     fn restore_state_mut(&mut self, context: &D3DC) {
         self.restore_state(context);
@@ -25,7 +27,8 @@ pub trait D3dStateMut<D3DC: D3dContext>: D3dState<D3DC> {
 
 /// provided via macro instead
 #[cfg(todo = "unnecessary")]
-impl<D3DC: D3dContext, T: D3dState<D3DC>> D3dStateSnapshot<D3DC> for T where
+impl<D3DC: D3dContext, T: D3dState<D3DC>> D3dStateSnapshot<D3DC> for T
+where
     [T; 1]: D3dStateSnapshot<D3DC>,
 {
     fn empty_state(device: &D3DC::IDevice) -> anyhow::Result<Self> {
@@ -38,7 +41,8 @@ impl<D3DC: D3dContext, T: D3dState<D3DC>> D3dStateSnapshot<D3DC> for T where
 }
 /// provided via macro instead
 #[cfg(todo)]
-impl<D3DC: D3dContext, T: D3dState<D3DC>> D3dState<D3DC> for T where
+impl<D3DC: D3dContext, T: D3dState<D3DC>> D3dState<D3DC> for T
+where
     [T]: D3dState<D3DC>,
 {
     fn restore_state(&self, context: &D3DC) {
@@ -48,7 +52,8 @@ impl<D3DC: D3dContext, T: D3dState<D3DC>> D3dState<D3DC> for T where
 }
 /// provided via macro instead
 #[cfg(todo)]
-impl<D3DC: D3dContext, T: D3dState<D3DC>> D3dState<D3DC> for Vec<T> where
+impl<D3DC: D3dContext, T: D3dState<D3DC>> D3dState<D3DC> for Vec<T>
+where
     [T]: D3dState<D3DC>,
 {
     fn restore_state(&self, context: &D3DC) {
@@ -94,33 +99,29 @@ impl_d3d! {
 
 pub trait D3dContextStateExt: D3dContext {
     #[inline]
-    fn get_snapshot<'c, S>(&'c self) -> D3dStateToken<'c, S, Self> where
+    fn get_snapshot<'c, S>(&'c self) -> D3dStateToken<'c, S, Self>
+    where
         S: D3dState<Self> + D3dStateSnapshot<Self>,
     {
         D3dStateToken::new_snapshot(self)
     }
     #[inline]
-    fn get_snapshot_buffers<'c, S>(&'c self) -> D3dStateToken<'c, BufferState<S>, Self> where
+    fn get_snapshot_buffers<'c, S>(&'c self) -> D3dStateToken<'c, BufferState<S>, Self>
+    where
         S: D3dStateSnapshot<Self>,
         BufferState<S>: D3dState<Self>,
     {
-        BufferState::new(0, S::snapshot_state(self))
-            .to_state_token(self.to_ref())
+        BufferState::new(0, S::snapshot_state(self)).to_state_token(self.to_ref())
     }
 }
 impl<D3DC: D3dContext> D3dContextStateExt for D3DC {}
 pub trait D3dStateExt<D3DC: D3dContext>: D3dState<D3DC> {
     #[inline]
-    fn to_state_token<'c>(self, context: InterfaceRef<'c, D3DC>) -> D3dStateToken<'c, Self, D3DC> where
+    fn to_state_token<'c>(self, context: InterfaceRef<'c, D3DC>) -> D3dStateToken<'c, Self, D3DC>
+    where
         Self: Sized,
     {
-        D3dStateToken {
-            context: Some(context),
-            state: self,
-        }
+        D3dStateToken { context: Some(context), state: self }
     }
 }
-impl<T, D3DC: D3dContext> D3dStateExt<D3DC> for T where
-    T: D3dState<D3DC>,
-{
-}
+impl<T, D3DC: D3dContext> D3dStateExt<D3DC> for T where T: D3dState<D3DC> {}

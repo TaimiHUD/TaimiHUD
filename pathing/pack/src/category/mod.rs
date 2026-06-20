@@ -145,7 +145,8 @@ impl Category {
 
         // TODO: support bh features properly...
         //marker_attributes.merge(&attributes_bh, false);
-        attributes_bh.merge(&marker_attributes, false); marker_attributes = attributes_bh;
+        attributes_bh.merge(&marker_attributes, false);
+        marker_attributes = attributes_bh;
 
         let display_name = display_name.or(bh_display_name);
 

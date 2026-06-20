@@ -1,10 +1,9 @@
 use {
     super::PathingWindowState,
     crate::{
-        render::element::prelude::*,
+        render::{element::prelude::*, machine::RenderMachine},
         with_i18n,
     },
-    crate::render::machine::RenderMachine,
     taimi_pack::category::CategoryFlags,
 };
 #[cfg(feature = "paths-lua")]
@@ -32,8 +31,12 @@ impl PathingWindowState {
             }
         }
     }
-    pub fn draw_context_menu_packs<'ui, U>(&mut self, ui: &mut U, machine: &mut RenderMachine, unfiltered: bool)
-    where
+    pub fn draw_context_menu_packs<'ui, U>(
+        &mut self,
+        ui: &mut U,
+        machine: &mut RenderMachine,
+        unfiltered: bool,
+    ) where
         U: ?Sized + ImDrawWindow<'ui>,
     {
         let _id = ui.push_id(match unfiltered {

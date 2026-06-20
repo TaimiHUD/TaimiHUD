@@ -1,22 +1,23 @@
 use {
     crate::{controller::Controller, settings::Settings},
     bitflags::bitflags,
+    rustc_hash::FxHashSet,
     serde::{de::DeserializeSeed, Deserialize, Serialize},
-    std::{collections::BTreeMap, fmt, sync::Arc, str::FromStr, num::NonZero},
+    std::{collections::BTreeMap, fmt, num::NonZero, str::FromStr, sync::Arc},
     strum::{IntoStaticStr, VariantArray},
     taimi_hoard::flags::{BitFlagContainer, BitFlagDe, BitFlagSer},
-    rustc_hash::FxHashSet,
 };
 #[cfg(feature = "paths")]
 use {
     std::borrow::Cow,
-    taimi_meta::{
-        ui::MapContext,
-        packs::VisibilityFlags,
-    },
-    taimi_pack::attributes::{keys::{Guid, ShowHideAction}, Festival, Festivals},
-    taimi_pack::category::id::{AsFullId, CategoryId, FullIdRef, IdCmpRelaxed},
     taimi_hoard::time::Timestamp,
+    taimi_meta::{packs::VisibilityFlags, ui::MapContext},
+    taimi_pack::attributes::{
+        keys::{Guid, ShowHideAction},
+        Festival,
+        Festivals,
+    },
+    taimi_pack::category::id::{AsFullId, CategoryId, FullIdRef, IdCmpRelaxed},
 };
 #[cfg(not(feature = "paths"))]
 type Timestamp = u64;
@@ -664,9 +665,9 @@ impl TriggerKind {
         }
     }
     pub fn show_hide_actions(self) -> impl Iterator<Item = (Self, ShowHideAction)> {
-        (self & Self::CATEGORY_MASK).into_iter().filter_map(|t| t.show_hide_action().map(|a|
-            (t, a)
-        ))
+        (self & Self::CATEGORY_MASK)
+            .into_iter()
+            .filter_map(|t| t.show_hide_action().map(|a| (t, a)))
     }
 }
 impl<'de> Deserialize<'de> for TriggerKind {
@@ -726,7 +727,11 @@ impl PathingSave {
             Self { hidden_guid_expiry, .. } if !hidden_guid_expiry.is_empty() => false,
             Self { per_account, .. } if !Self::is_per_account_empty(per_account) => false,
             Self { categories, .. } if !categories.is_empty() => false,
-            Self { categories: _, hidden_guid_expiry: _, per_account: _ } => true,
+            Self {
+                categories: _,
+                hidden_guid_expiry: _,
+                per_account: _,
+            } => true,
         }
     }
 
@@ -806,14 +811,20 @@ impl PathingCategories {
 }
 #[cfg(feature = "paths")]
 impl PathingCategories {
-    pub fn visibility_deviations_for<'a, 'r>(&'a self, root: &'r FullIdRef) -> impl Iterator<Item = (&'a CategoryId, VisibilityFlags)> + 'r where
+    pub fn visibility_deviations_for<'a, 'r>(
+        &'a self,
+        root: &'r FullIdRef,
+    ) -> impl Iterator<Item = (&'a CategoryId, VisibilityFlags)> + 'r
+    where
         'a: 'r,
     {
         let root = IdCmpRelaxed::with_ref(root);
         #[cfg(todo)]
         let deviations = self.deviations.iter();
-        self.toggles.iter().filter(move |id| id.id_starts_with(root))
-        .map(|id| (&id.id, VisibilityFlags::TOGGLE))
+        self.toggles
+            .iter()
+            .filter(move |id| id.id_starts_with(root))
+            .map(|id| (&id.id, VisibilityFlags::TOGGLE))
     }
     pub fn visibility_deviation(&self, id: &FullIdRef) -> VisibilityFlags {
         let id = IdCmpRelaxed::with_ref(id);
@@ -823,7 +834,8 @@ impl PathingCategories {
         }
         VisibilityFlags::visible(self.toggles.contains(id))
     }
-    pub fn set_visibility_deviation<'i, I>(&mut self, id: I, deviation: VisibilityFlags) where
+    pub fn set_visibility_deviation<'i, I>(&mut self, id: I, deviation: VisibilityFlags)
+    where
         I: Into<Cow<'i, FullIdRef>>,
     {
         let id = id.into();

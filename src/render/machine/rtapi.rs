@@ -94,15 +94,12 @@ impl RenderStateRtapi {
         let map_id = unsafe { ptr::read_volatile(&raw const (*rtapi.as_ptr()).map_id) };
         let prev_map_id = mem::replace(&mut self.prev_map_id, map_id);
         let gameplay_update = match self.gameplay {
-            Self::GAMEPLAY_LOADING if map_id != prev_map_id => Some(
-                GameplayState::new_loading(map_id, prev_map_id)
-            ),
+            Self::GAMEPLAY_LOADING if map_id != prev_map_id =>
+                Some(GameplayState::new_loading(map_id, prev_map_id)),
             Self::GAMEPLAY_INGAME if map_id != prev_map_id || prev_gameplay != Self::GAMEPLAY_INGAME =>
                 Some(GameplayState::new_ingame(map_id)),
             state if state == prev_gameplay => None,
-            Self::GAMEPLAY_LOADING => Some(
-                GameplayState::new_loading(Default::default(), map_id)
-            ),
+            Self::GAMEPLAY_LOADING => Some(GameplayState::new_loading(Default::default(), map_id)),
             Self::GAMEPLAY_CINEMATIC => Some(GameplayState::new_loading(map_id, map_id)),
             state => GameState::try_from(state).ok().map(GameplayState::from),
         };

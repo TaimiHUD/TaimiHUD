@@ -2,15 +2,12 @@
 pub use taimi_meta::coords::LocalSpace as PackSpace;
 use {
     self::{
-        registry::{PackLoader, PackMapPath, LoadedMarkerPath},
+        registry::{LoadedMarkerPath, PackLoader, PackMapPath},
         space::{SpaceContext, SpacePackShared},
         state::{LoadedMapInfo, LoadedMaps, LoadedPacks},
     },
     crate::{
-        controller::{
-            runtime::WallInstant,
-            Controller,
-        },
+        controller::{runtime::WallInstant, Controller},
         exports::runtime::{
             self as rt,
             bindings::{
@@ -35,15 +32,13 @@ use {
     },
     std::{collections::VecDeque, future::Future, mem, pin::Pin, sync::Arc, time::Duration},
     strum_macros::Display,
-    taimi_hoard::{
-        loc::LocationRef,
-        time::Timestamp,
-    },
+    taimi_hoard::{loc::LocationRef, time::Timestamp},
     taimi_meta::{
         packs::{
             collections::{CategorySet, PackSet},
             id::{MarkerId, MarkerPath},
             CategoryPath,
+            MapIndex,
             PackPath,
         },
         ui::{
@@ -53,16 +48,15 @@ use {
         },
     },
     taimi_pack::attributes::{AttrString, Festivals},
-    taimi_meta::packs::MapIndex,
     taimi_sync::watched,
     tokio::{select, sync::Semaphore, task::JoinSet},
     tokio_util::sync::ReusableBoxFuture,
 };
+
+#[cfg(feature = "paths-interact")]
+pub use self::interact::InteractMessage;
 #[cfg(feature = "paths-interact")]
 use self::interact::InteractReactor;
-#[cfg(feature = "scripts")]
-use crate::controller::script;
-
 #[allow(unused_imports)]
 pub use self::{
     config::PackConfig,
@@ -71,8 +65,8 @@ pub use self::{
     shared::{PathingEnables, PathingReceiver, PathingSender, PathingShared},
     state::VisibilityFlagsExt,
 };
-#[cfg(feature = "paths-interact")]
-pub use self::interact::InteractMessage;
+#[cfg(feature = "scripts")]
+use crate::controller::script;
 
 mod config;
 mod festivals;
@@ -104,12 +98,18 @@ pub(crate) enum PathingEvent {
     /// explicit request to keep pack and its resources unloaded
     /// (and optionally remove from registry)
     UnloadPack(PackPath, bool),
-    Refresh { include_datasources: bool },
+    Refresh {
+        include_datasources: bool,
+    },
     ReloadAll(bool),
     LoadAll,
     UnloadAll(bool),
-    PackLock { path: PackPath },
-    PackUnlock { path: PackPath },
+    PackLock {
+        path: PackPath,
+    },
+    PackUnlock {
+        path: PackPath,
+    },
     /// toggle or set category state
     CategoryEnableSet(PackPath, CategoryPath, Option<bool>),
     /// until we maintain the mapping for interaction attrs that toggle/show/hide...
@@ -165,10 +165,21 @@ pub(crate) enum PathingEvent {
     #[default]
     Nop,
     // Debug and diagnostics commands
-    RequestRebuildSpace { entities: Option<bool>, bvh: Option<bool> },
-    RequestRebuildVis { pack_path: Option<PackPath>, partial: bool, notify: Option<bool> },
-    RequestResourceRelease { pack_path: Option<PackPath> },
-    RequestResourceReport { pack_path: Option<PackPath> },
+    RequestRebuildSpace {
+        entities: Option<bool>,
+        bvh: Option<bool>,
+    },
+    RequestRebuildVis {
+        pack_path: Option<PackPath>,
+        partial: bool,
+        notify: Option<bool>,
+    },
+    RequestResourceRelease {
+        pack_path: Option<PackPath>,
+    },
+    RequestResourceReport {
+        pack_path: Option<PackPath>,
+    },
 }
 pub type PathingTaskBox = Pin<Box<dyn Future<Output = Option<PathingEvent>> + Send + 'static>>;
 
@@ -267,13 +278,13 @@ impl PathingController {
         }
         let gameplay_prev = self.rx.gameplay.get_mut().clone();
         let enables_prev = self.rx.enables.get_mut().clone();
-        let load_throttle_prev = self
-            .rx
-            .load_throttle
-            .get_mut().clone();
+        let load_throttle_prev = self.rx.load_throttle.get_mut().clone();
         let (scheduled_events, filter_next_schedule) = match () {
             #[cfg(feature = "paths-filter")]
-            _ => (self.scheduled_events.infinite_mut().next(), &mut self.filter_next_schedule),
+            _ => (
+                self.scheduled_events.infinite_mut().next(),
+                &mut self.filter_next_schedule,
+            ),
             #[cfg(not(feature = "paths-filter"))]
             _ => (future::pending::<Option<((), ())>>(), future::pending::<()>()),
         };
@@ -511,8 +522,7 @@ impl PathingController {
             async move {
                 let mut enable_flags = enables.read().clone();
                 let settings = settings.read().await;
-                let load_simultaneous = settings.pathing.as_ref()
-                    .and_then(|p| p.load_simultaneous);
+                let load_simultaneous = settings.pathing.as_ref().and_then(|p| p.load_simultaneous);
                 let interact_config = match &settings.pathing {
                     #[cfg(feature = "paths-interact")]
                     p => p.as_ref().map(|p| interact::InteractSettings::from_settings(p)),
@@ -534,9 +544,7 @@ impl PathingController {
                 if let Some(load_simultaneous) = load_simultaneous {
                     load_throttle.send_replace(load_simultaneous);
                 }
-                (
-                    interact_config,
-                )
+                (interact_config,)
             }
         };
         let preload = self.preload_all();
@@ -572,13 +580,11 @@ impl PathingController {
             }
         };
         let mut engine_online = false;
-        self.rx
-            .enables
-            .write_if(|en| {
-                engine_online = en.contains(PathingEnables::ENGINE);
-                en.set(PathingEnables::KATRENDER, katrender);
-                Some(true)
-            });
+        self.rx.enables.write_if(|en| {
+            engine_online = en.contains(PathingEnables::ENGINE);
+            en.set(PathingEnables::KATRENDER, katrender);
+            Some(true)
+        });
         #[cfg(todo)]
         if !engine_online && katrender && self.gameplay_map().is_some() {
             RenderEvent::StartEngine.try_send()
@@ -695,15 +701,12 @@ impl PathingController {
                 self.process_category_set(pack_path.rel(cat.path), state).await,
             CategoryEnableById(pack_path, cat_id, state) =>
                 self.process_category_set_id(pack_path, cat_id, state).await,
-            CategoryEnableCommit(pack_path, cats) => {
-                self.category_commit_vis(pack_path, &mut cats.into_paths()).await
-            },
+            CategoryEnableCommit(pack_path, cats) =>
+                self.category_commit_vis(pack_path, &mut cats.into_paths()).await,
             #[cfg(feature = "paths-filter")]
-            ResetMarkerIds(ids) =>
-                self.process_filter_clear_ids(ids),
+            ResetMarkerIds(ids) => self.process_filter_clear_ids(ids),
             #[cfg(feature = "paths-filter")]
-            ResetMarkerPath(path) =>
-                self.process_filter_clear_path(path),
+            ResetMarkerPath(path) => self.process_filter_clear_path(path),
             #[cfg(feature = "paths-interact")]
             TriggerMarkerCopy { path, loaded_path, value, message } =>
                 self.process_marker_copy(path, loaded_path, value, message).await,
@@ -711,8 +714,13 @@ impl PathingController {
             TriggerMarkerInfo { path, loaded_path, message } =>
                 self.process_marker_info(path, loaded_path, message).await,
             #[cfg(feature = "paths-interact")]
-            DismissMarker { path, loaded_path, until, contexts, reset } =>
-                self.process_marker_dismiss(path, loaded_path, until, contexts, reset),
+            DismissMarker {
+                path,
+                loaded_path,
+                until,
+                contexts,
+                reset,
+            } => self.process_marker_dismiss(path, loaded_path, until, contexts, reset),
             #[cfg(feature = "paths-interact")]
             InteractControl(msg) => {
                 let cx = (&self.maps, &self.map_info, &self.filter_state, &self.settings);
@@ -824,7 +832,8 @@ impl PathingController {
             _ => self.rx.interact.player_pos.ml,
         };
         self.gameplay_map().and_then(|map_id| {
-            let is_text_input = ml.map(|ml| ml.read_ui_state())
+            let is_text_input = ml
+                .map(|ml| ml.read_ui_state())
                 .map(|state| UiState::from(state).contains(UiState::TextInput))
                 .unwrap_or(true);
             (!is_text_input).then_some(map_id)
@@ -834,7 +843,14 @@ impl PathingController {
     pub(crate) async fn handle_press_interact(&mut self, map_id: MapIndex) {
         let interact_ctx = (&self.map_info, &self.maps, map_id, &self.filter_state);
         if self.rx.interact.try_throttle_press() {
-            let followup = self.interact.trigger_interact_action(&mut self.rx.interact, interact_ctx, InteractReactor::INTERACT_ACTION).await;
+            let followup = self
+                .interact
+                .trigger_interact_action(
+                    &mut self.rx.interact,
+                    interact_ctx,
+                    InteractReactor::INTERACT_ACTION,
+                )
+                .await;
             self.process_or_spawn_message(followup).await;
         } else {
             log::debug!("throttling interact handler");
@@ -875,7 +891,9 @@ impl PathingController {
             self.space.collect_garbage(maps, map_id, aggressive);
             #[cfg(feature = "paths-interact")]
             {
-                self.interact.collect_garbage(&mut self.rx, maps, map_id, aggressive).await;
+                self.interact
+                    .collect_garbage(&mut self.rx, maps, map_id, aggressive)
+                    .await;
             }
         }
     }
@@ -906,8 +924,7 @@ impl PathingController {
             e @ (PathingEvent::Nop | PathingEvent::Exit(..) | PathingEvent::FanOut(..)) =>
                 self.spawn_message(e),
             #[cfg(feature = "paths-interact")]
-            e @ PathingEvent::InteractControl(..) =>
-                self.spawn_message(e),
+            e @ PathingEvent::InteractControl(..) => self.spawn_message(e),
             event => self.process_message(event).await,
         }
     }
@@ -923,7 +940,7 @@ impl PathingController {
                     tokio::time::sleep(Duration::from_millis(7)).await;
                     Ok(e)
                 });
-            }
+            },
             e => {
                 self.tasks.spawn(future::ready(Ok(e)));
             },

@@ -736,7 +736,8 @@ impl PackRender {
                         for (poi, lpoi) in pack.pois.values_mut().zip(pack.map_state.loaded_pois(map_info))
                         {
                             poi.populate_rotation(&lpoi);
-                            #[cfg(todo)] {
+                            #[cfg(todo)]
+                            {
                                 poi.update(device, &pack.info, Some(lpoi))
                             }
                         }

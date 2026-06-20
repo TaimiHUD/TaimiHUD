@@ -4,8 +4,8 @@ use glamour::Size2;
 use {
     anyhow::{anyhow, Context},
     std::{io, sync::Weak, thread},
-    windows::Win32::Graphics::Dxgi::Common::{self as dxgi, DXGI_FORMAT},
     taimi_sync::arcs::weak_is_null,
+    windows::Win32::Graphics::Dxgi::Common::{self as dxgi, DXGI_FORMAT},
 };
 use {
     std::{
@@ -600,10 +600,7 @@ impl TextureSlot {
     pub fn imgui_texture(&self) -> Option<ImguiTexture> {
         let id = self.resource_view().map(|resource| resource.clone());
 
-        self.get_imgui_dims().map(move |size| ImguiTexture {
-            id,
-            size,
-        })
+        self.get_imgui_dims().map(move |size| ImguiTexture { id, size })
     }
 
     pub fn resource(&self) -> Option<Arc<Texture>> {
@@ -701,8 +698,7 @@ impl TextureSlot {
             _ => None,
         };
         match tex {
-            Some(Some(tex)) =>
-                Some(self.insert_loaded(tex)),
+            Some(Some(tex)) => Some(self.insert_loaded(tex)),
             Some(None) => {
                 self.insert_inactive(Weak::new());
                 None
@@ -723,8 +719,10 @@ impl TextureSlot {
                 Weak::upgrade(tex).map(|tex| tex.texture_byte_size()).unwrap_or(0),
             Self::Nexus(tex) => {
                 use taimi_d3d::dx11::buffer::ShaderResourceView;
-                let bpp = Texture::format_bpp(ShaderResourceView::from_d3d_ref(&tex.resource).get_desc().Format);
-                bpp.saturating_mul(tex.width as usize).saturating_mul(tex.height as usize)
+                let bpp =
+                    Texture::format_bpp(ShaderResourceView::from_d3d_ref(&tex.resource).get_desc().Format);
+                bpp.saturating_mul(tex.width as usize)
+                    .saturating_mul(tex.height as usize)
             },
             _ => 0,
         }

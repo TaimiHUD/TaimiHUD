@@ -20,9 +20,9 @@ use {
         render::element::prelude::*,
         settings::state::ui::pathing::PathingFilterFlags,
     },
+    taimi_hoard::flags::BitSet,
     taimi_meta::packs::{CategoryPath, PackPath, VisibilityFlags},
     taimi_pack::category::CategoryFlags,
-    taimi_hoard::flags::BitSet,
 };
 
 pub struct DrawPackRoots<'a, 'u, U: ?Sized + 'u> {
@@ -34,7 +34,8 @@ pub struct DrawPackRoots<'a, 'u, U: ?Sized + 'u> {
     pub unfilter_interest: Option<CategoryPath>,
     pub last_menu_open: Option<CategoryPath>,
 }
-impl<'a, 'u, 'ui, U> DrawPackRoots<'a, 'u, U> where
+impl<'a, 'u, 'ui, U> DrawPackRoots<'a, 'u, U>
+where
     U: ?Sized + ImDrawWindow<'ui> + 'u,
 {
     pub fn draw(&mut self) {
@@ -75,7 +76,9 @@ impl<'a, 'u, 'ui, U> DrawPackRoots<'a, 'u, U> where
                     _ => self.prepare_categories(),
                     _ => {
                         let categories = self.categories.map(|state| {
-                            DrawCategoryCollectionTree::new(DrawCategoryCollection::new(self.ui, state, self.state))
+                            DrawCategoryCollectionTree::new(DrawCategoryCollection::new(
+                                self.ui, state, self.state,
+                            ))
                         });
                         let Some(categories) = categories else { return };
                         categories
@@ -185,13 +188,16 @@ impl<'a, 'u, 'ui, U> DrawPackRoots<'a, 'u, U> where
             is_header: true,
             button_interact: None,
             allow_overlap: true,
-            filter_selected: self.categories.as_ref().and_then(|c| match c.filter_state.is_active() {
-                false => None,
-                true => match c.filter_state.all_filtered() {
-                    true => Some(false),
+            filter_selected: self
+                .categories
+                .as_ref()
+                .and_then(|c| match c.filter_state.is_active() {
                     false => None,
-                },
-            }),
+                    true => match c.filter_state.all_filtered() {
+                        true => Some(false),
+                        false => None,
+                    },
+                }),
         }
     }
 
@@ -215,9 +221,10 @@ pub struct DrawCategoryToggle<'a, 'u, U: ?Sized> {
     pub is_copyable: bool,
     pub has_children: bool,
     pub pseudo_root: bool,
-    pub filter_selected: Option<bool>
+    pub filter_selected: Option<bool>,
 }
-impl<'a, 'u, 'ui, U> DrawCategoryToggle<'a, 'u, U> where
+impl<'a, 'u, 'ui, U> DrawCategoryToggle<'a, 'u, U>
+where
     U: ?Sized + ImDrawWindow<'ui>,
 {
     /// TODO: return CategoryAction .-.
@@ -271,7 +278,8 @@ impl<'a, 'u, 'ui, U> DrawCategoryToggle<'a, 'u, U> where
         (act, header_token)
     }
 
-    pub(super) fn prepare_header<'u0, 'a0>(&'a0 mut self) -> DrawCategoryHeader<'a, 'u0, U> where
+    pub(super) fn prepare_header<'u0, 'a0>(&'a0 mut self) -> DrawCategoryHeader<'a, 'u0, U>
+    where
         'u: 'u0,
         'a0: 'u0,
     {
@@ -335,7 +343,8 @@ pub struct DecorateCategoryHeader<'a, 'u, U: ?Sized + 'u> {
     pub info: &'a CategoryInfo,
     pub was_hovered: bool,
 }
-impl<'a, 'u, 'ui, U> DecorateCategoryHeader<'_, 'u, U> where
+impl<'a, 'u, 'ui, U> DecorateCategoryHeader<'_, 'u, U>
+where
     U: ?Sized + ImDrawWindow<'ui> + 'u,
 {
     pub fn decorate(&mut self) -> Option<UiAction> {
@@ -398,9 +407,7 @@ impl super::PackElements {
                 if apply_filters {
                     // TODO: go one level up? only open parents with at least one whitelisted child!
                     let cats: BitSet = pack.categories.iter_whitelisted(&pack.state).collect();
-                    pack.categories.open_mask.extend(
-                        cats.iter_of::<CategoryPath>()
-                    );
+                    pack.categories.open_mask.extend(cats.iter_of::<CategoryPath>());
                 } else {
                     pack.categories.open_mask.flags.fill(true);
                     pack.categories.open_mask.extend_for(cats.count(), true);
@@ -414,15 +421,13 @@ impl super::PackElements {
                 false => pack.categories.filter_state.is_active() && pack.categories.open_mask.any(),
                 true => false,
             };
-            let cats = apply_filters.then_some(pack.state.info.category_info())
-                .flatten();
+            let cats = apply_filters.then_some(pack.state.info.category_info()).flatten();
             if let Some(..) = cats {
                 let cats: BitSet = pack.categories.iter_whitelisted(&pack.state).collect();
                 for cat in cats.iter_of::<CategoryPath>() {
                     pack.categories.open_mask.remove_at(cat);
 
-                    let new_len = pack.categories.open_mask.last_one()
-                        .map(|i| i + 1).unwrap_or(0);
+                    let new_len = pack.categories.open_mask.last_one().map(|i| i + 1).unwrap_or(0);
                     pack.categories.open_mask.truncate(new_len);
                 }
             } else {
@@ -432,26 +437,36 @@ impl super::PackElements {
     }
 }
 impl PackElement {
-    pub fn draw<'ui, U>(&mut self, ui: &mut U) where
+    pub fn draw<'ui, U>(&mut self, ui: &mut U)
+    where
         U: ?Sized + ImDrawWindow<'ui>,
     {
         let mut roots = self.prepare_draw(ui);
         roots.draw();
-        let DrawPackRoots { act_cat, act_pack, unfilter_interest, .. } = roots;
+        let DrawPackRoots {
+            act_cat, act_pack, unfilter_interest, ..
+        } = roots;
         self.act_post_draw(ui, act_cat, act_pack, true);
         if let Some(interest) = unfilter_interest {
             if let Some(cats) = self.state.info.info.as_ref().map(|i| &i.categories) {
-                let hide = self.categories.filter_state.flags.contains(PathingFilterFlags::ShowHidden);
+                let hide = self
+                    .categories
+                    .filter_state
+                    .flags
+                    .contains(PathingFilterFlags::ShowHidden);
                 let filter = move |path: &CategoryPath| match hide {
                     false => !cats.hidden.contains(*path),
                     true => true,
                 };
-                self.categories.filter_state.extend_interest(cats.children_of(interest).filter(filter));
+                self.categories
+                    .filter_state
+                    .extend_interest(cats.children_of(interest).filter(filter));
             }
         }
     }
 
-    pub fn prepare_draw<'a, 'u, 'ui, U>(&'a self, ui: &'u mut U) -> DrawPackRoots<'a, 'u, U> where
+    pub fn prepare_draw<'a, 'u, 'ui, U>(&'a self, ui: &'u mut U) -> DrawPackRoots<'a, 'u, U>
+    where
         U: ?Sized + ImDrawWindow<'ui> + 'u,
     {
         DrawPackRoots {

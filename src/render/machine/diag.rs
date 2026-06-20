@@ -1,13 +1,14 @@
 use {
     super::RenderMachine,
-    crate::exports::runtime::statistics::{StatsRef, StatsDesc, StatsUnit, MetricsSwitch, StatsCounter},
-    std::time::Instant,
+    crate::exports::runtime::statistics::{MetricsSwitch, StatsCounter, StatsDesc, StatsRef, StatsUnit},
     log::Log,
-    std::collections::LinkedList,
-    std::sync::Mutex,
-    std::sync::LazyLock,
-    std::mem,
-    std::ptr,
+    std::{
+        collections::LinkedList,
+        mem,
+        ptr,
+        sync::{LazyLock, Mutex},
+        time::Instant,
+    },
     sync_unsafe_cell::SyncUnsafeCell,
 };
 
@@ -15,15 +16,21 @@ impl RenderMachine {
     pub(super) fn metrics_init(&mut self) {
         let sec = "stats-render";
         let stats_counters = &[
-            (StatsRef::with_counter(&STATS_FRAME_TIME_SLICE, StatsUnit::Fraction), StatsDesc::new(
-                sec, "stats-render-time-slice",
-            ), true),
-            (StatsRef::with_counter(&STATS_FRAME_TIME_RENDER, StatsUnit::Time), StatsDesc::new(
-                sec, "stats-render-time",
-            ), true),
-            (StatsRef::with_counter(&STATS_FRAME_TIME_UI, StatsUnit::Time), StatsDesc::new(
-                sec, "stats-render-time-ui",
-            ), true),
+            (
+                StatsRef::with_counter(&STATS_FRAME_TIME_SLICE, StatsUnit::Fraction),
+                StatsDesc::new(sec, "stats-render-time-slice"),
+                true,
+            ),
+            (
+                StatsRef::with_counter(&STATS_FRAME_TIME_RENDER, StatsUnit::Time),
+                StatsDesc::new(sec, "stats-render-time"),
+                true,
+            ),
+            (
+                StatsRef::with_counter(&STATS_FRAME_TIME_UI, StatsUnit::Time),
+                StatsDesc::new(sec, "stats-render-time-ui"),
+                true,
+            ),
         ];
         for &(counter, mut desc, detailed) in stats_counters {
             desc.detailed = detailed;
@@ -97,32 +104,28 @@ pub struct FrameLog {
 }
 impl FrameLog {
     pub fn new() -> Self {
-        Self {
-            records: Default::default(),
-        }
+        Self { records: Default::default() }
     }
     pub fn is_enabled() -> bool {
         MetricsSwitch::read().contains(MetricsSwitch::FRAME_LOG)
     }
     pub fn is_taimi() -> bool {
-        unsafe {
-            ptr::read_volatile(Self::is_taimi_flag().get())
-        }
+        unsafe { ptr::read_volatile(Self::is_taimi_flag().get()) }
     }
     pub fn is_game() -> bool {
         !Self::is_taimi() && Self::is_enabled()
     }
     pub fn is_taimi_set(is_taimi: bool) {
-        unsafe {
-            ptr::write_volatile(Self::is_taimi_flag().get(), is_taimi)
-        }
+        unsafe { ptr::write_volatile(Self::is_taimi_flag().get(), is_taimi) }
     }
     pub fn is_taimi_flag() -> &'static SyncUnsafeCell<bool> {
         static FLAG: SyncUnsafeCell<bool> = SyncUnsafeCell::new(false);
         &FLAG
     }
     pub fn take_records(&self) -> Option<LinkedList<String>> {
-        self.records.lock().ok()
+        self.records
+            .lock()
+            .ok()
             .map(|mut records| mem::take(&mut *records))
     }
     pub fn clear(&self) {
@@ -143,7 +146,9 @@ impl Log for FrameLog {
 
     fn log(&self, record: &log::Record) {
         #[cfg(todo = "unnecessary")]
-        if !Self::is_enabled() { return }
+        if !Self::is_enabled() {
+            return
+        }
 
         let record = record.args().to_string();
         if let Ok(mut records) = self.records.lock() {

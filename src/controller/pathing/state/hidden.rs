@@ -1,11 +1,13 @@
-use std::num::NonZero;
-use std::sync::Arc;
-use std::collections::BTreeMap;
-use crate::controller::pathing::state::filter::{self, HiddenAlways, HiddenForMap, HiddenForCharacter, MarkerFilter};
-use crate::controller::pathing::shared::HiddenGuids;
-use taimi_meta::packs::{MapIndex, MarkerId};
-use taimi_hoard::time::Timestamp;
-use taimi_pack::attributes::keys::Guid;
+use {
+    crate::controller::pathing::{
+        shared::HiddenGuids,
+        state::filter::{self, HiddenAlways, HiddenForCharacter, HiddenForMap, MarkerFilter},
+    },
+    std::{collections::BTreeMap, num::NonZero, sync::Arc},
+    taimi_hoard::time::Timestamp,
+    taimi_meta::packs::{MapIndex, MarkerId},
+    taimi_pack::attributes::keys::Guid,
+};
 
 #[derive(Debug, Clone, Default, Hash)]
 pub struct MarkerState {
@@ -13,40 +15,53 @@ pub struct MarkerState {
 }
 impl MarkerState {
     pub fn hide_contexts_for<'a>(&'a self, id: &MarkerId) -> impl Iterator<Item = &'a HideContext> + Clone {
-        self.hidden.get(id)
+        self.hidden
+            .get(id)
             .into_iter()
             .flat_map(|hidden| hidden.contexts())
     }
 
-    pub fn is_hidden(&self, id: &MarkerId, map: &filter::MapMetadata, character: &filter::CharacterMetadata) -> bool {
-        self.hide_contexts_for(id)
-            .any(|ctx| {
-                let filtered = match ctx {
-                    HideContext::Global => filter::FILTER_HIDDEN,
-                    HideContext::Local(filter) => filter.is_visible(map),
-                    HideContext::Character(filter) => filter.is_visible(character),
-                };
-                matches!(filtered, filter::FILTER_HIDDEN)
-            })
+    pub fn is_hidden(
+        &self,
+        id: &MarkerId,
+        map: &filter::MapMetadata,
+        character: &filter::CharacterMetadata,
+    ) -> bool {
+        self.hide_contexts_for(id).any(|ctx| {
+            let filtered = match ctx {
+                HideContext::Global => filter::FILTER_HIDDEN,
+                HideContext::Local(filter) => filter.is_visible(map),
+                HideContext::Character(filter) => filter.is_visible(character),
+            };
+            matches!(filtered, filter::FILTER_HIDDEN)
+        })
     }
 
     pub fn next_expiry(&self) -> Option<Timestamp> {
-        self.hidden.values().filter_map(|hidden| match hidden.reset {
-            AutoReset::Expiry { expiry } => Some(expiry),
-            _ => None
-        }).min()
+        self.hidden
+            .values()
+            .filter_map(|hidden| match hidden.reset {
+                AutoReset::Expiry { expiry } => Some(expiry),
+                _ => None,
+            })
+            .min()
     }
 
     pub fn marker_mut(&mut self, id: impl Into<MarkerId>) -> &mut HiddenMarker {
         let id = id.into();
-        self.hidden.entry(id).or_insert(HiddenMarker::global(AutoReset::Never))
+        self.hidden
+            .entry(id)
+            .or_insert(HiddenMarker::global(AutoReset::Never))
     }
-    pub fn expire_at(&mut self, id: impl Into<MarkerId>, expiry: impl Into<Timestamp>) -> (&mut HiddenMarker, bool) {
+    pub fn expire_at(
+        &mut self,
+        id: impl Into<MarkerId>,
+        expiry: impl Into<Timestamp>,
+    ) -> (&mut HiddenMarker, bool) {
         let ts = expiry.into();
         let entry = self.marker_mut(id);
         let changed = match &mut entry.reset {
-            AutoReset::Expiry { expiry } if *expiry == ts =>
-                false,
+            AutoReset::Expiry { expiry } if *expiry == ts => false,
             reset => {
                 *reset = AutoReset::expire_at_timestamp(ts);
                 true
@@ -65,16 +80,14 @@ impl MarkerState {
     pub fn reset_expired(&mut self, now: &Timestamp) -> bool {
         let prev_len = self.hidden.len();
         self.hidden.retain(|_, hidden| match &hidden.reset {
-            AutoReset::Expiry { expiry } if expiry <= now =>
-                false,
+            AutoReset::Expiry { expiry } if expiry <= now => false,
             _ => true,
         });
         prev_len != self.hidden.len()
     }
     pub fn reset_map_leave(&mut self) {
         self.hidden.retain(|_, hidden| match &hidden.reset {
-            AutoReset::MapChange | AutoReset::Distance =>
-                false,
+            AutoReset::MapChange | AutoReset::Distance => false,
             _ => true,
         })
     }
@@ -88,7 +101,12 @@ impl MarkerState {
         let mut dirty = false;
         for id in all_ids {
             let duplicate_expired = match (self.hidden.get(id), &now) {
-                (Some(HiddenMarker { reset: AutoReset::Expiry { expiry }, .. }), Some(now)) => Some(expiry <= now),
+                (
+                    Some(HiddenMarker {
+                        reset: AutoReset::Expiry { expiry }, ..
+                    }),
+                    Some(now),
+                ) => Some(expiry <= now),
                 (Some(..), _) => Some(false),
                 (None, _) => None,
             };
@@ -99,7 +117,9 @@ impl MarkerState {
                 }
                 continue
             }
-            let Some(&expiry_timestamp) = hidden_guids.get(Guid::from_uuid_ref(id)) else { continue };
+            let Some(&expiry_timestamp) = hidden_guids.get(Guid::from_uuid_ref(id)) else {
+                continue
+            };
             match now {
                 Some(now) if expiry_timestamp <= now => continue,
                 _ => (),
@@ -118,10 +138,7 @@ pub struct HiddenMarker {
 }
 impl HiddenMarker {
     pub const fn global(reset: AutoReset) -> Self {
-        Self {
-            contexts: Vec::new(),
-            reset,
-        }
+        Self { contexts: Vec::new(), reset }
     }
     pub fn with_contexts<C: IntoIterator<Item = HideContext>>(reset: AutoReset, contexts: C) -> Self {
         let mut hidden = Self {
