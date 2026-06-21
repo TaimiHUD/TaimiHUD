@@ -1,3 +1,4 @@
+#![doc(html_logo_url = "https://taimihud.com/logotype-holo.png")]
 //! Parser and data types for GW2 TacO pathing packs.
 pub mod attributes;
 pub mod category;

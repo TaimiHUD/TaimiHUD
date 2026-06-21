@@ -1,3 +1,4 @@
+#![doc(html_logo_url = "https://taimihud.com/logotype-holo.png")]
 //! TaimiHUD addon — pathing, encounter timers, and squad markers.
 mod controller;
 mod exports;

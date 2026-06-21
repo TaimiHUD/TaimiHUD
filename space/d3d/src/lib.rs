@@ -1,3 +1,4 @@
+#![doc(html_logo_url = "https://taimihud.com/logotype-holo.png")]
 //! DirectX 11 abstractions and rendering primitives for TaimiHUD.
 pub mod blob;
 pub mod buffer;
