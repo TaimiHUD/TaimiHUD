@@ -7,7 +7,7 @@ use {
 
 pub type MapID = u32;
 
-/// https://wiki.guildwars2.com/wiki/API:1/maps
+/// <https://wiki.guildwars2.com/wiki/API:1/maps>
 #[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Deserialize, Serialize))]
 pub struct Map {

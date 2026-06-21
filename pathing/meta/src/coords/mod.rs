@@ -526,7 +526,7 @@ where
     Transform3::from_matrix_unchecked(trans.matrix)
 }
 
-/// XXX: [glam::Matrix4::look_to_lh] does not normalize the up cross vector,
+/// XXX: [glam::Mat4::look_to_lh] does not normalize the up cross vector,
 /// but we do?
 ///
 /// the difference is probably just a rounding error or we're wrong idk
