@@ -10,7 +10,8 @@ use {
             PlugSharedData,
             PlugSharedRef,
         },
-        space::{engine::SpaceEvent, pack::SharedLoader},
+        controller::pathing::registry::SharedLoaderBox as SharedLoader,
+        space::engine::SpaceEvent,
     },
     anyhow::Context,
     core::{fmt, mem, ops},
@@ -257,7 +258,7 @@ impl ScriptApiPackAssets for LuaPackDesc {
         S: ScriptUserStr,
     {
         let loader = self.shared().get_loader()?;
-        let mut loader = loader.lock().ok().context("poison")?;
+        let mut loader = loader.blocking_lock();
         path.with_str(|path| {
             let mut res = loader
                 .load_asset_dyn(path)
@@ -290,7 +291,7 @@ impl ScriptApiPackAssets for LuaPackDesc {
     {
         let loader = self.shared().get_loader()?;
         let exists = {
-            let loader = loader.lock().ok().context("poison")?;
+            let loader = loader.blocking_lock();
             path.with_str(|p| match loader.contains_asset(p) {
                 Err(e) => Err(e),
                 Ok(false) => Err(script::format_err!("texture {p} not found")),
@@ -880,6 +881,7 @@ impl PackHandleMut for LuaPackDesc {
             path
         };
 
+        #[cfg(deleteme)]
         SpaceEvent::ScriptCreate {
             generation: self.path.generation,
             pack_idx: self.path.index,
@@ -915,6 +917,7 @@ impl PackHandleMut for LuaPackDesc {
             path
         };
 
+        #[cfg(deleteme)]
         SpaceEvent::ScriptCreate {
             generation: self.path.generation,
             pack_idx: self.path.index,
@@ -993,6 +996,7 @@ impl PackHandleMut for LuaPackDesc {
             path
         };
 
+        #[cfg(deleteme)]
         SpaceEvent::ScriptCreate {
             generation: self.path.generation,
             pack_idx: self.path.index,
@@ -1015,6 +1019,7 @@ impl PackHandleMut for LuaPackDesc {
         } else {
             o.mask_marker(path);
         }
+        #[cfg(deleteme)]
         SpaceEvent::ScriptMask {
             generation: self.path.generation,
             pack_idx: self.path.index,
@@ -1032,6 +1037,7 @@ impl PackHandleMut for LuaPackDesc {
         } else {
             o.mask_marker(path);
         }
+        #[cfg(deleteme)]
         SpaceEvent::ScriptMask {
             generation: self.path.generation,
             pack_idx: self.path.index,
@@ -1050,6 +1056,7 @@ impl PackHandleMut for LuaPackDesc {
             o.mask_marker(path);
         }
 
+        #[cfg(deleteme)]
         SpaceEvent::ScriptMask {
             generation: self.path.generation,
             pack_idx: self.path.index,
@@ -1135,6 +1142,7 @@ impl PackRoot {
                 }
             }
         });
+        #[cfg(deleteme)]
         if let Some(()) = changed {
             crate::controller::pathing::PathingEvent::RequestDisabledPaths.try_send();
         }
@@ -1284,6 +1292,7 @@ impl CategoryHandleMut for PackCategory {
     fn set_category_attr_dyn(&self, value: PackValueCell) -> script::Result<()> {
         let key = value.id();
         self.marker.overrides_write().attrs.set_attr_dyn(value);
+        #[cfg(deleteme)]
         SpaceEvent::ScriptOverrideUpdate {
             generation: self.marker.pack_path.generation,
             pack_idx: self.marker.pack_path.index,
@@ -1484,6 +1493,7 @@ impl PathableHandleMut for PackPoi {
                 }
             },
         } }
+        #[cfg(deleteme)]
         SpaceEvent::ScriptOverrideUpdate {
             generation: self.marker.pack_path.generation,
             pack_idx: self.marker.pack_path.index,
@@ -1655,6 +1665,7 @@ impl PathableHandleMut for PackTrail {
     fn set_marker_attr_dyn(&self, v: PackValueCell) -> script::Result<()> {
         let key = v.id();
         self.marker.overrides_write().attrs.set_attr_dyn(v);
+        #[cfg(deleteme)]
         SpaceEvent::ScriptOverrideUpdate {
             generation: self.marker.pack_path.generation,
             pack_idx: self.marker.pack_path.index,

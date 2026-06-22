@@ -6,7 +6,7 @@ use {
             self as rt,
             statistics::{MetricsSwitch, StatsRef},
         },
-        render::{element::prelude::*, machine::RenderMachine},
+        render::{element::prelude::*, machine::{RenderMachine, RenderSlot}},
         Controller,
         ControllerEvent,
         TEXTURES,
@@ -244,7 +244,9 @@ impl InfoTabState {
     }
 
     /// TODO: TreeNode sections
-    pub fn stats_table(&self, ui: &Ui) {
+    pub fn stats_table<'ui, U>(&self, ui: &mut U) where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         if let Ok(stats) = StatsRef::registry().try_read() {
             if stats.is_empty() {
                 return
@@ -276,7 +278,7 @@ impl InfoTabState {
                     }
                 }
             }
-            let _table = ui.begin_table("stats", 2);
+            let _table = ui.begin_table_with_flags("stats", 2, Default::default());
             let mut section_prev = 0usize;
             for (desc, counter) in stats.iter() {
                 if desc.detailed & !detailed {
@@ -290,16 +292,16 @@ impl InfoTabState {
                 if section_prev != section {
                     section_prev = section;
                     ui.table_next_column();
-                    with_i18n!(desc.section, |label| ui.table_header(label));
+                    with_i18n!(desc.section, |label| ui.table_header_dyn(&mut {label}));
                     ui.table_next_column();
                 }
                 ui.indent();
                 ui.table_next_column();
                 let display = counter.unit.display_value(value);
                 with_i18n!(desc.name, |label| ui
-                    .display_with_font(&NexusLinkFont::Ui, &format_args!("{label}:")));
+                    .text_with_font(NexusLinkFont::Ui, im_fmt!("{label}:")));
                 ui.table_next_column();
-                ui.display_with_font(&NexusLinkFont::Ui, &display);
+                ui.text_with_font(NexusLinkFont::Ui, im_fmt!("{display}"));
                 ui.unindent();
             }
         }
@@ -309,8 +311,6 @@ impl InfoTabState {
     where
         U: ?Sized + ImDrawWindow<'ui>,
     {
-        use {crate::space::pack, std::sync::atomic::Ordering};
-
         if let Some(Ok(engine)) = engine {
             ui.text_with_font(NexusLinkFont::Big, fl!("engine"));
             ui.text_with_font(NexusLinkFont::Ui, fl!("ecs-data"));

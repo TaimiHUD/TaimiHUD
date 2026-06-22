@@ -852,8 +852,7 @@ impl PackRoot {
             id: category.full_id.clone(),
             display_name: category
                 .display_name
-                .clone()
-                .unwrap_or_else(|| category.display_name().into()),
+                .clone(),
             flags: category.flags | CategoryFlags::ROOT,
             direct_child_count: category.child_ids().count(),
         }
@@ -861,6 +860,10 @@ impl PackRoot {
 
     pub fn path(&self) -> CategoryPath {
         CategoryPath::with_path(self.index)
+    }
+    pub fn display_name(&self) -> &str {
+        self.display_name.as_ref().map(|n| &n[..])
+            .unwrap_or_else(|| self.id.as_str())
     }
 }
 

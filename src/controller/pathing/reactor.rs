@@ -66,7 +66,11 @@ impl PathingEvent {
 
     #[inline]
     pub fn try_send(self) {
-        let _ = PathingController::try_send(self);
+        let _res = PathingController::try_send(self);
+        #[cfg(taimi_debug)]
+        if !_res {
+            log::error!("pathing rx overflow!");
+        }
     }
 
     pub const VISIBLE_TOGGLE_SPACE: Self = Self::VisibleToggle { context: None, set: None };

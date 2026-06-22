@@ -4,22 +4,23 @@ use {
         space::DrawSpace,
     },
     crate::render::machine::RenderPosition,
-    crate::space::pack::{instance::{PoiVertexBuffer, PoiVertex}, PoiRender, TrailRender, PoiCommonRenderData, PackRenderResources, PackRenderState, PackRenderData},
-    crate::resources::shader::{ShaderLoader, ShaderPair, ShaderLayout},
+    crate::space::{pack::{instance::{PoiVertexBuffer, PoiVertex}, PoiRender, TrailRender, PoiCommonRenderData, PackRenderResources, PackRenderState, PackRenderData}, dx11::{RenderBackend, InstanceBufferData}},
+    crate::resources::shader::{ShaderPair, ShaderLayout},
     arcffi::cstr::CStrBox,
     taimi_d3d::{
         dx11::prelude::*,
         shader::{ShaderDefinition, ShaderKind},
     },
     glamour::Point3,
-    glam::Vec3A,
+    glam::{Vec3A, Vec4},
     std::collections::{BinaryHeap, BTreeSet},
     std::ffi::CStr,
+    std::mem,
     std::ops,
     std::fmt,
     std::iter,
     strum::VariantArray,
-    taimi_hoard::cmp::CmpIgnore,
+    taimi_hoard::{cmp::CmpIgnore, vec::vec32_eq},
     taimi_meta::{packs::TrailSectionPath, ui::{LocalContext, MapContext}},
 };
 
@@ -142,14 +143,18 @@ impl ShaderState {
 pub struct DrawSpacePack<'a> {
     pub state: Option<Option<ShaderState>>,
     pub poi_common: &'a PoiCommonRenderData,
+    pub backend: &'a RenderBackend,
+    #[cfg(todo = "unnecessary")]
     pub shaders: &'a ShaderLoader,
     pub shader_trail: Option<ShaderPair>,
     pub context: &'a Dx11Context,
+    pub poi_billboarding: bool,
+    pub trail_colour: Vec4,
 }
 impl<'a> DrawSpacePack<'a> {
     fn bind_common(&mut self) -> Option<()> {
         if self.state.is_some() { return Some(()) }
-        self.shader_trail = self.shaders.pair_named("trail").ok();
+        self.shader_trail = self.backend.shaders.pair_named("trail").ok();
         self.poi_common.set_primitive(self.context);
         self.state = Some(None);
         Some(())
@@ -165,6 +170,7 @@ impl<'a> DrawSpacePack<'a> {
         self.state = Some(Some(ShaderState::Trail));
         Some(())
     }
+    const SLOT_POI_CB: u32 = 0;
     fn bind_poi(&mut self) -> Option<()> {
         if matches!(self.state, Some(Some(ShaderState::Poi))) {
             return Some(())
@@ -175,11 +181,30 @@ impl<'a> DrawSpacePack<'a> {
         self.state = Some(Some(ShaderState::Poi));
         Some(())
     }
+
+    pub const INIT_POI_BILLBOARDING: bool = true;
+    pub const INIT_TRAIL_COLOUR: Vec4 = Vec4::ONE;
+    fn trail_colour_neutral(&self) -> bool {
+        vec32_eq(self.trail_colour, Self::INIT_TRAIL_COLOUR)
+    }
 }
 impl DrawSpaceEntity for DrawSpacePack<'_> {
     #[inline]
     fn is_arcrender(&self) -> bool { false }
-    fn draw_trail_section(&mut self, _pack_data: &PackRenderData, _space_idx: usize, trail: &TrailRender, _lpath: LoadedTrailPath, section: TrailSectionPath) -> bool {
+    fn draw_trail_section(&mut self, pack_data: &PackRenderData, _space_idx: usize, trail: &TrailRender, lpath: LoadedTrailPath, section: TrailSectionPath) -> bool {
+        let colour = match (self.trail_colour_neutral(), pack_data.trail_draw_tint(trail, lpath, LocalContext::World)) {
+            (true, Some(tint)) => Some(tint),
+            (false, None) => Some(Self::INIT_TRAIL_COLOUR),
+            _ => None,
+        };
+        if let (Some(colour), Some(ib)) = (colour, self.poi_common.world_ib.as_ref()) {
+            let coloured = InstanceBufferData { colour, ..InstanceBufferData::IDENTITY };
+            unsafe {
+                ib.update_element_at(self.context, &coloured, 0, 0);
+            }
+            self.trail_colour = colour;
+        }
+
         if self.bind_trail().is_none() { return false }
         trail.bind_texture(self.context, self.poi_common, LocalContext::World);
         trail.draw_section(self.context, section, LocalContext::World);
@@ -187,13 +212,34 @@ impl DrawSpaceEntity for DrawSpacePack<'_> {
     }
 
     fn draw_poi(&mut self, pack_data: &PackRenderData, _space_idx: usize, poi: &PoiRender, lpath: LoadedPoiPath) -> bool {
+        let was_billboarding = mem::replace(&mut self.poi_billboarding, poi.is_billboard());
+        if was_billboarding != self.poi_billboarding {
+            let slot = 0;
+            self.backend.perspective_handler.select_billboard_cb(
+                self.context,
+                slot,
+                self.poi_billboarding,
+            );
+        }
         if self.bind_poi().is_none() { return false }
         poi.bind_texture(self.context, self.poi_common, LocalContext::World);
         poi.draw(self.context, pack_data.render_poi_bookmark + lpath.path as usize, LocalContext::World);
         true
     }
 
-    fn finish(&mut self) {}
+    fn finish(&mut self) {
+        if !self.poi_billboarding {
+            self.backend.perspective_handler.select_billboard_cb(self.context, Self::SLOT_POI_CB, true);
+        }
+        if !self.trail_colour_neutral() {
+            // reset back to default...
+            if let Some(ib) = self.poi_common.world_ib.as_ref() {
+                unsafe {
+                    ib.update_element_at(self.context, &InstanceBufferData::IDENTITY, 0, 0);
+                }
+            }
+        }
+    }
 }
 
 /// arcrender

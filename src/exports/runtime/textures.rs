@@ -702,14 +702,14 @@ impl TextureSlot {
         }
     }
 
-    pub fn get_imgui_dims(&self) -> Option<[f32; 2]> {
+    pub fn im_size(&self) -> Option<taimi_ui::im::ui::ImSize2> {
         match self {
             #[cfg(feature = "extension-nexus")]
-            Self::Nexus(t) => Some(t.size()),
+            Self::Nexus(t) => Some(t.size().cast()),
             #[cfg(feature = "texture-loader")]
             Self::Loaded(t) => {
                 let [w, h] = t.dimensions;
-                Some([w as f32, h as f32])
+                Some([w as f32, h as f32].into())
             },
             _ => None,
         }
@@ -717,7 +717,7 @@ impl TextureSlot {
     pub fn imgui_texture(&self) -> Option<ImguiTexture> {
         let id = self.resource_view().map(|resource| resource.clone());
 
-        self.get_imgui_dims().map(move |size| ImguiTexture { id, size })
+        self.im_size().map(move |size| ImguiTexture { id, size: size.cast() })
     }
 
     pub fn resource(&self) -> Option<Arc<Texture>> {
@@ -835,11 +835,10 @@ impl TextureSlot {
             Self::Inactive(tex) if tex.strong_count() > 0 =>
                 Weak::upgrade(tex).map(|tex| tex.texture_byte_size()).unwrap_or(0),
             Self::Nexus(tex) => {
-                use taimi_d3d::dx11::buffer::ShaderResourceView;
-                let bpp =
-                    Texture::format_bpp(ShaderResourceView::from_d3d_ref(&tex.resource).get_desc().Format);
-                bpp.saturating_mul(tex.width as usize)
-                    .saturating_mul(tex.height as usize)
+                let size = tex.size_u32();
+                let bytes_pixel = tex.resource().as_ref().map(|srv| Texture::format_bpp(srv.get_desc().Format)).unwrap_or(0) as u32;
+                bytes_pixel.saturating_mul(size.width)
+                    .saturating_mul(size.height) as usize
             },
             _ => 0,
         }

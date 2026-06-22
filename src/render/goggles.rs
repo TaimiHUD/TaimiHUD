@@ -8,11 +8,8 @@ use {
         settings::goggles::GogglesEnables,
         space::goggles::{self, class::ClassShared, D3dPtr},
     },
-    anyhow::Context,
-    std::{mem, thread},
     strum::VariantArray,
     taimi_hoard::lazyfmt,
-    windows::{core::Interface, Win32::Graphics::Direct3D11::ID3D11DeviceContext_Vtbl},
 };
 
 #[derive(Default)]
@@ -22,7 +19,7 @@ pub(super) struct GogglesConfig {
 }
 impl GogglesConfig {
     #[cfg(feature = "goggles2-project")]
-    pub fn draw_project_options<'ui, U>(ui: &mut U, machine: &mut RenderMachine)
+    pub fn draw_project_options<'ui, U>(&mut self, ui: &mut U, machine: &mut RenderMachine)
     where
         U: ?Sized + ImDrawWindow<'ui>,
     {
@@ -38,16 +35,14 @@ impl GogglesConfig {
             if let Some(combo) = ui.begin_combo("Project Method", preview) {
                 for &mode in ProjectMethod::VARIANTS {
                     let modename: &str = mode.into();
-                    let selected = imgui::Selectable::new(modename)
-                        .selected(selected_mode == mode)
-                        .build(ui);
+                    let selected = ui.selectable(modename, selected_mode == mode);
                     if selected {
                         new_mode = Some(mode)
                     }
                 }
                 combo.end();
             }
-            if ui.is_item_clicked_with_button(MouseButton::Right) {
+            if ui.is_item_right_clicked() {
                 new_mode = Some(Default::default());
             }
             if let Some(new_mode) = new_mode {
@@ -99,7 +94,7 @@ impl GogglesConfig {
             }
             #[cfg(taimi_debug)]
             if ui.is_item_hovered() && machine.goggles.camera.perspective_params.0 != 0.0 {
-                ui.tooltip(|| {
+                if let Some(_token) = ui.begin_tooltip() {
                     let (_h, aspect, near, far) = machine.goggles.camera.perspective_params;
                     ui.text(format!("zrange={near:?}..{far:?}({aspect})"));
                     let map_id = machine.gameplay.gameplay_map();
@@ -113,7 +108,7 @@ impl GogglesConfig {
                             ui.text(format!("floors={min}..={max}"));
                         }
                     }
-                });
+                }
             }
             if goggles::FerretResource::has_found_perspective() {
                 ui.same_line();
@@ -222,11 +217,10 @@ impl GogglesConfig {
     where
         U: ?Sized + ImDrawWindow<'ui>,
     {
-        let list = imgui::ListBox::new("lenses");
         let mut selected_lens = None;
         let mut new_selection = None;
         let mut selected_info = None;
-        if let Some(_list) = list.begin(ui) {
+        if let Some(_list) = ui.begin_listbox(c"lenses") {
             selected_lens = self.view_lens;
             for (key, info) in ClassShared::iter_ui() {
                 let ty = info.kind.tag();
@@ -238,11 +232,9 @@ impl GogglesConfig {
                 let ptr = key.as_ptr() as usize;
                 let name = format!("{ty}={ptr:#08x}");
                 let label = format!("{:?}({name}){winner}###{ptr:#08x}", info.classification);
-                let mut selected = imgui::Selectable::new(label)
-                    .selected(is_selected)
-                    .build(ui);
+                let mut selected = ui.selectable(label, is_selected);
                 if ui.is_item_hovered() {
-                    if ui.is_mouse_down(imgui::MouseButton::Left) {
+                    if ui.with_io_dyn(|io| io.button_is_down_untyped(imw::BUTTON_LMB as _)) {
                         selected = true;
                     }
                 }
@@ -257,7 +249,7 @@ impl GogglesConfig {
         if let Some(lens) = new_selection {
             self.view_lens = Some(lens);
             self.view_lens_info.clear();
-        } else if ui.is_item_clicked_with_button(MouseButton::Right) {
+        } else if ui.is_item_right_clicked() {
             self.view_lens = None;
             self.view_lens_info = String::new();
             selected_lens = None;
@@ -269,9 +261,7 @@ impl GogglesConfig {
             if let Some(combo) = ui.begin_combo("reclassify", preview) {
                 for &cls in goggles::class::BufferClass::VARIANTS {
                     let name: &str = cls.into();
-                    let selected = imgui::Selectable::new(name)
-                        .selected(info.classification == cls)
-                        .build(ui);
+                    let selected = ui.selectable(name, info.classification == cls);
                     if selected {
                         new_class = Some(Some(cls));
                     }
@@ -279,7 +269,7 @@ impl GogglesConfig {
                 combo.end();
             }
         }
-        if new_class.is_none() && ui.is_item_clicked_with_button(MouseButton::Right) {
+        if new_class.is_none() && ui.is_item_right_clicked() {
             new_class = Some(None);
         }
 

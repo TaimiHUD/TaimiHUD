@@ -141,6 +141,14 @@ impl Default for PathingSettings {
             trigger_allow_auto: TriggerKind::settings_default_auto(),
             trigger_allow_interact: TriggerKind::settings_default_interact(),
             load_simultaneous: None,
+            #[cfg(feature = "paths-lua")]
+            scripting_enable: false,
+            #[cfg(feature = "paths-lua")]
+            scripting_auto: false,
+            #[cfg(feature = "paths-lua")]
+            scripting_unsecured: false,
+            #[cfg(feature = "paths-lua")]
+            scripting_tick_rate: 1.0f32,
         }
     }
 }

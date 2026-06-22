@@ -26,7 +26,7 @@ use crate::space::engine::{Engine, SpaceEvent};
 #[cfg(feature = "goggles")]
 use {
     crate::{
-        settings::goggles::{GogglesEnables, GogglesSettings, GogglesMapDepth},
+        settings::goggles::{GogglesEnables, GogglesMapDepth},
         render::goggles as render_goggles,
     },
     std::{borrow::Cow, ops::Range},
@@ -207,17 +207,14 @@ impl PathingConfig {
             for &opt in T::VARIANTS {
                 let name: &str = opt.into();
                 if with_i18n!(name, |name| ui.selectable(name, value == opt)) {
-                    selected = Some(opt.clone());
+                    selected = Some(Some(opt.clone()));
                 }
             }
-        };
-        match selected {
-            Some(selected) => Some(Some(selected)),
-            None if ui.is_item_right_clicked() =>
+        } else if ui.is_item_right_clicked() {
             // reset to default
-                Some(None),
-            _ => None,
+            selected = Some(None);
         }
+        selected
     }
 
     fn slider_setting<'ui, U>(
@@ -281,13 +278,15 @@ impl PathingConfig {
     {
         Self::slider_opt_mult(ui, label, value, Self::RANGE_ALPHA, initial)
     }
-    fn slider_opt_mult(
-        ui: &Ui,
-        label: &str,
+    fn slider_opt_mult<'ui, U>(
+        ui: &mut U,
+        label: impl ImStrExt,
         value: f32,
         range: (f32, f32),
         initial: Option<f32>,
-    ) -> Option<Option<f32>> {
+    ) -> Option<Option<f32>> where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let value = match value {
             v if v <= 0.0 => None,
             v => Some(v),
@@ -351,11 +350,13 @@ impl PathingConfig {
         res
     }
 
-    fn toggle_setting(
-        ui: &Ui,
+    fn toggle_setting<'ui, U>(
+        ui: &mut U,
         id: &str,
         value: &mut bool,
-    ) -> Option<Option<bool>> {
+    ) -> Option<Option<bool>> where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         if with_i18n!(id, |label| ui.checkbox(&label, value)) {
             Some(Some(*value))
         } else if ui.is_item_right_clicked() {
@@ -925,7 +926,9 @@ impl PathingConfig {
     }
 
     #[cfg(feature = "paths-interact")]
-    fn draw_interaction_opts(&mut self, ui: &Ui) {
+    fn draw_interaction_opts<'ui, U>(&mut self, ui: &mut U) where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let settings =
             Self::get_pathing(|s| (s.trigger_enable, s.trigger_allow_auto, s.trigger_allow_interact));
         let Some((mut trigger_enable, trigger_allow_auto, trigger_allow_interact)) = settings else {
@@ -933,25 +936,22 @@ impl PathingConfig {
         };
         let mut settings_dirty = false;
 
-        let indent_token = {
-            ui.unindent();
-            || ui.indent()
-        };
+        ui.unindent();
         let enable_toggled = {
             let _id = ui.push_id("trigger_enable");
             ui.checkbox("", &mut trigger_enable)
         }
         .then(move || trigger_enable);
-        let mut trigger_reset = trigger_enable && ui.is_item_clicked_with_button(imgui::MouseButton::Right);
+        let mut trigger_reset = trigger_enable && ui.is_item_right_clicked();
         ui.same_line();
 
-        let interaction_tree = with_i18n!("pathing-config-interactions", |label| TreeNode::new(&label)
-            .flags(TreeNodeFlags::FRAMED)
-            .opened(false, Condition::Once)
-            .tree_push_on_open(false)
-            .push(ui));
-        trigger_reset |= ui.is_item_clicked_with_button(imgui::MouseButton::Right);
-        indent_token();
+        let interaction_tree = ui.begin_sidebar_tree_node(
+            ImCondition::startup(false),
+            c"pathing-config-interactions",
+            fl!("pathing-config-interactions"),
+        );
+        trigger_reset |= ui.is_item_right_clicked();
+        ui.indent();
 
         let mut interact_toggled = None;
         let set_interact = if let Some(_tree) = interaction_tree {
@@ -979,11 +979,11 @@ impl PathingConfig {
         }
         .then(move || auto_enabled);
         ui.same_line();
-        let autotrigger_tree = with_i18n!("pathing-config-autotrigger", |label| TreeNode::new(&label)
-            .flags(TreeNodeFlags::FRAMED)
-            .opened(false, Condition::Once)
-            .tree_push_on_open(false)
-            .push(ui));
+        let autotrigger_tree = ui.begin_sidebar_tree_node(
+            ImCondition::startup(false),
+            c"pathing-config-autotrigger",
+            fl!("pathing-config-autotrigger"),
+        );
         ui.indent();
         let set_auto = if let Some(_tree) = autotrigger_tree {
             let _id = ui.push_id("trigger_allow_auto");
@@ -1033,7 +1033,9 @@ impl PathingConfig {
             InteractMessage::RefreshSettings.try_send();
         }
     }
-    fn draw_trigger_opts(&mut self, ui: &Ui, mut setting: TriggerKind) -> Option<Option<TriggerKind>> {
+    fn draw_trigger_opts<'ui, U>(&mut self, ui: &mut U, mut setting: TriggerKind) -> Option<Option<TriggerKind>> where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let mut changed = false;
         let mut reset = false;
         for (i, flag) in TriggerKind::SETTINGS_GUI.into_iter().enumerate() {
@@ -1047,7 +1049,7 @@ impl PathingConfig {
                     flag
                 )
             });
-            if ui.is_item_clicked_with_button(imgui::MouseButton::Right) {
+            if ui.is_item_right_clicked() {
                 reset = true;
             }
         }
@@ -1095,7 +1097,7 @@ impl PathingConfig {
                 ui.checkbox_flags(&label, &mut enables, enable)
             });
             let toggled = match (toggled, enable) {
-                (false, GogglesEnables::ENABLE) if ui.is_item_clicked_with_button(imgui::MouseButton::Right) => {
+                (false, GogglesEnables::ENABLE) if ui.is_item_right_clicked() => {
                     Self::set_pathing(|s| {
                         s.space.goggles.reset_enables();
                         enables = s.space.goggles.enables();
@@ -1129,10 +1131,10 @@ impl PathingConfig {
                     Self::set_pathing(|s| s.space.goggles.obscured_distance = value);
                 }
                 if ui.is_item_hovered() {
-                    ui.tooltip(|| {
-                        ui.text(format!("{obscured_distance_effective}m @ {:.01}%", obscured_distance * 100.0));
+                    if let Some(_tt) = ui.begin_tooltip() {
+                        ui.text(im_fmt!("{obscured_distance_effective}m @ {:.01}%", obscured_distance * 100.0));
                         with_i18n!("pathing-config-goggles-distance-notice", |msg| ui.text(&msg));
-                    });
+                    }
                 }
             }
         }
@@ -1270,11 +1272,15 @@ impl PathingConfig {
         Some(())
     }
     #[cfg(feature = "goggles")]
-    fn goggles_feature_opts_all(ui: &Ui, enables: &mut GogglesEnables, enable: GogglesEnables) -> GogglesEnables {
+    fn goggles_feature_opts_all<'ui, U>(ui: &mut U, enables: &mut GogglesEnables, enable: GogglesEnables) -> GogglesEnables where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         Self::goggles_feature_opts(ui, enables, enable, enable.options_mask())
     }
     #[cfg(feature = "goggles")]
-    fn goggles_feature_opts(ui: &Ui, enables: &mut GogglesEnables, _enable: GogglesEnables, opts: GogglesEnables) -> GogglesEnables {
+    fn goggles_feature_opts<'ui, U>(ui: &mut U, enables: &mut GogglesEnables, _enable: GogglesEnables, opts: GogglesEnables) -> GogglesEnables where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let mut commit = GogglesEnables::empty();
         for (i, opt) in opts.iter().enumerate() {
             let label = Cow::Owned(format!("pathing-config-goggles-{opt}"));

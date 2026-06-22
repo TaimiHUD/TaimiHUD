@@ -1,7 +1,7 @@
 #[cfg(feature = "paths-lua")]
 use {
     super::PackLoc,
-    crate::{controller::script::pathing::LuaPackDesc, space::pack::SharedLoader},
+    crate::{controller::script::pathing::LuaPackDesc, controller::pathing::registry::SharedLoaderBox as SharedLoader},
     core::num::NonZero,
     taimi_hoard::lazyfmt,
     taimi_pack::{
@@ -958,6 +958,7 @@ impl LuaController {
         }
         .context("preparing pack.lua loader")?;
 
+        #[cfg(deleteme)]
         SpaceEvent::ScriptStart {
             generation,
             pack_idx,

@@ -8,7 +8,10 @@ use {
     taimi_pack::{category::id::CategoryId, script::lua::RuntimeLua},
 };
 use {
-    crate::controller::script::{PlugSharedData, ScriptMessage},
+    crate::controller::{
+        pathing::registry::SharedLoaderBox as SharedLoader,
+        script::{PlugSharedData, ScriptMessage},
+    },
     anyhow::Context,
     core::fmt,
     std::{
@@ -36,7 +39,7 @@ pub type LuaPackDesc = ();
 #[cfg(feature = "paths-lua")]
 pub const PACK_ENTRYPOINT: &'static str = RuntimeLua::PACK_ENTRYPOINT;
 
-pub type WeakLoader = Weak<Mutex<Box<dyn PackLoaderContext + Send + 'static>>>;
+pub type WeakLoader = Weak<tokio::sync::Mutex<Box<dyn PackLoaderContext + Send + 'static>>>;
 pub struct PackPlugShared {
     pub plug: PlugSharedData,
     pub path: PackLoc,
@@ -67,7 +70,7 @@ impl PackPlugShared {
     pub fn get_pack(&self) -> script::Result<Arc<Pack>> {
         self.pack.upgrade().context("pack unloaded")
     }
-    pub fn get_loader(&self) -> script::Result<Arc<Mutex<Box<dyn PackLoaderContext + Send + 'static>>>> {
+    pub fn get_loader(&self) -> script::Result<SharedLoader> {
         self.loader.upgrade().context("pack unloaded")
     }
 }

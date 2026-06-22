@@ -79,7 +79,7 @@ impl PathingWindowState {
             pack.draw_menu(ui);
             #[cfg(feature = "paths-lua")]
             {
-                let script_menus = pack.script_data.as_ref().map(|m| {
+                let script_menus = pack.state.plug.as_ref().map(|m| {
                     (
                         &m.plug.menus,
                         m.plug.menus.shared.read().unwrap_or_else(|e| e.into_inner()),
@@ -95,7 +95,7 @@ impl PathingWindowState {
                     drop(script_menus);
                     if let Some(clicked) = clicked {
                         if shared.menu_write(&clicked, |s| s.click_state()).is_some() {
-                            ScriptMessage::menu_clicked_pack(clicked, engine.packs.generation, pack_idx)
+                            ScriptMessage::menu_clicked_pack(clicked, 0, pack_idx.path as _)
                                 .try_send();
                         }
                     }

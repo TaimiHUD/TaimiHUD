@@ -133,12 +133,14 @@ pub enum SpaceEvent {
     GogglesClearLens,
     #[cfg(feature = "goggles")]
     RefreshEdgeScale,
+    #[cfg(deleteme)]
     #[cfg(feature = "paths-lua")]
     ScriptStart {
         generation: usize,
         pack_idx: usize,
         shared: Arc<PackPlugShared>,
     },
+    #[cfg(deleteme)]
     #[cfg(feature = "paths-lua")]
     ScriptOverrideUpdate {
         generation: usize,
@@ -148,12 +150,14 @@ pub enum SpaceEvent {
         overrides: MarkerOverridesShared,
         changed: (Option<PackKeyId>, BTreeSet<PackKeyId>),
     },
+    #[cfg(deleteme)]
     #[cfg(feature = "paths-lua")]
     ScriptCreate {
         generation: usize,
         pack_idx: usize,
         marker_path: MarkerLoc,
     },
+    #[cfg(deleteme)]
     #[cfg(feature = "paths-lua")]
     ScriptMask {
         generation: usize,
@@ -190,14 +194,14 @@ fn handle_direction_timings(mut commands: Commands, mut query: Query<(Entity, &D
     let now = Instant::now();
     for (entity, direction, mut render) in &mut query {
         let start = direction.phase.start_for_set(direction.direction.offset_set());
-        if now > direction.direction.end(start) {
+        if now > direction.direction.end(start).into_std() {
             log::trace!(
                 "Entity {} reached end after {}, despawning.",
                 entity,
                 direction.direction.duration
             );
             commands.entity(entity).despawn();
-        } else if now > direction.direction.start(start) && render.disabled {
+        } else if now > direction.direction.start(start).into_std() && render.disabled {
             log::trace!(
                 "Entity {} reached start at {}!",
                 entity,
@@ -640,6 +644,7 @@ impl Engine {
                     MarkerFeed(phase_state) => self.new_phase(phase_state).context("marker new phase")?,
                     MarkerReset(timer) => self.remove_phase(timer).context("marker remove phase")?,
                     #[cfg(feature = "paths-lua")]
+                    #[cfg(deleteme)]
                     ScriptStart { generation, pack_idx, shared } => {
                         self.packs.script_start(
                             &self.render_backend.device,
@@ -650,6 +655,7 @@ impl Engine {
                         return Ok(Some(false))
                     },
                     #[cfg(feature = "paths-lua")]
+                    #[cfg(deleteme)]
                     ScriptOverrideUpdate {
                         generation,
                         pack_idx,
@@ -667,6 +673,7 @@ impl Engine {
                         return Ok(Some(false))
                     },
                     #[cfg(feature = "paths-lua")]
+                    #[cfg(deleteme)]
                     ScriptCreate { generation, pack_idx, marker_path } => {
                         self.packs.script_create(
                             &self.render_backend.device,
@@ -677,6 +684,7 @@ impl Engine {
                         return Ok(Some(false))
                     },
                     #[cfg(feature = "paths-lua")]
+                    #[cfg(deleteme)]
                     ScriptMask { generation, pack_idx, marker_path } => {
                         self.packs.script_mask(
                             &self.render_backend.device,
@@ -1342,9 +1350,8 @@ impl Engine {
             (true, true) => 0.075,
         };
         let cull = MapFrustum::from_camera_data(
-            machine.get_fov().y,
             camera,
-            machine.get_aspect_ratio(),
+            (machine.get_aspect_ratio(), machine.get_fov().y),
             depth.start * cull_near..depth.end.min(distance_max),
         );
         (camera, depth, cull)
@@ -1638,9 +1645,8 @@ impl Engine {
                 let cull = match goggles_2pass {
                     Some((_, Some(obscured_dist))) if obscured_dist >= depth.start => {
                         cull_alt = MapFrustum::from_camera_data(
-                            machine.get_fov().y,
                             camera,
-                            machine.get_aspect_ratio(),
+                            (machine.get_aspect_ratio(), machine.get_fov().y),
                             depth.start..obscured_dist,
                         );
                         &cull_alt
@@ -1706,7 +1712,7 @@ impl Engine {
                 let near = pos.y.abs().max(depth.start);
                 // TODO: reuse obscured distance setting for this
                 let far = (depth.end - depth.start) * 0.5 + near;
-                cull_alt = MapFrustum::from_camera_data(machine.get_fov().y, cam_alt, machine.get_aspect_ratio(), near..far);
+                cull_alt = MapFrustum::from_camera_data(cam_alt, (machine.get_aspect_ratio(), machine.get_fov().y), near..far);
                 (&cam_alt, &cull_alt)
             },
             #[cfg(feature = "goggles2-project")]
@@ -1718,7 +1724,7 @@ impl Engine {
                 let near = pos.y/*.abs()*/.max(depth.start);
                 let far = depth.end - depth.start + near;
                 // TODO: slight angle adjustment for refraction or something idk how light works sorry
-                cull_alt = MapFrustum::from_camera_data(machine.get_fov().y, camera, machine.get_aspect_ratio(), near..far);
+                cull_alt = MapFrustum::from_camera_data(camera, (machine.get_aspect_ratio(), machine.get_fov().y), near..far);
                 (&camera, &cull_alt)
             },
             #[cfg(feature = "goggles2")]
@@ -2137,10 +2143,10 @@ impl Engine {
                 world: r.backing.render.metadata.model_matrix,
                 colour: glam::Vec3::ONE.extend(m.marker.opacity),
             };
-            r.backing
-                .set_and_draw(perspective_slot, &self.render_backend.device, &device_context, &[
+            let _res = r.backing
+                .set_and_draw(Self::PERSPECTIVE_SLOT, &self.render_backend.device, &device_context, &[
                     ibd,
-                ])?;
+                ]);
         }
         if !fixed_rot.is_empty() {
             let orig_billboard = core::mem::replace(
@@ -2165,9 +2171,9 @@ impl Engine {
                     world,
                     colour: glam::Vec3::ONE.extend(opacity),
                 };
-                backing.set_and_draw(perspective_slot, &self.render_backend.device, &device_context, &[
+                let _res = backing.set_and_draw(Self::PERSPECTIVE_SLOT, &self.render_backend.device, &device_context, &[
                     ibd,
-                ])?;
+                ]);
             }
 
             self.render_backend
@@ -2236,17 +2242,18 @@ impl Engine {
             // TODO: cap size and reuse one buffer here
             let vbuffer = crate::resources::Model::from_vertices(vertices)
                 .to_buffer(&self.render_backend.device)
-                .context("direction buffer")?;
+                .context("direction buffer");
+            let Some(vbuffer) = rt::log::error_ok(vbuffer) else { continue };
             let ibd = super::dx11::InstanceBufferData {
                 world: glam::Mat4::IDENTITY,
                 colour: glam::Vec3::ONE.extend(dir.direction.opacity),
             };
             // overriding vb with trail to destination, so do this manually instead of r.backing.set_and_draw()...
             let render = &r.backing.render;
-            render.update_instance_buffer(&self.render_backend.device, &device_context, &[ibd])?;
+            let _res = render.update_instance_buffer(&self.render_backend.device, &device_context, &[ibd]);
             render.set_shaders(&device_context);
-            render.set_texture(perspective_slot, &device_context);
-            taimi_d3d::dx11::VertexBuffer::set_all(&device_context, perspective_slot, &[
+            render.set_texture(Self::PERSPECTIVE_SLOT, &device_context);
+            taimi_d3d::dx11::VertexBuffer::set_all(&device_context, Self::PERSPECTIVE_SLOT, &[
                 &vbuffer,
                 render.instance_buffer(),
             ]);
@@ -2687,7 +2694,11 @@ impl Engine {
         let sender = crate::SPACE_SENDER.try_read();
         let sender = sender.as_ref().map(|s| &**s);
         if let Ok(Some(sender)) = sender {
-            let _ = sender.try_send(e);
+            let _res = sender.try_send(e);
+            #[cfg(taimi_debug)]
+            if _res.is_err() {
+                log::error!("space rx overflow!");
+            }
         }
     }
 

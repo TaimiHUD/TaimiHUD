@@ -4,6 +4,7 @@ use {
     core::{any::Any, fmt},
     std::{
         collections::BTreeMap,
+        path::Path,
         sync::{
             atomic::{AtomicUsize, Ordering},
             Arc,
@@ -18,6 +19,11 @@ use {
 };
 #[cfg(feature = "scripts-lua")]
 use {std::thread, tokio::sync::mpsc};
+#[cfg(feature = "paths-lua")]
+use {
+    crate::controller::pathing::registry::PackPath,
+    std::collections::BTreeSet,
+};
 
 pub mod debug;
 pub mod event;
@@ -243,6 +249,11 @@ pub struct PlugsShared {
     pub plugs: BTreeMap<usize, Arc<PlugShared>>,
     #[cfg(feature = "paths-lua")]
     pub packs: BTreeMap<PackLoc, Arc<PackPlugShared>>,
+    /// not loaded but could be maybe!
+    #[cfg(feature = "paths-lua")]
+    pub available_packs: BTreeSet<PackPath>,
+    #[cfg(feature = "paths-lua")]
+    pub available_plugs: BTreeSet<Arc<Path>>,
 }
 
 /// TODO: newtype? there must be other fields...

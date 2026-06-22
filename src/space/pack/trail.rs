@@ -14,6 +14,7 @@ use {
     },
     anyhow::Context,
     std::{mem, ops},
+    glam::{Vec3, Vec4},
     taimi_d3d::dx11::{buffer::VertexBuffer, prelude::*},
     taimi_hoard::loc::Locator,
     taimi_meta::{
@@ -41,6 +42,7 @@ pub struct TrailRender {
     pub section_vbuffer: Option<VertexBuffer>,
     pub section_vb_ng: Option<super::instance::TrailVertexBuffer>,
     pub vbuffer_section_end: Vec<u32>,
+    pub vertex_colour: [u8; 3],
 }
 
 impl TrailRender {
@@ -51,6 +53,7 @@ impl TrailRender {
             section_vbuffer: None,
             section_vb_ng: None,
             vbuffer_section_end: Vec::new(),
+            vertex_colour: Self::WHITE_U8,
         }
     }
 
@@ -60,6 +63,15 @@ impl TrailRender {
         geometry: LoadedTrailGeometry,
         arcrender: bool,
     ) -> anyhow::Result<()> {
+        // TODO: average colours if we ever support gradients?
+        self.vertex_colour = geometry.vertices.first()
+            .and_then(|v| match v.colour {
+                c if c.abs_diff_eq(Self::WHITE_F32.truncate(), Self::COMPONENT_THRESH) => None,
+                c => Some(c),
+            }).map(|c| {
+                let [r, g, b] = (c * 255.0).to_array();
+                [r as u8, g as u8, b as u8]
+            }).unwrap_or(Self::WHITE_U8);
         let trailv = geometry.vertices.iter()
             .map(|v| super::instance::TrailVertex::from(*v))
             .collect::<Vec<_>>();
@@ -254,6 +266,29 @@ impl TrailRender {
     pub fn is_empty(&self) -> bool {
         self.section_vbuffer.is_none() && self.vbuffer_section_end.is_empty()
     }
+
+    #[inline]
+    pub fn vertex_colour(&self) -> Vec4 {
+        (self.vertex_colour256() / 255.0f32).extend(1.0)
+    }
+    #[inline]
+    fn vertex_colour256(&self) -> Vec3 {
+        let [r, g, b] = self.vertex_colour;
+        Vec3::new(r as f32, g as f32, b as f32)
+    }
+    pub fn tint_to(&self, target: Vec4) -> Option<Vec4> {
+        if Self::WHITE_F32.abs_diff_eq(target, Self::COMPONENT_THRESH) {
+            return None
+        }
+        Some(target * 255.0 / self.vertex_colour256().extend(1.0))
+    }
+    pub const WHITE_U8: [u8; 3] = [0xffu8; 3];
+    pub const WHITE_F32: Vec4 = Vec4::ONE;
+    /// ~1/255
+    #[cfg(todo)]
+    const COMPONENT_THRESH: f32 = 4e-3f32;
+    /// ~3/255
+    const COMPONENT_THRESH: f32 = 1e-2f32;
 
     #[inline]
     pub fn cleanup_background(mut self) {

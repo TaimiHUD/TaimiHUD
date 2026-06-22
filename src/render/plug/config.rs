@@ -1,6 +1,7 @@
 #[cfg(feature = "scripts-lua")]
 use {
     crate::controller::script::lua::{LuaExecContext, LuaMessage},
+    taimi_hoard::loc::LocationRef,
     anyhow::Context,
     taimi_pack::{
         attributes::keys,
@@ -17,12 +18,12 @@ use {
         render::element::prelude::*,
     },
     core::mem,
-    std::{borrow::Cow, fs, sync::Arc},
+    std::{borrow::Cow, fs, path::PathBuf, sync::{Arc, Weak}},
     taimi_sync::watched::Watched,
 };
 
-#[cfg(all(feature = "paths", feature = "scripts-lua"))]
-use crate::space::pack::ActivePack;
+#[cfg(feature = "paths-lua")]
+use crate::controller::pathing::registry::PackPath;
 #[cfg(feature = "paths")]
 use crate::{controller::script::PackLoc, space::Engine};
 
@@ -42,8 +43,8 @@ pub struct PlugConfig<'a> {
     pub desc: &'a PlugConfigDesc,
     pub state: &'a mut PlugConfigState,
     pub scratch: &'a mut PlugConfigCache,
-    #[cfg(feature = "paths")]
-    pub engine: Option<&'a mut Engine>,
+    #[cfg(todo)]
+    pub plugs: &'a mut PlugElements,
 }
 impl<'a> PlugConfig<'a> {
     fn draw_repl<'ui, W, C>(&mut self, ui: &mut W, _context: &mut C)
@@ -118,30 +119,21 @@ impl<'a> PlugConfig<'a> {
                 if ui.selectable(c"global", matches!(target, LuaExecContext::Global)) {
                     *target = LuaExecContext::Global;
                 }
+                let plugs = self.state.plugs.get_mut();
                 #[cfg(feature = "paths")]
-                let packs = self
-                    .engine
-                    .as_ref()
-                    .into_iter()
-                    .flat_map(|e| {
-                        e.packs
-                            .loaded_packs
-                            .iter()
-                            .enumerate()
-                            .map(|(i, (_, p))| (PackLoc::new(e.packs.generation, i), p))
-                    })
-                    .filter(|(_, p)| p.has_scripts());
+                let packs = plugs
+                    .packs
+                    .iter();
                 #[cfg(feature = "paths")]
-                for (path, pack) in packs {
-                    let _id = ui.push_id(Arc::as_ptr(&pack.pack));
+                for (&path, pack) in packs {
+                    let _id = ui.push_id(Weak::as_ptr(&pack.pack));
                     if ui.selectable(
-                        im_fmt!("{}", pack.pack.name),
+                        im_fmt!("{}", pack.plug.name),
                         *target == LuaExecContext::Pack(path),
                     ) {
                         *target = LuaExecContext::Pack(path);
                     }
                 }
-                let plugs = self.state.plugs.get_mut();
                 for (&path, plug) in plugs.plugs.iter() {
                     let _id = ui.push_id(Arc::as_ptr(plug));
                     if ui.selectable(im_fmt!("{}", plug.name), *target == LuaExecContext::Plugin(path)) {
@@ -169,36 +161,36 @@ impl<'a> PlugConfig<'a> {
         W: ?Sized + ImDrawWindow<'ui>,
         C: ?Sized + DrawContext<'ui>,
     {
+        let plugs = self.state.plugs.get_mut();
         #[cfg(feature = "scripts-lua")]
+        #[cfg(todo)]
         let map_id = self.engine.as_ref().and_then(|e| e.packs.current_map);
         #[cfg(feature = "paths")]
-        let packs = self.engine.as_mut().into_iter().flat_map(|e| {
-            e.packs
-                .loaded_packs
-                .iter_mut()
-                .enumerate()
-                .map(|(i, (_, p))| (PackLoc::new(e.packs.generation, i), p))
-        });
+        let packs = plugs.packs.iter();
         #[cfg(feature = "scripts-lua")]
-        for (path, pack) in packs {
+        for (&path, pack) in packs {
+            #[cfg(deleteme)]
             if !pack.script_capable {
                 continue
             }
             let target = LuaExecContext::Pack(path);
-            let label = im_fmt!("{}", pack.pack.name);
+            let label = im_fmt!("{}", pack.plug.name);
             let node = ui.begin_tree_node_framed(
                 ImCondition::startup(false),
-                Arc::as_ptr(&pack.pack) as *const (),
+                Weak::as_ptr(&pack.pack) as *const (),
                 label,
                 true,
             );
             let Some(_node) = node else { continue };
+            #[cfg(todo)]
             if pack.has_scripts() {
                 Self::draw_cats_lua(ui, context, target, pack);
                 if ui.button(c"stop") {
                     LuaMessage::Stop { context: target }.try_send();
-                    // TODO: message instead!
-                    pack.script_data = None;
+                    #[cfg(deleteme)] {
+                        // TODO: message instead!
+                        pack.script_data = None;
+                    }
                 }
                 #[cfg(todo)]
                 {
@@ -206,6 +198,7 @@ impl<'a> PlugConfig<'a> {
                     if ui.button(c"reset") {}
                 }
                 ui.same_line();
+                #[cfg(deleteme)]
                 if ui.button(c"reset markers") {
                     let active_pois = pack
                         .active_pois
@@ -230,12 +223,12 @@ impl<'a> PlugConfig<'a> {
             } else {
                 let src = ui
                     .button(c"pack.lua")
-                    .then(|| {
-                        pack.with_loader(|l| {
-                            l.load_asset_dyn(crate::controller::script::pathing::PACK_ENTRYPOINT)
-                        })
+                    .then(||
+                        pack.get_loader().and_then(|l|
+                            l.blocking_lock().load_asset_dyn(crate::controller::script::pathing::PACK_ENTRYPOINT)
+                        )
                         .context("pack.lua")
-                    })
+                    )
                     .transpose();
                 if let Some(Some(src)) = rt::log::error_ok(src) {
                     LuaMessage::SpawnPack(
@@ -263,7 +256,7 @@ impl<'a> PlugConfig<'a> {
                         .map(|cat| &cat.full_id)
                 };
                 let id = crate::controller::script::persistence::ScriptHostPersistence::id_prefix_for_pack(
-                    &pack.pack.name[..],
+                    &pack.plug.name[..],
                 )
                 .to_string();
                 let mut changed = false;
@@ -276,18 +269,13 @@ impl<'a> PlugConfig<'a> {
                     settings.mark_dirty();
                 }
             }
-            if let Some(menus) = pack.script_data.as_ref().map(|d| &d.plug.menus) {
-                Self::draw_menus_lua(ui, context, target, menus);
-            }
-            if let (Some(shared), true) = (pack.script_data.as_ref(), pack.has_scripts()) {
-                let debug =
-                    ui.begin_tree_node_framed(ImCondition::startup(false), c"watches", c"debug", true);
-                if let Some(_node) = debug {
-                    Self::draw_watch_lua(ui, context, target, &shared.plug);
-                }
+            Self::draw_menus_lua(ui, context, target, &pack.plug.menus);
+            let debug =
+                ui.begin_tree_node_framed(ImCondition::startup(false), c"watches", c"debug", true);
+            if let Some(_node) = debug {
+                Self::draw_watch_lua(ui, context, target, &pack.plug);
             }
         }
-        let plugs = self.state.plugs.get_mut();
         for (&path, plug) in plugs.plugs.iter() {
             let target = LuaExecContext::Plugin(path);
             let label = im_fmt!("{}", &plug.name[..]);
@@ -441,6 +429,7 @@ impl<'a> PlugConfig<'a> {
         ui.unindent();
     }
     #[cfg(feature = "scripts-lua")]
+    #[cfg(todo)]
     fn draw_cats_lua<'ui, W, C>(
         ui: &mut W,
         _context: &mut C,
@@ -494,53 +483,135 @@ impl<'a> PlugConfig<'a> {
         }
         ui.unindent();
     }
-    fn draw_plugs<'ui, W, C>(&mut self, ui: &mut W, _context: &mut C)
-    where
-        W: ?Sized + ImDrawWindow<'ui>,
-        C: ?Sized + DrawContext<'ui>,
-    {
-        let plugdir = rt::addon_dir().join("Plugins");
-        ui.text(im_fmt!("{}", rt::relative_path(&plugdir).display()));
-        ui.same_line();
+    /// TODO: hack, move into script controller!
+    fn refresh_plugs(&mut self) -> anyhow::Result<impl Iterator<Item = PathBuf>> {
+        let plugdir = rt::addon_dir().join("plugins");
         let dir = match fs::read_dir(&plugdir) {
             Ok(d) => d,
             Err(e) => {
-                ui.text(im_fmt!("prob doesn't exist? {e:#}"));
-                return
+                return Err(anyhow::anyhow!("{} prob doesn't exist? {e:#}", plugdir.display()));
             },
         };
-        crate::render::RenderState::draw_open_path_button(
-            ui,
-            fl!("open-button", kind = fl!("path")),
-            &plugdir,
-        );
-        for entry in dir {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(e) => {
-                    ui.text(im_fmt!("{e:#}"));
-                    continue
-                },
-            };
-            let name = entry.file_name();
+        Ok(dir.into_iter().filter_map(|entry| {
+            let Some(entry) = rt::log::warn_ok(entry) else { return None };
             let suffix = match entry.file_type() {
                 Ok(t) if t.is_dir() => "/",
                 #[cfg(windows)]
                 Ok(t) if std::os::windows::fs::FileTypeExt::is_symlink_dir(&t) => "/",
                 _ => "",
             };
-            ui.text(im_fmt!("{}{suffix}", name.display()));
-            ui.same_line();
-            #[cfg(feature = "scripts-lua")]
-            if ui.button(c"load plug") {
-                let is_dir = !suffix.is_empty();
-                let mut path = entry.path();
-                if is_dir {
-                    path.push("init.lua");
-                }
-                LuaMessage::SpawnPlug(path).try_send();
+            let is_dir = !suffix.is_empty();
+            let mut path = entry.path();
+            if is_dir {
+                path.push("init.lua");
+            }
+            Some(path)
+        }))
+    }
+    #[cfg(feature = "paths-lua")]
+    fn refresh_packs(&mut self) -> anyhow::Result<impl Iterator<Item = PackPath>> {
+        let shared = Controller::with_sender(|s|
+            s.pathing.as_ref().map(|p| p.shared.clone())
+        ).flatten().context("pathing offline")?;
+        let packs = shared.packs.packs.borrow().iter()
+            .filter_map(|(path, pack)|
+                pack.loaded.borrow().loader.clone().map(|l| (path, l))
+            ).collect::<Vec<_>>();
+        Ok(packs.into_iter().filter_map(|(path, l)| {
+            let has = l.blocking_lock().contains_asset(crate::controller::script::pathing::PACK_ENTRYPOINT)
+                .context("detecting pack.lua");
+            rt::log::warn_ok(has).unwrap_or(false)
+                .then_some(path)
+        }))
+    }
+    fn draw_plugs<'ui, W, C>(&mut self, ui: &mut W, _context: &mut C)
+    where
+        W: ?Sized + ImDrawWindow<'ui>,
+        C: ?Sized + DrawContext<'ui>,
+    {
+        let plugdir = rt::addon_dir().join("plugins");
+        ui.text(im_fmt!("{}", rt::relative_path(&plugdir).display()));
+        ui.same_line();
+        crate::render::RenderState::draw_open_path_button(
+            ui,
+            fl!("open-button", kind = fl!("path")),
+            &plugdir,
+        );
+        ui.same_line();
+        if ui.button(c"refresh") {
+            let found_plugs = rt::log::error_ok(self.refresh_plugs());
+            if let Some(found) = found_plugs {
+                self.state.plugs.write_with(|shared| {
+                    shared.available_plugs = found.map(|p| p.into()).collect();
+                });
+            }
+            let found_packs = rt::log::error_ok(self.refresh_packs());
+            if let Some(found) = found_packs {
+                self.state.plugs.write_with(|shared| {
+                    shared.available_packs = found.map(|p| p.into()).collect();
+                });
             }
         }
+        let plugs = self.state.plugs.get_mut();
+        for path in &plugs.available_plugs {
+            #[cfg(todo)]
+            let (name, suffix) = match path.file_name() {
+                #[cfg(feature = "scripts-lua")]
+                Some(name) if name.eq_ascii("init.lua") =>
+                    (entry.parent().unwrap_or(path), "/"),
+                _ => (path, ""),
+            };
+            let (name, suffix) = (rt::relative_path(path), "");
+            ui.text(im_fmt!("{}{suffix}", name.display()));
+            ui.same_line();
+            if ui.button(c"load plug") {
+                LuaMessage::SpawnPlug((&**path).into()).try_send();
+            }
+        }
+        #[cfg(feature = "paths-lua")]
+        Controller::with_sender(|s| {
+            let packs = s.pathing.as_ref().map(|p|
+                &p.shared.packs
+            );
+            let Some(packs) = packs else { return };
+            let sharedpacks = packs.packs.borrow();
+            for path in &plugs.available_packs {
+                ui.text(im_fmt!("#{}", path.path));
+                let Some(pack) = sharedpacks.lookup_ref(path) else { continue };
+                ui.same_line();
+                ui.text(im_fmt!("{}", pack.info));
+                #[cfg(todo = "unnecessary")]
+                {
+                    // this is probably a bad idea, enjoy
+                    let loaded = pack.loaded.borrow();
+                    if let Some(unloaded) = &loaded.unloaded {
+                        ui.text(im_fmt!("{unloaded}"));
+                        continue
+                    } else if loaded.loader.is_none() {
+                        ui.text_disabled(c"unloaded");
+                        continue
+                    }
+                }
+                ui.indent();
+                if ui.button(c"pack.lua") {
+                    let loader = {
+                        let loaded = pack.loaded.borrow();
+                        loaded.loader.clone().and_then(|l| loaded.pack.clone().map(|p| (p, l)))
+                    };
+                    let asset = loader.context("unloaded")
+                        .and_then(|(p, l)| {
+                            let asset = l.blocking_lock().load_asset_dyn(crate::controller::script::pathing::PACK_ENTRYPOINT);
+                            asset
+                            .context("pack.lua")
+                            .map(move |a| (p, l, a))
+                        });
+                    if let Some((pack, loader, asset)) = rt::log::error_ok(asset) {
+                        LuaMessage::SpawnPack(pack, loader, asset, 0, path.path as _).try_send();
+                    }
+                }
+                ui.unindent();
+            }
+        });
     }
 }
 impl<'a, 'ui, W, C> Drawable<W, C> for PlugConfig<'a>

@@ -111,24 +111,25 @@ impl PathingWindowState {
         let pivot = match &mut pos {
             Some(..) => state.anchor,
             pos @ None => {
-                *pos = Some(UiVec2::from(ui.io().display_size) * 0.5);
+                *pos = Some(ui.with_io_dyn(|io| io.display_size() * 0.5).into());
                 AnchorPosition::Centre
             },
         };
         if let Some(pos) = pos.take() {
-            ui.window_prepare_pos(pos.into(), ImCondition::Startup, pivot.into());
+            ui.window_prepare_pos(pos.to_point(), ImCondition::Startup, pivot.into());
         }
         ui.window_prepare_collapsed(open.is_collapsed(), ImCondition::Startup);
+        let mut open = open.into();
         let window = with_i18n!("pathing-window", |title| ui.begin_taimi_window(
-            c"pathing-window",
+            "pathing-window",
             title,
-            ImCondition::startup(size),
+            ImCondition::startup(size.to_size()),
             &mut open,
         ));
         let visible = window.is_some();
         if let Some(_token) = window {
             size = ui.window_size().into();
-            let appearing = ui.is_window_appearing();
+            let appearing = ui.window_is_appearing();
             if appearing && self.ui_tab_pending.is_none() {
                 self.ui_tab_pending = Some(self.ui_state.tab.index());
             }
@@ -152,7 +153,7 @@ impl PathingWindowState {
         if let Some(pos) = pos {
             ui_state.window.position_abs = pos;
             ui_state.window.position_rel =
-                ui_state.window.position_abs / UiVec2::from(ui.io().display_size);
+                ui_state.window.position_abs / ui.with_io_dyn(|io| io.display_size()).to_raw();
             ui_state.set_window_size(size);
         }
         let open_prev = mem::replace(&mut ui_state.window.open, open);
@@ -173,23 +174,31 @@ impl PathingWindowState {
         let token = {
             let label = match tab {
                 #[cfg(feature = "paths-interact")]
-                PathingWindowTab::INDEX_POIS => "poiz",
+                PathingWindowTab::INDEX_POIS => c"poiz",
                 #[cfg(feature = "paths-edit")]
-                PathingWindowTab::INDEX_EDIT => "editz",
-                _ => "packz",
+                PathingWindowTab::INDEX_EDIT => c"editz",
+                _ => c"packz",
             };
             let flags = match self.ui_tab_pending {
                 Some(i) if i == tab => {
                     self.ui_tab_pending = None;
-                    imgui::TabItemFlags::SET_SELECTED
+                    match ui.imgui_version_num() {
+                        #[cfg(taimi_imgui = "180")]
+                        Some(im180::VERSION_NUM) =>
+                            Some(im180::sys::ImGuiTabItemFlags_SetSelected),
+                        #[cfg(taimi_imgui = "192")]
+                        Some(im192::VERSION_NUM) =>
+                            Some(im192::sys::ImGuiTabItemFlags_SetSelected),
+                        _ => Default::default(),
+                    }
                 },
-                _ => imgui::TabItemFlags::empty(),
+                _ => Default::default(),
             };
-            ui.tab_item_with_flags(label, None, flags)
+            ui.begin_tab_dyn(&mut {label}, None, flags)
         };
 
         if !prev & token.is_some() {
-            if ui.is_window_appearing() {
+            if ui.window_is_appearing() {
                 // first frame is wonky :<
                 return None
             }

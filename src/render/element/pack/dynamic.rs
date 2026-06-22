@@ -1,51 +1,46 @@
 use {
     super::{PackElement, PackVisibility},
     crate::{
-        controller::{
-            pathing::{
-                info::MapPackInfo,
-                registry::{
-                    LoadedMarkerPath,
-                    LoaderBox,
-                    PackCategoryInfo,
-                    PackFormat,
-                    PackIndex,
-                    PackInfo,
-                    PackInfoSignature,
-                    PackPath,
-                    PackRegistryNs,
-                    PackRoot,
-                    SharedLoaderBox,
-                },
-                shared::{
-                    PathingShared,
-                    SharedMapPackLoaded,
-                    SharedMapPackState,
-                    SharedPackConfig,
-                    SharedPackInfo,
-                    SharedPackLoad,
-                    SharedPackLoaded,
-                },
-                space::TrailGeometryRequests,
-                state::LoadedMapPack,
-                PathingEvent,
-                UnloadedReason,
+        controller::pathing::{
+            info::MapPackInfo,
+            registry::{
+                LoadedMarkerPath,
+                LoaderBox,
+                PackCategoryInfo,
+                PackFormat,
+                PackIndex,
+                PackInfo,
+                PackInfoSignature,
+                PackPath,
+                PackRegistryNs,
+                PackRoot,
+                SharedLoaderBox,
             },
-            Controller,
+            shared::{
+                PathingShared,
+                SharedMapPackLoaded,
+                SharedMapPackState,
+                SharedPackConfig,
+                SharedPackInfo,
+                SharedPackLoad,
+                SharedPackLoaded,
+            },
+            space::TrailGeometryRequests,
+            state::LoadedMapPack,
+            PathingEvent,
+            UnloadedReason,
         },
         exports::{
             runtime as rt,
             runtime::textures::{TextureKey, TextureSlot},
         },
-        render::element::im::prelude::*,
+        render::element::prelude::*,
         settings::SourceKind,
-        util::PositionInput,
         TEXTURES,
     },
     anyhow::{anyhow, Context},
     glam::Vec4,
     glamour::Point3,
-    imgui::TreeNode,
     relative_path::PathExt,
     std::{
         borrow::Cow,
@@ -72,7 +67,6 @@ use {
             CategoryPath,
             MapIndex,
             MarkerPath,
-            PoiIndex,
             PoiPath,
             SectionOfTrail,
             TrailIndex,
@@ -288,6 +282,7 @@ impl PackEdit {
             display_name: Some(str_opt_ref(&self.env.pack_cat_name).unwrap_or("packedit").into()),
             sub_categories: Default::default(),
             marker_attributes: Default::default(),
+            map_id: 0,
         };
         if self.env.pack_cat_id.is_empty() {
             self.env.pack_cat_id = self.env.pack_alloc_name.clone();
@@ -701,8 +696,8 @@ enum TrlBoop {
     Snip,
     Refresh,
 }
-pub struct DrawPe<'a, 's, 'ui> {
-    pub ui: &'a Ui<'ui>,
+pub struct DrawPe<'a, 's, 'u, U: ?Sized + 'u> {
+    pub ui: &'u mut U,
     pub state: &'s mut PackEdit,
     pub packs: &'a IndexedList<PackRegistryNs, PackIndex, [PackElement]>,
     act_pack_alloc: Option<PackPath>,
@@ -712,9 +707,11 @@ pub struct DrawPe<'a, 's, 'ui> {
     act_trl_clear: Option<(Result<TrlPath, TrailPath>, i32)>,
     act_trl_boop: Option<TrlBoop>,
 }
-impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
+impl<'a, 's, 'u, 'ui, U> DrawPe<'a, 's, 'u, U> where
+    U: ?Sized + ImDrawWindow<'ui> + 'u,
+{
     pub fn new(
-        ui: &'a Ui<'ui>,
+        ui: &'u mut U,
         state: &'s mut PackEdit,
         packs: &'a IndexedList<PackRegistryNs, PackIndex, [PackElement]>,
     ) -> Self {
@@ -754,6 +751,19 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
             self.state.update_loaded();
         }
 
+        let noblank = match self.ui.imgui_version_num() {
+            #[cfg(taimi_imgui = "180")]
+            Some(im180::VERSION_NUM) => Some(
+                imw::InputText::IM180_FLAGS_PRESET
+                | im180::sys::ImGuiInputTextFlags_CharsNoBlank
+            ),
+            #[cfg(taimi_imgui = "192")]
+            Some(im192::VERSION_NUM) => Some(
+                imw::InputText::IM192_FLAGS_PRESET
+                | im192::sys::ImGuiInputTextFlags_CharsNoBlank
+            ),
+            _ => None,
+        };
         {
             let _id = self.ui.push_id("pecat");
             let is_new_cat =
@@ -766,6 +776,7 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                         flags: Default::default(),
                         sub_categories: Default::default(),
                         marker_attributes: Default::default(),
+                        map_id: 0,
                     };
                     self.state.env.apply_attrs(&mut cat.marker_attributes);
                     self.act_new_cat = Some(cat);
@@ -864,19 +875,14 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
             }
             self.ui.same_line();
             let width = self.ui.content_region_avail()[0] * 0.45;
-            self.ui.set_next_item_width(width);
+            self.ui.item_prepare_width(width);
             self.ui
-                .input_text("##catid", &mut self.state.env.pack_cat_id)
-                .hint("id")
-                .chars_noblank(true)
-                .build();
+                .input_text_managed(c"##catid", &mut self.state.env.pack_cat_id, 64, Some(c"id"), noblank);
             if is_new_cat {
                 self.ui.same_line();
-                self.ui.set_next_item_width(width);
+                self.ui.item_prepare_width(width);
                 self.ui
-                    .input_text("##catname", &mut self.state.env.pack_cat_name)
-                    .hint("name")
-                    .build();
+                    .input_text_managed(c"##catname", &mut self.state.env.pack_cat_name, 64, Some(c"name"), None);
             }
         }
         let mpath = self.state.cursor.id;
@@ -887,13 +893,25 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
             self.state.env.pos.draw_take_current(self.ui);
             self.state.env.pos.draw_edit_manual(self.ui, false);
 
-            let colourid = "markercolour";
-            if let Some(_token) = self.ui.begin_popup(colourid) {
+            let colourid = c"markercolour";
+            if let Some(_token) = self.ui.begin_popup(colourid, Default::default()) {
                 let mut colour = self.state.env.colour.to_array();
-                if imgui::ColorPicker::new("##tint", &mut colour).build(self.ui) {
+                let label = c"##tint";
+                let changed = match self.ui.imgui_version_num() {
+                    #[cfg(taimi_imgui = "180")]
+                    Some(im180::VERSION_NUM) => unsafe {
+                        im180::sys::igColorPicker4(label.as_ptr(), colour.as_mut_ptr(), 0, core::ptr::null())
+                    },
+                    #[cfg(taimi_imgui = "192")]
+                    Some(im192::VERSION_NUM) => unsafe {
+                        im192::sys::igColorPicker4(label.as_ptr(), colour.as_mut_ptr(), 0, core::ptr::null())
+                    },
+                    _ => false,
+                };
+                if changed {
                     self.state.env.colour = colour.into();
                 }
-                if self.ui.button("ok") {
+                if self.ui.button(c"ok") {
                     self.ui.close_current_popup();
                 }
             }
@@ -908,11 +926,10 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
             let tex_selected = &self.state.env.tex_selected[..];
             if !tex_selected.is_empty() | true {
                 let label = if let Some(poi_path) = poi_path {
-                    self.ui
-                        .display_with_font(&(), &format_args!("poi#{}", poi_path.path));
-                    "save"
+                    self.ui.text(im_fmt!("poi#{}", poi_path.path));
+                    c"save"
                 } else {
-                    "poipoi"
+                    c"poipoi"
                 };
                 if self.ui.button(label) {
                     self.act_new_poi = Some(());
@@ -920,27 +937,23 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                 self.ui.same_line();
             }
             let width = self.ui.content_region_avail()[0] * 0.8;
-            self.ui.set_next_item_width(width);
+            self.ui.item_prepare_width(width);
             let texs = self
                 .ui
-                .begin_combo("##texs", str_opt_ref(tex_selected).unwrap_or("img"));
+                .begin_combo(c"##texs", str_opt_ref(tex_selected).unwrap_or("img"));
             if let Some(_token) = texs {
                 let width = self.ui.content_region_avail()[0];
-                self.ui.set_next_item_width(width);
+                self.ui.item_prepare_width(width);
                 let selected = self
                     .state
                     .env
                     .avail_textures
                     .get(tex_selected)
                     .map(|tex| tex.key.clone());
-                self.ui.set_item_default_focus();
+                self.ui.window_prepare_item_focus();
                 let manual_entry = self
                     .ui
-                    .input_text("##tex", &mut self.state.env.tex_selected)
-                    .auto_select_all(true)
-                    .enter_returns_true(true)
-                    .hint("image path")
-                    .build();
+                    .input_text_managed(c"##tex", &mut self.state.env.tex_selected, 96, Some(c"image path"), None);
                 if manual_entry {
                     self.ui.close_current_popup();
                 }
@@ -960,7 +973,7 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                                 .map(Cow::Borrowed)
                         })
                         .unwrap_or(Cow::Borrowed(&key[..]));
-                    if Selectable::new(&display).selected(selected).build(self.ui) {
+                    if self.ui.selectable(&display, selected) {
                         selection = Some(&key[..]);
                         selection_source = Some(tex.source);
                     } else if self.ui.is_item_hovered() {
@@ -981,7 +994,7 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                         }
                     }
                 }
-                if Selectable::new("fallback").build(self.ui) {
+                if self.ui.selectable(c"fallback", false) {
                     selection = Some("taimi");
                 }
                 if let Some(selection) = selection {
@@ -991,7 +1004,7 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                 }
             }
             self.ui.same_line();
-            if self.ui.button("refresh") {
+            if self.ui.button(c"refresh") {
                 self.state.refresh_textures();
             }
         }
@@ -1002,31 +1015,31 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
             let section_path = mpath.try_to::<SectionOfTrail>();
             let trail_path: Option<TrailPath> = mpath.try_to();
             let trail_root = trail_path.or(section_path.map(|p| p.root));
-            let _id = self.ui.push_id("petrail");
+            let _id = self.ui.push_id(c"petrail");
             if let Some(_section_path) = section_path {
-                if self.ui.button("refresh") {
+                if self.ui.button(c"refresh") {
                     self.act_trl_boop = Some(TrlBoop::Refresh);
                 }
                 self.ui.same_line();
-                if self.ui.button("boop") {
+                if self.ui.button(c"boop") {
                     self.act_trl_boop = Some(TrlBoop::Append);
                 }
                 self.ui.same_line();
-                if self.ui.button("reboop") {
+                if self.ui.button(c"reboop") {
                     self.act_trl_boop = Some(TrlBoop::Replace);
                 }
                 self.ui.same_line();
-                if self.ui.button("snip") {
+                if self.ui.button(c"snip") {
                     self.act_trl_boop = Some(TrlBoop::Snip);
                 }
-                if self.ui.button("end") {
+                if self.ui.button(c"end") {
                     self.state.cursor.id.path = MarkerIndex::UNK;
                 }
             } else {
-                let label = "trailing";
+                let label = c"trailing";
                 let can_commit = !self.state.env.trl_name.is_empty() || trail_path.is_some();
                 let mut commit = match can_commit {
-                    true => self.ui.button("trailing"),
+                    true => self.ui.button(c"trailing"),
                     false => {
                         self.ui.text_disabled(label);
                         false
@@ -1034,43 +1047,46 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
                 };
                 self.ui.same_line();
                 let width = self.ui.content_region_avail()[0] * 0.95;
-                self.ui.set_next_item_width(width);
+                self.ui.item_prepare_width(width);
                 commit |= self
                     .ui
-                    .input_text("##trl", &mut self.state.env.trl_name)
-                    .hint("trl")
-                    .chars_noblank(true)
-                    .enter_returns_true(true)
-                    .build();
+                    .input_text_managed(c"##trl", &mut self.state.env.trl_name, 96, Some(c"trl"), noblank);
                 if commit & can_commit {
                     self.act_new_trail = Some(());
                 }
             }
             if let (Some(trail_path), Some(map_id)) = (trail_root, self.state.env.latest_map) {
-                if self.ui.button("clear TRL") {
+                if self.ui.button(c"clear TRL") {
                     self.act_trl_clear = Some((Err(trail_path), map_id.get() as i32));
                 } else if self.ui.is_item_hovered() {
                     self.ui
-                        .tooltip_text("CLICKING HERE WILL PROBABLY NUKE A TRL FILE FROM THE PACK");
+                        .tooltip_text(c"CLICKING HERE WILL PROBABLY NUKE A TRL FILE FROM THE PACK");
                 }
             }
         }
         self.ui
-            .input_text("##tip", &mut self.state.env.tip_name)
-            .hint("tip")
-            .build();
+            .input_text_managed(c"##tip", &mut self.state.env.tip_name, 96, Some(c"tip"), None);
     }
     pub fn draw_alloc(&mut self) {
-        let _id = self.ui.push_id("pe-alloc");
-        let mut commit = self.ui.button("allocate new");
+        let _id = self.ui.push_id(c"pe-alloc");
+        let mut commit = self.ui.button(c"allocate new");
         self.ui.same_line();
+        let noblank = match self.ui.imgui_version_num() {
+            #[cfg(taimi_imgui = "180")]
+            Some(im180::VERSION_NUM) => Some(
+                imw::InputText::IM180_FLAGS_PRESET
+                | im180::sys::ImGuiInputTextFlags_CharsNoBlank
+            ),
+            #[cfg(taimi_imgui = "192")]
+            Some(im192::VERSION_NUM) => Some(
+                imw::InputText::IM192_FLAGS_PRESET
+                | im192::sys::ImGuiInputTextFlags_CharsNoBlank
+            ),
+            _ => None,
+        };
         commit |= self
             .ui
-            .input_text("##dir", &mut self.state.env.pack_alloc_name)
-            .hint("dir")
-            .chars_noblank(true)
-            .enter_returns_true(true)
-            .build();
+            .input_text_managed(c"##dir", &mut self.state.env.pack_alloc_name, 96, Some(c"dir"), noblank);
         if commit {
             if self.state.env.pack_alloc_name.is_empty() {
                 self.state.env.pack_alloc_name.push_str("packedit");
@@ -1078,35 +1094,25 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
             self.act_pack_alloc = Some(PackPath::with_path(PackIndex::MAX));
         } else if !self.state.env.pack_alloc_name.is_empty() {
             let width = self.ui.content_region_avail()[0] * 0.45;
-            self.ui.set_next_item_width(width);
+            self.ui.item_prepare_width(width);
             self.ui
-                .input_text("##packid", &mut self.state.env.pack_cat_id)
-                .hint("id")
-                .chars_noblank(true)
-                .build();
+                .input_text_managed(c"##packid", &mut self.state.env.pack_cat_id, 96, Some(c"id"), noblank);
             self.ui.same_line();
-            self.ui.set_next_item_width(width);
+            self.ui.item_prepare_width(width);
             self.ui
-                .input_text("##catname", &mut self.state.env.pack_cat_name)
-                .hint("name")
-                .build();
+                .input_text_managed(c"##catname", &mut self.state.env.pack_cat_name, 96, Some(c"name"), None);
         }
         self.draw_alloc_open();
     }
     pub fn draw_alloc_open(&mut self) {
-        let packs = TreeNode::new("otherpacks")
-            .label::<&str, _>("open")
-            .leaf(false)
-            .framed(true)
-            .tree_push_on_open(false)
-            .push(self.ui);
+        let packs = self.ui.begin_tree_node_framed(ImCondition::appear(false), c"otherpacks", c"open", false);
         if let Some(packs) = packs {
             self.ui.indent();
             for pd in self.packs.values() {
                 let _packid = self.ui.push_id(pd.state.ui_id());
-                self.ui.display_with_font(&NexusLinkFont::Ui, &pd.state.info);
+                self.ui.text_with_font(NexusLinkFont::Ui, im_fmt!("{}", &pd.state.info));
                 self.ui.same_line();
-                if self.ui.button("commandeer") {
+                if self.ui.button(c"commandeer") {
                     self.act_pack_alloc = Some(pd.state.pack_path());
                 }
             }
@@ -1439,7 +1445,9 @@ impl<'a, 's, 'ui> DrawPe<'a, 's, 'ui> {
     }
 }
 impl super::PackElements {
-    pub fn draw_dynamic(&mut self, ui: &Ui) {
+    pub fn draw_dynamic<'ui, U>(&mut self, ui: &mut U) where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let mut draw = DrawPe::new(ui, &mut self.pack_edit, self.pack_state.map_ref_as_slice());
         draw.draw();
         draw.post_draw();

@@ -67,7 +67,7 @@ use {
         spatial::{BvhShape, MintConv, TriggerBoundsInfo},
         ui::gameplay::GameplayState,
     },
-    taimi_pack::attributes::{keys, AttrString, InteractionAttributes, MarkerAttributes},
+    taimi_pack::{category::id, attributes::{cell::GetAttrDynExt, keys, AttrString, InteractionAttributes, MarkerAttributes}},
     taimi_sync::arcs::ArcPtrCmp,
     tokio::sync::{broadcast, RwLock},
     tokio_stream::wrappers::errors::BroadcastStreamRecvError as BroadcastError,
@@ -88,7 +88,7 @@ impl SpaceInteraction {
         let (radius, auto) = {
             let interaction = poi.interaction_attrs();
 
-            (interaction.trigger_range(), interaction.auto_trigger())
+            (interaction.attr_or_default_into::<keys::TriggerRange, _>(), interaction.attr_or_default_into::<keys::AutoTrigger, _>())
         };
         let bounds = TriggerBoundsInfo::new(position, radius, auto);
         Self {
@@ -104,7 +104,7 @@ impl SpaceInteraction {
         self.bounds.is_auto()
     }
     pub fn is_passive(&self, attrs: &InteractionAttributes) -> bool {
-        self.is_auto() || attrs.info().is_some() || attrs.copy_value().is_some()
+        self.is_auto() || attrs.has_attr_of::<keys::Info>() || attrs.has_attr_of::<keys::CopyValue>()
     }
     /// may display an unintrusive popup or notification, even if not allowed to auto-trigger
     pub const PASSIVE_NEARBY: TriggerKind =
@@ -181,35 +181,35 @@ impl SpaceInteraction {
     }
     pub fn interest_for(attrs: &InteractionAttributes) -> (TriggerKind, bool) {
         let mut interest = TriggerKind::empty();
-        if attrs.copy_value().is_some() {
+        if attrs.has_attr_of::<keys::CopyValue>() {
             interest.insert(TriggerKind::COPY);
         }
-        if attrs.info().is_some() {
+        if attrs.has_attr_of::<keys::Info>() {
             interest.insert(TriggerKind::INFO);
         }
-        if !attrs.reset_guids().is_empty() {
+        if attrs.has_attr_of::<keys::ResetGuid>() {
             interest.insert(TriggerKind::RESET);
         }
-        if attrs.taco_behavior.is_some() {
+        if attrs.has_attr_of::<keys::Behaviour>() {
             interest.insert(TriggerKind::BEHAVIOUR);
         }
-        if attrs.bounce_behavior.is_some() {
+        if attrs.has_attr_of::<keys::Bounce>() {
             interest.insert(TriggerKind::BOUNCE);
         }
         #[cfg(todo)]
         if !lpoi.guid.is_nil() {
             interest.insert(TriggerKind::BEHAVIOUR);
         }
-        if attrs.show_category.is_some() {
+        if attrs.has_attr_of::<keys::ShowCategory>() {
             interest.insert(TriggerKind::SHOW);
         }
-        if attrs.hide_category.is_some() {
+        if attrs.has_attr_of::<keys::HideCategory>() {
             interest.insert(TriggerKind::HIDE);
         }
-        if attrs.toggle_category.is_some() {
+        if attrs.has_attr_of::<keys::ToggleCategory>() {
             interest.insert(TriggerKind::TOGGLE);
         }
-        (interest, attrs.auto_trigger())
+        (interest, attrs.attr_or_default::<keys::AutoTrigger>().into())
     }
     pub fn is_interactive(poi: &LoadedPoi) -> bool {
         !poi.get_interaction_attrs()
@@ -583,13 +583,13 @@ impl InteractReactor {
                 log::info!("{blocked} copy");
             }
         }
-        for (id, show_hide) in attrs.category_actions() {
+        for (id, show_hide) in keys::ShowHideAction::iter_in_attrs(attrs) {
             let allowed = allowed & TriggerKind::from_show_hide_action(show_hide);
             took_action.get_or_insert_default().insert(allowed);
             if !allowed.is_empty() {
                 #[cfg(todo)]
                 let cat = show_hide.category().pivot(loaded_path.root.root);
-                let cat = id.clone();
+                let cat = id::IdNameBox::with_arcbox(id.into_owned());
                 // TODO: spawn instead to ensure it arrives?
                 events.push(PathingEvent::CategoryEnableById(
                     loaded_path.root.root,
@@ -600,7 +600,7 @@ impl InteractReactor {
                 log::info!("{blocked} {}", show_hide);
             }
         }
-        if let reset @ &[_, ..] = attrs.reset_guids() {
+        if let Some(reset) = attrs.get_attr_of::<keys::ResetGuid>() {
             let allowed = allowed & TriggerKind::RESET;
             took_action.get_or_insert_default().insert(allowed);
             if !allowed.is_empty() {
@@ -635,7 +635,7 @@ impl InteractReactor {
 
         let behaviour = match &action {
             InteractionEventAction::Dismiss(config) => Some((config.mode, config.reset_delay.into())),
-            _ => attrs.behaviour().map(|b| (b, attrs.reset_delay())),
+            _ => attrs.clone_attr_of::<keys::Behaviour>().map(|b| (b, attrs.attr_or_default::<keys::ResetLength>())),
         };
         if let Some((behaviour, reset_delay)) = behaviour {
             let organic = match action.is_natural() {
@@ -691,7 +691,7 @@ impl InteractReactor {
                         None
                     },
                     Behaviour::Taco(TacoBehaviour::ResetDelay) =>
-                        Some(Either::Right(keys::ResetLength(reset_delay).duration())),
+                        Some(Either::Right(reset_delay.duration())),
                     Behaviour::Taco(TacoBehaviour::AlwaysVisible) =>
                         Some(Either::Right(Duration::from_secs(0))),
                     Behaviour::Taco(TacoBehaviour::ResetPermanent) => {
@@ -771,7 +771,7 @@ impl InteractReactor {
             for id in ids {
                 let filter = filter::GroupConfig {
                     guid: keys::Guid::from(id.uuid),
-                    inverted: lpoi.info().filter_attrs().invert_behavior(),
+                    inverted: lpoi.info().filter_attrs().attr_or_default::<keys::InvertBehaviour>().into(),
                 };
                 if let filter::FILTER_HIDDEN = filter.is_visible(filter_state) {
                     return true
@@ -826,7 +826,7 @@ impl InteractReactor {
                 let guid = map.poi_guid_by_index(map_info, lpath);
                 let attrs = lpoi.interaction_attrs();
                 let act_auto = match self.config.trigger_allow_auto {
-                    _ if !attrs.auto_trigger() => false,
+                    _ if !attrs.attr_or_default_into::<keys::AutoTrigger, bool>() => false,
                     allow if allow.is_empty() => false,
                     allow => SpaceInteraction::interest_for(attrs).0.intersects(allow),
                 };

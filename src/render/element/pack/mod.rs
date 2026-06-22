@@ -18,13 +18,15 @@ use {
             },
             Controller,
         },
-        exports::runtime as rt,
         render::element::prelude::*,
         settings::state::ui::WindowOpen,
     },
     std::{
+        cmp,
+        collections::BinaryHeap,
         fmt::Write,
         mem,
+        num::NonZero,
         sync::{Arc, Weak},
     },
     taimi_hoard::{loc::LocationMut, str_opt, str_opt_ref},
@@ -38,6 +40,8 @@ use {
         watched::{watch, Watched, Watcher},
     },
 };
+#[cfg(feature = "scripts")]
+use crate::controller::script::pathing::PackPlugShared;
 
 #[allow(unused_imports)]
 #[cfg(feature = "paths-edit")]
@@ -183,77 +187,28 @@ impl PackElements {
             pack.pre_draw(&mut self.filter_query, visibility);
         }
     }
-    /// TODO: binary heap with real sort key
-    fn iter_packs_draw<'a, 'u, 'ui, U>(
-        ui: &'u mut U,
-        pack_state: &'a mut PackVecOf<PackElement>,
-        filtered: Option<bool>,
-        amt_hidden: &'a mut usize,
-    ) -> impl Iterator<Item = &'a mut PackElement> + 'u + 'ui
-    where
-        U: ImDrawWindow<'ui>,
-        'u: 'ui,
-        'a: 'u,
-    {
-        let mut unloaded = Vec::new();
-        let mut delayed = Vec::new();
-        let mut delayed_sep = false;
-        let mut packs = pack_state.values_mut();
-        let mut sep = None;
-        core::iter::from_fn(move || {
-            let mut next = None;
-            while let Some(pack) = packs.next() {
-                let delay = match &pack.state.unloaded {
-                    Some(UnloadedReason::Gravestone) => continue,
-                    _ if filtered.is_some() && pack.categories.filter_state.all_filtered() => true,
-                    Some(
-                        UnloadedReason::Disabled
-                        | UnloadedReason::UnknownFormat
-                        | UnloadedReason::LoadingFailed(..),
-                    ) => true,
-                    _ => false,
-                };
-                match delay {
-                    true if filtered.is_some() && pack.categories.filter_state.any_visible() =>
-                        delayed.push(pack),
-                    true => unloaded.push(pack),
-                    false => {
-                        next = Some(pack);
-                        sep = Some(false);
-                        break
-                    },
-                }
-            }
-            next.or_else(|| {
-                let delayed = delayed.pop();
-                if delayed.is_some() && sep == Some(false) && !delayed_sep {
-                    ui.separator();
-                    ui.spacing();
-                    ui.separator();
-                    delayed_sep = true;
-                }
-                delayed
-            })
-            .or_else(|| {
-                let matching = matches!(filtered, Some(true));
-                match sep {
-                    _ if unloaded.is_empty() => (),
-                    Some(false) if matching => {
-                        *amt_hidden = unloaded.len();
-                        return None
-                    },
-                    Some(false) => {
-                        ui.separator();
-                        if !delayed_sep {
-                            ui.spacing();
-                            ui.separator();
-                        }
-                        sep = Some(true);
-                    },
-                    Some(true) | None => (),
-                }
-                unloaded.pop()
-            })
+    const SORT_KEY_TRAILING: NonZero<u8> = unsafe { NonZero::new_unchecked(3) };
+    fn pack_sort_key(filtering: bool, pack: &PackElement) -> Option<NonZero<u8>> {
+        const SORT_KEY_HIDE: u8 = 0;
+        const SORT_KEY_ACTIVE: u8 = 1;
+        const SORT_KEY_PENDING: u8 = 2;
+        const SORT_KEY_TRAILING: u8 = PackElements::SORT_KEY_TRAILING.get();
+        let delay = match &pack.state.unloaded {
+            Some(UnloadedReason::Gravestone) => None,
+            _ if filtering && pack.categories.filter_state.all_filtered() => Some(true),
+            Some(
+                UnloadedReason::Disabled
+                | UnloadedReason::UnknownFormat
+                | UnloadedReason::LoadingFailed(..),
+            ) => Some(true),
+            _ => Some(false),
+        };
+        NonZero::new(match delay {
+            None => SORT_KEY_HIDE,
+            Some(true) if filtering && pack.categories.filter_state.any_visible() =>
+                SORT_KEY_PENDING,
+            Some(false) => SORT_KEY_ACTIVE,
+            Some(true) => SORT_KEY_TRAILING,
         })
     }
     pub fn draw<'ui, U>(&mut self, ui: &mut U)
@@ -269,8 +224,26 @@ impl PackElements {
         };
         let mut amt_hidden = 0;
         let mut any_packs = false;
-        let packs = Self::iter_packs_draw(ui, &mut self.pack_state, filtered, &mut amt_hidden);
-        for pack in packs {
+        let mut packs = self.pack_state.values_mut()
+            .filter_map(|v| match Self::pack_sort_key(filtered.is_some(), v) {
+                None => None,
+                Some(Self::SORT_KEY_TRAILING) if matches!(filtered, Some(true)) => {
+                    amt_hidden += 1;
+                    None
+                },
+                Some(key) => Some(cmp::Reverse((v, key))),
+            }).collect::<BinaryHeap<_>>();
+        let mut key_prev = None;
+        while let Some(cmp::Reverse((pack, key))) = packs.pop() {
+            let key_prev = mem::replace(&mut key_prev, Some(key));
+            match key_prev {
+                Some(prev) if prev != key => {
+                    ui.separator();
+                    ui.spacing();
+                    ui.separator();
+                },
+                _ => (),
+            }
             match self.context_menu {
                 Some((path, _)) if path == pack.state.pack_path() => (),
                 _ => pack.context_menu = None,
@@ -410,6 +383,35 @@ impl PackElement {
         }
     }
 }
+impl PartialOrd for PackElement {
+    #[inline]
+    fn partial_cmp(&self, rhs: &Self) -> Option<cmp::Ordering> {
+        Some(self.cmp(rhs))
+    }
+}
+impl Ord for PackElement {
+    fn cmp(&self, rhs: &Self) -> cmp::Ordering {
+        let id_name = self.state.info.category_info()
+            .and_then(|(_, i)| i.primary_root())
+            .map(|r| r.id.as_str())
+            .or_else(|| self.state.id_name())
+            .unwrap_or_else(|| &self.state.display_name[..]);
+        let id_name_rhs = rhs.state.info.category_info()
+            .and_then(|(_, i)| i.primary_root())
+            .map(|r| r.id.as_str())
+            .or_else(|| rhs.state.id_name())
+            .unwrap_or_else(|| &rhs.state.display_name[..]);
+        id_name.cmp(id_name_rhs)
+            .then(self.state.info.index.cmp(&rhs.state.info.index))
+    }
+}
+impl PartialEq for PackElement {
+    #[inline]
+    fn eq(&self, rhs: &Self) -> bool {
+        self.cmp(rhs).is_eq()
+    }
+}
+impl Eq for PackElement {}
 
 #[derive(Debug)]
 pub struct PackElementState {
@@ -420,6 +422,8 @@ pub struct PackElementState {
     pub unloaded: Option<UnloadedReason>,
     pub pack: Option<Weak<Pack>>,
     pub map_info: Option<SharedMapPackLoaded>,
+    #[cfg(feature = "scripts")]
+    pub plug: Option<Arc<PackPlugShared>>,
 
     /// info.categories is relied on too heavily atm for this to be useful
     category_flags: Option<()>,
@@ -443,6 +447,8 @@ impl PackElementState {
             unloaded: None,
             pack: None,
             map_info: None,
+            #[cfg(feature = "scripts")]
+            plug: None,
             category_flags: None,
             display_name: String::new(),
             id_name: String::new(),
@@ -505,11 +511,13 @@ impl PackElementState {
         let datasource_name = self.info.datasource.as_ref().map(|ds| &ds.path[..]);
         DrawCategoryTooltip::<()>::longest_title([display_name, file_name, datasource_name])
     }
-    pub fn ui_id(&self) -> *const () {
-        let id_name =
-            str_opt_ref(&self.id_name).or_else(|| self.info.datasource.as_ref().map(|ds| &ds.path[..]));
+    pub fn id_name(&self) -> Option<&str> {
+        let id_name = str_opt_ref(&self.id_name).or_else(|| self.info.datasource.as_ref().map(|ds| &ds.path[..]));
         //let id_name = id_name.or(str_opt_ref(&self.display_name));
         id_name
+    }
+    pub fn ui_id(&self) -> *const () {
+        self.id_name()
             .map(|n| n.as_ptr() as *const ())
             .unwrap_or(self.info.index.path as usize as *const ())
     }

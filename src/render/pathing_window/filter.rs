@@ -110,8 +110,8 @@ impl PathingWindowState {
             Some(hint),
             None,
         ));
-        let search_focus = ui.is_item_focused();
-        let search_commit = search_focus && ui.is_key_pressed(imgui::Key::Enter);
+        let search_focus = ui.item_is_focused();
+        let search_commit = search_focus && ui.with_io_dyn(|io| io.key_is_pressed_alphanum(b'\n'));
         if !self.search_state.buffer.is_empty() {
             ui.same_line();
             if ui.button("X") {
@@ -124,10 +124,10 @@ impl PathingWindowState {
                     None
                 });
             } else if ui.is_item_hovered() {
-                with_i18n!("searchbar-clear", |msg| ui.tooltip_text(msg));
+                with_i18n!("pathing-search-clear", |msg| ui.tooltip_text(msg));
             }
         }
-        if search_focus && ui.io().want_text_input {
+        if search_focus && ui.with_io_dyn(|io| io.want_text_input()) {
             self.search_focus_latch = true;
         }
         if !self.search_state.buffer.is_empty() || self.search_focus_latch {
@@ -188,21 +188,18 @@ impl PathingWindowState {
                 ui.dummy([1.0, 1.0]);
                 ui.same_line();
                 if let Some(w) = max_width {
-                    ui.set_next_item_width(w * 1.5);
+                    ui.item_prepare_width(w * 1.5);
                 }
                 with_i18n!(preview, |preview| ui.begin_combo("", &preview))
             };
             if let Some(_token) = enable_combo {
                 for choice in choices {
                     let selected = choice == enable;
-                    if with_i18n!(enable_id(choice), |label| Selectable::new(label)
-                        .selected(selected)
-                        .build(ui))
-                    {
+                    if with_i18n!(enable_id(choice), |label| ui.selectable(label, selected)) {
                         self.ui_state.filter.flags.set_enable_filter(choice);
                     }
                 }
-            } else if ui.is_item_clicked_with_button(imgui::MouseButton::Right) {
+            } else if ui.is_item_right_clicked() {
                 self.ui_state.filter.flags.set_enable_filter(None);
             }
         }

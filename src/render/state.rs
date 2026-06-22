@@ -548,9 +548,9 @@ impl RenderState {
         let window = ui.begin_window_with(c"TAIMIHUD_ALERT_AREA", None, window_flags);
         if let Some(_window) = imw::BeginVisible::pop_open(window) {
             let checkpoint = ui.cursor_pos();
-            ui.set_cursor_pos((checkpoint - Vec2::splat(1.0)));
+            ui.set_cursor_pos((checkpoint - ImVec2::splat(1.0)));
             ui.text_colored([1.0; 4], &text);
-            ui.set_cursor_pos((checkpoint + Vec2::splat(1.0)));
+            ui.set_cursor_pos((checkpoint + ImVec2::splat(1.0)));
             ui.text_colored([0.0, 0.0, 0.0, 1.0], &text);
             ui.set_cursor_pos(checkpoint);
             ui.text(text);
@@ -696,9 +696,26 @@ impl RenderState {
 
     /// per-frame state setup
     pub fn pre_render_ui(&mut self) {
+        #[cfg(feature = "scripts")]
+        {
+            self.machine.plug_ui_state.pre_render();
+        }
         #[cfg(feature = "paths")]
         {
             use crate::render::element::pack::PackVisibility;
+
+            #[cfg(feature = "scripts")]
+            if self.machine.plug_ui_state.process_dirty_for_packs() {
+                #[cfg(todo)] {
+                    self.machine.pack_ui_state.update_from(&*self.machine.plug_ui_state.plugs_rx);
+                }
+                let plugs = self.machine.plug_ui_state.plugs_rx.get_mut();
+                for (path, pack) in self.machine.pack_ui_state.pack_state.iter_mut() {
+                    let packloc = crate::controller::script::PackLoc::new(0, path.path as usize);
+                    pack.state.plug = plugs.packs.get(&packloc).cloned();
+                }
+            }
+
             self.pathing_window.pre_render();
             let visibility = self.pathing_window.window_visibility();
             let pack_visibility = self

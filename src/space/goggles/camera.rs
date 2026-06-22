@@ -298,7 +298,8 @@ impl GogglesShared {
         g2!(*&ferret.cam.snatch_camera)
     }
     pub fn wants_snatch_camera() -> bool {
-        g2!(*&ferret.cam.snatch_camera.data.w_axis.w).is_infinite()
+        let w = g2!(&raw const ferret.cam.snatch_camera.data.w_axis);
+        unsafe { (&*w).w }.is_infinite()
     }
     #[inline]
     pub fn clear_camera_found() {
@@ -326,7 +327,8 @@ impl GogglesShared {
         g2!(*&ferret.cam.snatch_perspective)
     }
     pub fn wants_snatch_camera_smooth() -> bool {
-        g2!(*&ferret.cam.snatch_camera_smooth.data.w_axis.w).is_infinite()
+        let w = g2!(&raw const ferret.cam.snatch_camera_smooth.data.w_axis);
+        unsafe { (&*w).w }.is_infinite()
     }
     #[inline]
     pub fn trip_snatch_camera_smooth() {
@@ -337,7 +339,8 @@ impl GogglesShared {
         g2!(*&ferret.cam.snatch_camera_smooth)
     }
     pub fn wants_snatch_perspective() -> bool {
-        g2!(*&ferret.cam.snatch_perspective.data.w_axis.w).is_infinite()
+        let w = g2!(&raw const ferret.cam.snatch_perspective.data.w_axis);
+        unsafe { (&*w).w }.is_infinite()
     }
     #[inline]
     pub fn clear_perspective_found() {

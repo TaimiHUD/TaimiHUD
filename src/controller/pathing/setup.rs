@@ -903,8 +903,8 @@ impl PathingController {
                             },
                             #[cfg(feature = "extension-nexus")]
                             TextureSlot::Nexus(tex) => {
-                                let srv = Some(tex.resource.clone());
-                                iunk = srv.map(Into::into);
+                                let srv = tex.resource().clone();
+                                iunk = srv.map(|srv| srv.into_d3d().into());
                                 "nexus"
                             },
                         };

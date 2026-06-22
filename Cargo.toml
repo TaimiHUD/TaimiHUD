@@ -119,6 +119,7 @@ markers-edit = [
 ]
 
 paths = [
+  "space",
   "paths-interact",
   "paths-edit",
 ]

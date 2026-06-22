@@ -54,6 +54,8 @@ use {
     },
     taimi_sync::{arcs::ArcLazyMut, watched::watch},
 };
+#[cfg(feature = "paths-filter")]
+use taimi_pack::attributes::{keys, cell::GetAttrDynExt};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PackConfig {
@@ -485,7 +487,7 @@ impl PathingController {
             };
             #[cfg(feature = "paths-filter")]
             if let Some(filter_state) = guid_filter_state {
-                let inverted = filters.as_ref().map(|f| f.invert_behavior()).unwrap_or(false);
+                let inverted: bool = filters.as_ref().and_then(|f| f.clone_attr_of::<keys::InvertBehaviour>()).unwrap_or_default().into();
                 // TODO: use GroupConfig properly here and move most of this into a method!
                 let marker_path: MarkerPath<PackPath> =
                     MarkerPath::with_parts(_lpath.root.root, _marker_path.path);

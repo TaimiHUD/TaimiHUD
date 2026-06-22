@@ -49,6 +49,7 @@ use {
     },
     taimi_pack::{
         attributes::{
+            cell::GetAttrDynExt,
             keys::{self, GetAttr},
             AttrString,
         },
@@ -247,7 +248,7 @@ impl PathingController {
                 GetAttr::<keys::IsWall>::get_attr_or_default(attrs)
                     .into_owned()
                     .into(),
-                Vec4::from(GetAttr::<keys::Tint>::get_attr_or_default(attrs).into_owned()).truncate(),
+                ltrail.render_attrs().attr_or_default_into::<keys::Tint, glam::Vec4>().truncate(),
             ))
         })
     }

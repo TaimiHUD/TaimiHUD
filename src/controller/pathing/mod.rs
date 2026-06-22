@@ -671,8 +671,8 @@ impl PathingController {
         });
     }
     #[cfg(feature = "paths-lua")]
-    fn toggle_script_enable(&self, set: Option<bool>) {
-        self.rx.enables.send_modify(|en| match set {
+    fn toggle_script_enable(&mut self, set: Option<bool>) {
+        self.rx.enables.write_with(|en| match set {
             Some(set) => en.set(PathingEnables::SCRIPTING_LUA, set),
             None => en.toggle(PathingEnables::SCRIPTING_LUA),
         });

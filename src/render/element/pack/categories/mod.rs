@@ -1064,7 +1064,7 @@ where
                         let _padding = self
                             .draw
                             .ui
-                            .push_style_var(StyleVar::ItemSpacing([f32::EPSILON, f32::EPSILON]));
+                            .push_style_item_spacing(ImVec2::splat(f32::EPSILON));
                         //self.draw.ui.spacing();
                         self.draw.ui.dummy([1.0, 1.0]);
                     }
