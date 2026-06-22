@@ -549,10 +549,7 @@ impl ConfigUpdateState {
             };
             if let Some(token) = gh_api_token {
                 BootstrapState::write_with(|state| {
-                    state.gh_api_token = match token.is_empty() {
-                        false => Some(token),
-                        true => None,
-                    };
+                    state.gh_api_token = taimi_hoard::str_opt(token);
                 });
             }
             ui.separator();
