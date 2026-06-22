@@ -89,10 +89,6 @@ impl Str0 {
     }
 
     #[inline(always)]
-    pub fn to_string(&self) -> String {
-        self.as_str().into()
-    }
-    #[inline(always)]
     pub fn to_string0(&self) -> String0 {
         unsafe { String0::from_c_string_unchecked(self.to_c_string()) }
     }
