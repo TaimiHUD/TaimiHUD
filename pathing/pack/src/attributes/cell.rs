@@ -1,5 +1,5 @@
 use {
-    crate::{attributes::keys::AttrKey, category::id::IdCmpRelaxed},
+    crate::{attributes::keys::{AttrKey, GetAttr, SetAttr}, category::id::IdCmpRelaxed},
     core::{
         borrow::{Borrow, BorrowMut},
         cmp,
@@ -1078,7 +1078,7 @@ impl SetAttrDyn for PackValueSet {
         true
     }
 }
-impl<A: AttrKey + AttrKeyValue> super::keys::GetAttr<A> for PackValueSet {
+impl<A: AttrKey + AttrKeyValue> GetAttr<A> for PackValueSet {
     fn has_attr(&self) -> bool {
         self.contains(&A::pack_key_of())
     }
@@ -1088,7 +1088,7 @@ impl<A: AttrKey + AttrKeyValue> super::keys::GetAttr<A> for PackValueSet {
             .map(PackValueOf::get)
     }
 }
-impl<A: AttrKey + AttrKeyValue> super::keys::SetAttr<A> for PackValueSet {
+impl<A: AttrKey + AttrKeyValue> SetAttr<A> for PackValueSet {
     fn set_attr(&mut self, v: A) {
         self.replace(PackValueOf::new_boxed(v).into_inner());
     }
@@ -1153,7 +1153,7 @@ impl dyn GetAttrDyn {
     pub fn imp_get_attr_dyn<A, T>(container: &T) -> Option<Cow<'_, dyn AttrKeyValue>>
     where
         A: AttrKey + AttrKeyValue,
-        T: super::keys::GetAttr<A>,
+        T: GetAttr<A>,
     {
         container.get_attr().map(|v| match v {
             Cow::Owned(v) => Cow::Owned(PackValueDyn::new_boxed_dyn(v)),
@@ -1165,6 +1165,63 @@ pub trait GetAttrDynExt {
     fn get_attr_dyn_ref_of<A: AttrKeyValue>(&self) -> Option<&A>;
     fn clone_attr_dyn_of<A: AttrKeyValue>(&self) -> Option<PackValueOf<A>>;
     fn has_attr_dyn_of<A: AttrKeyValue>(&self) -> bool;
+    #[inline]
+    fn attr_dyn_or_default<A: AttrKeyValue>(&self) -> A where
+        A: Default,
+    {
+        self.clone_attr_dyn_of::<A>().and_then(|v| v.into_value())
+            .unwrap_or_default()
+    }
+    #[inline]
+    fn attr_dyn_or_default_into<A: AttrKeyValue, T>(&self) -> T where
+        A: Default + Into<T>,
+    {
+        self.attr_dyn_or_default::<A>().into()
+    }
+
+    // these could be GetAttrExt but idk if there's a good marker trait for that...
+    #[inline]
+    fn has_attr_of<A>(&self) -> bool where
+        Self: GetAttr<A>,
+    {
+        GetAttr::<A>::has_attr(self)
+    }
+    #[inline]
+    fn get_attr_ref_of<A>(&self) -> Option<&A> where
+        Self: GetAttr<A>,
+    {
+        GetAttr::<A>::get_attr_ref(self)
+    }
+    #[inline]
+    fn get_attr_of<A>(&self) -> Option<Cow<'_, A>> where
+        Self: GetAttr<A>,
+        A: ToOwned,
+    {
+        GetAttr::<A>::get_attr(self)
+    }
+    #[inline]
+    fn clone_attr_of<A>(&self) -> Option<A::Owned> where
+        Self: GetAttr<A>,
+        A: ToOwned,
+    {
+        GetAttr::<A>::get_attr(self).map(Cow::into_owned)
+    }
+    #[inline]
+    fn attr_or_default<A>(&self) -> A::Owned where
+        Self: GetAttr<A>,
+        A: ToOwned,
+        A::Owned: Default,
+    {
+        GetAttr::<A>::get_attr_or_default(self).into_owned()
+    }
+    #[inline]
+    fn attr_or_default_into<A, T>(&self) -> T where
+        Self: GetAttr<A>,
+        A: ToOwned,
+        A::Owned: Default + Into<T>,
+    {
+        self.attr_or_default::<A>().into()
+    }
 }
 impl<T> GetAttrDynExt for T
 where
