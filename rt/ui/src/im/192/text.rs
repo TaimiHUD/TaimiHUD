@@ -136,6 +136,12 @@ impl<'ui> ImDrawText for &'_ Ui<'ui> {
         })
     }
     #[inline]
+    fn text_line_height(&self) -> f32 {
+        unsafe {
+            sys::igGetTextLineHeight()
+        }
+    }
+    #[inline]
     fn text_unformatted_dyn(&mut self, text: &mut dyn ImStr) {
         <dyn ImStr>::with_bstr(text, |text| unsafe {
             let ptr = text.as_ptr() as *const c_char;
@@ -202,6 +208,10 @@ impl<'ui> ImDrawText for Ui<'ui> {
     #[inline(always)]
     fn calc_text_size_dyn(&self, text: &mut dyn ImStr) -> ImSize2 {
         ImDrawText::calc_text_size_dyn(&self, text)
+    }
+    #[inline(always)]
+    fn text_line_height(&self) -> f32 {
+        ImDrawText::text_line_height(&self)
     }
     #[inline(always)]
     fn text_unformatted_dyn(&mut self, text: &mut dyn ImStr) {

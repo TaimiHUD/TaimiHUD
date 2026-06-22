@@ -514,6 +514,7 @@ pub type DynArgsWindow = DynFlagsContainer;
 pub type DynArgsWidgetSized = DynArgsChildWindow;
 pub type DynArgsWidget = DynFlagsContainer;
 pub type DynArgsTreeNode = DynArgsWidget;
+pub type DynArgsListbox = DynArgsWidgetSized;
 
 pub type DynArgsInput = DynArgsWidget;
 pub type DynArgsInputInt = DynArgsInput;
@@ -801,6 +802,23 @@ impl<'i> LabelledWidget<'i> for Combo {
     type Output = bool;
 }
 impl ContainerWidget for Combo {}
+
+#[derive(Debug, Copy, Clone, Default)]
+pub struct Listbox;
+impl<'i> LabelledWidget<'i> for Listbox {
+    type State = ();
+    type Args = DynArgsListbox;
+    type Output = bool;
+}
+impl ContainerWidget for Listbox {}
+impl Listbox {
+    /// bottom-right aligned
+    ///
+    /// `ImSize2::splat(f32::MAX)` equivalent to negative values?
+    pub const SIZE_MAX: ImSize2 = ImSize2::new(-1.0, -1.0);
+    /// about 7 lines tall with default item width
+    pub const SIZE_NONE: ImSize2 = ImSize2::new(0.0, 0.0);
+}
 
 #[derive(Debug, Copy, Clone, Default)]
 pub struct InputInt;
@@ -1184,6 +1202,22 @@ pub trait ImWidgetExt<'ui> {
         preview.with_imstr_dyn(|preview| self.begin_container_labelled(&Combo, label, Some(preview)))
     }
     #[inline(always)]
+    fn begin_listbox<S>(&mut self, label: S) -> Option<UiTokenDyn<'ui>>
+    where
+        for<'i> Self: ImWidgetLabelledContainer<'ui, 'i, Listbox, BeginOutput = Option<UiTokenDyn<'ui>>>,
+        S: ImStrExt,
+    {
+        self.begin_container_labelled(&Listbox, label, ())
+    }
+    #[inline(always)]
+    fn begin_listbox_sized<S>(&mut self, label: S, size: ImSize2) -> Option<UiTokenDyn<'ui>>
+    where
+        for<'i> Self: ImWidgetLabelledContainer<'ui, 'i, Listbox, BeginOutput = Option<UiTokenDyn<'ui>>>,
+        S: ImStrExt,
+    {
+        ImWidgetExt::begin_container_with(self, &Listbox, label, (), DynArgsSubContainer::new(None, Some(size)))
+    }
+    #[inline(always)]
     fn begin_menu<L>(&mut self, label: L) -> Option<UiTokenDyn<'ui>>
     where
         for<'i> Self: ImWidgetLabelledContainer<'ui, 'i, Menu, BeginOutput = Option<UiTokenDyn<'ui>>>,
@@ -1494,6 +1528,7 @@ pub trait ImDrawWidgetHost<'ui>:
     + for<'i> ImWidgetLabelledContainer<'ui, 'i, PopupModal, BeginOutput = Option<UiTokenDyn<'ui>>>
     + for<'i> ImWidgetLabelledContainer<'ui, 'i, TreeNode, BeginOutput = Option<UiTokenDyn<'ui>>>
     + for<'i> ImWidgetLabelledContainer<'ui, 'i, Combo, BeginOutput = Option<UiTokenDyn<'ui>>>
+    + for<'i> ImWidgetLabelledContainer<'ui, 'i, Listbox, BeginOutput = Option<UiTokenDyn<'ui>>>
     + for<'i> ImWidgetLabelledContainer<'ui, 'i, Menu, BeginOutput = Option<UiTokenDyn<'ui>>>
     + for<'i> ImWidgetLabelled<'ui, 'i, Selectable>
     + for<'i> ImWidgetLabelled<'ui, 'i, MenuItem>
@@ -1526,6 +1561,7 @@ impl<'ui, U: ?Sized> ImDrawWidgetHost<'ui> for U where
         + ImWidgetLabelledContainer<'ui, 'i, PopupModal, BeginOutput = Option<UiTokenDyn<'ui>>>
         + ImWidgetLabelledContainer<'ui, 'i, TreeNode, BeginOutput = Option<UiTokenDyn<'ui>>>
         + ImWidgetLabelledContainer<'ui, 'i, Combo, BeginOutput = Option<UiTokenDyn<'ui>>>
+        + ImWidgetLabelledContainer<'ui, 'i, Listbox, BeginOutput = Option<UiTokenDyn<'ui>>>
         + ImWidgetLabelledContainer<'ui, 'i, Menu, BeginOutput = Option<UiTokenDyn<'ui>>>
         + ImWidgetLabelled<'ui, 'i, Slider<f32>>
         + ImWidgetLabelled<'ui, 'i, Slider<u8>>

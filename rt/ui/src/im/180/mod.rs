@@ -229,6 +229,20 @@ impl ImIo for Io {
             io => io.WantCaptureMouse,
         }
     }
+    fn button_is_down_untyped(&self, b: usize) -> bool {
+        match self {
+            #[cfg(feature = "imgui180-rs")]
+            io => io.mouse_down.get(b).copied().unwrap_or(false),
+            #[cfg(not(feature = "imgui180-rs"))]
+            io => io.MouseDown.get(b).copied().unwrap_or(false),
+            #[cfg(todo = "unnecessary")]
+            _ => unsafe { sys::igIsMouseDown(b as sys::ImGuiMouseButton) },
+        }
+    }
+    #[inline]
+    fn button_is_pressed_untyped(&self, b: usize) -> bool {
+        unsafe { sys::igIsMouseClicked(b as sys::ImGuiMouseButton, false) }
+    }
     #[inline]
     fn key_is_down_untyped(&self, idx: usize) -> bool {
         match self {
@@ -240,9 +254,12 @@ impl ImIo for Io {
         .map(|&v| v as bool)
         .unwrap_or(false)
     }
-    /// TODO: ugly assumptions
     #[inline]
-    fn key_is_down_alphanum(&self, c: u8) -> bool {
+    fn key_is_pressed_untyped(&self, idx: usize) -> bool {
+        unsafe { sys::igIsKeyPressed(idx as i32, false) }
+    }
+    /// TODO: ugly assumptions
+    fn key_from_alphanum(&self, c: u8) -> usize {
         let key_idx = |k: sys::ImGuiKey_| {
             match self {
                 #[cfg(feature = "imgui180-rs")]
@@ -261,16 +278,38 @@ impl ImIo for Io {
             b'X' => key_idx(sys::ImGuiKey_X),
             b'Y' => key_idx(sys::ImGuiKey_Y),
             b'Z' => key_idx(sys::ImGuiKey_Z),
+            b' ' => key_idx(sys::ImGuiKey_Space),
+            b'\x08' => key_idx(sys::ImGuiKey_Backspace),
+            b'\x7f' => key_idx(sys::ImGuiKey_Delete),
+            b'\t' => key_idx(sys::ImGuiKey_Tab),
+            b'\n' => key_idx(sys::ImGuiKey_Enter),
+            b'\x1b' => key_idx(sys::ImGuiKey_Escape),
+            #[cfg(todo)]
+            self::todo => key_idx(sys::ImGuiKey_KeyPadEnter),
+            #[cfg(todo)]
+            self::todo => key_idx(sys::ImGuiKey_LeftArrow),
+            #[cfg(todo)]
+            self::todo => key_idx(sys::ImGuiKey_RightArrow),
+            #[cfg(todo)]
+            self::todo => key_idx(sys::ImGuiKey_UpArrow),
+            #[cfg(todo)]
+            self::todo => key_idx(sys::ImGuiKey_DownArrow),
+            #[cfg(todo)]
+            self::todo => key_idx(sys::ImGuiKey_Home),
+            #[cfg(todo)]
+            self::todo => key_idx(sys::ImGuiKey_End),
+            #[cfg(todo)]
+            self::todo => key_idx(sys::ImGuiKey_Insert),
             c => {
                 let keycode_a = key_idx(sys::ImGuiKey_A);
                 if let Some(keycode_0) = keycode_a.checked_sub(10) {
                     (keycode_0 + c as usize).wrapping_sub(b'0' as usize)
                 } else {
-                    return false
+                    return usize::MAX
                 }
             },
         };
-        self.key_is_down_untyped(idx)
+        idx
     }
 }
 impl ImPlatformIo for ImGuiIO {}
@@ -2062,6 +2101,9 @@ fn im180_container_end_tree_node() {
 fn im180_container_end_combo() {
     unsafe { sys::igEndCombo() }
 }
+fn im180_container_end_listbox() {
+    unsafe { sys::igListBoxFooter() }
+}
 
 impl<W: Default> Into<((W, ImVersion18000), sys::ImGuiCond)> for ImCondition {
     #[inline(always)]
@@ -2718,6 +2760,33 @@ where
             true => UiTokenDyn::empty(),
             false => unsafe { UiTokenFn::new_fn_item(&mut im180_container_end_tree_node) },
         })
+    }
+}
+impl Into<((imw::Listbox, ImVersion18000), sys::ImVec2)> for imw::DynArgsWidgetSized {
+    #[inline(always)]
+    fn into(self) -> ((imw::Listbox, ImVersion18000), sys::ImVec2) {
+        (
+            Default::default(),
+            ImSpaces(self.size().unwrap_or(imw::Listbox::SIZE_NONE)).into(),
+        )
+    }
+}
+impl<'ui, U: ?Sized, S, F> ImWidget<U> for (&'ui imw::Listbox, S, (), F)
+where
+    U: ImDraw + AsUi<'ui, Ui<'ui>>,
+    F: Into<((imw::Listbox, ImVersion18000), sys::ImVec2)>,
+    S: ImStrExt,
+{
+    //type Output = Option<imw::ContainerOpen<Combo>>;
+    type Output = Option<UiTokenDyn<'ui>>;
+    #[inline]
+    fn draw_widget(self, _ui: &mut U) -> Self::Output {
+        let (_, label, (), flags) = self;
+        let (_, size) = flags.into();
+        <dyn ImStr>::with_cstr(label, move |label| {
+            unsafe { sys::igListBoxHeader_Vec2(label.as_ptr(), size) }
+        })
+        .then(|| unsafe { UiTokenFn::new_fn_item(&mut im180_container_end_listbox) })
     }
 }
 impl Into<((imw::Combo, ImVersion18000), sys::ImGuiComboFlags)> for imw::DynArgsWidget {

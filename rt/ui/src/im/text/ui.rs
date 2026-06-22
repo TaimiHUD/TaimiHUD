@@ -91,6 +91,7 @@ impl<'ui, U: ?Sized + ImDrawTextStack<'ui> + ImDrawText> UiTextExt<'ui> for U {}
 
 pub trait ImDrawText: ImDraw {
     fn calc_text_size_dyn(&self, text: &mut dyn ImStr) -> ImSize2;
+    fn text_line_height(&self) -> f32;
     fn text_unformatted_dyn(&mut self, text: &mut dyn ImStr);
     fn text_wrapped_dyn(&mut self, text: &mut dyn ImStr);
 
@@ -153,6 +154,9 @@ pub trait ImDrawTextExt: ImDrawText {
     #[inline(always)]
     fn calc_text_size<S: ImStrExt>(&self, mut text: S) -> ImSize2 {
         text.with_imstr_dyn(|text| self.calc_text_size_dyn(text))
+    }
+    fn text_line_height_with_spacing(&self) -> f32 {
+        self.text_line_height() + self.with_style_dyn(|style| style.item_spacing().height)
     }
     #[inline(always)]
     fn text_wrapped<S: ImStrExt>(&mut self, mut text: S) {

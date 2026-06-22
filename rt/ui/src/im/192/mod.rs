@@ -204,13 +204,42 @@ impl ImIo for ImGuiIO {
         self.WantCaptureMouse
     }
     #[inline]
+    fn button_is_down_untyped(&self, b: usize) -> bool {
+        #[cfg(todo = "unnecessary")]
+        return unsafe { sys::igIsMouseDown(b as sys::ImGuiMouseButton) };
+        self.MouseDown.get(b).copied().unwrap_or(false)
+    }
+    #[inline]
+    fn button_is_pressed_untyped(&self, b: usize) -> bool {
+        #[cfg(todo = "unnecessary")]
+        return unsafe { sys::igIsMouseClicked_Bool(b as sys::ImGuiMouseButton, false) };
+        let Some(true) = self.MouseDown.get(b) else { return false };
+        unsafe {
+            *self.MouseDownDuration.get_unchecked(b) == 0.0
+        }
+    }
+    #[inline]
     fn key_is_down_untyped(&self, idx: usize) -> bool {
         self.KeysData.get(idx).map(|state| state.Down).unwrap_or(false)
     }
     #[inline]
-    fn key_is_down_alphanum(&self, c: u8) -> bool {
-        let idx = (sys::ImGuiKey_0 as usize + c.to_ascii_uppercase() as usize).wrapping_sub(b'0' as usize);
-        self.key_is_down_untyped(idx)
+    fn key_is_pressed_untyped(&self, idx: usize) -> bool {
+        #[cfg(todo = "unnecessary")]
+        return unsafe { sys::igIsKeyPressed_Bool(idx, false) };
+        self.KeysData.get(idx).map(|state| state.Down && state.DownDuration == 0.0).unwrap_or(false)
+    }
+    #[inline]
+    /// TODO: more mappings (see also im180)
+    fn key_from_alphanum(&self, c: u8) -> usize {
+        match c {
+            b' ' => sys::ImGuiKey_Space as usize,
+            b'\x08' => sys::ImGuiKey_Backspace as usize,
+            b'\x7f' => sys::ImGuiKey_Delete as usize,
+            b'\t' => sys::ImGuiKey_Tab as usize,
+            b'\n' => sys::ImGuiKey_Enter as usize,
+            b'\x1b' => sys::ImGuiKey_Escape as usize,
+            c => (sys::ImGuiKey_0 as usize + c.to_ascii_uppercase() as usize).wrapping_sub(b'0' as usize),
+        }
     }
 }
 impl ImPlatformIo for ImGuiPlatformIO {}
@@ -1994,6 +2023,9 @@ fn im192_container_end_tree_node() {
 fn im192_container_end_combo() {
     unsafe { sys::igEndCombo() }
 }
+fn im192_container_end_listbox() {
+    unsafe { sys::igEndListBox() }
+}
 
 impl<W: Default> Into<((W, ImVersion19200), sys::ImGuiCond)> for ImCondition {
     #[inline(always)]
@@ -2610,6 +2642,31 @@ where
             true => UiTokenDyn::empty(),
             false => unsafe { UiTokenFn::new_fn_item(&mut im192_container_end_tree_node) },
         })
+    }
+}
+impl Into<((imw::Listbox, ImVersion19200), sys::ImVec2)> for imw::DynArgsWidgetSized {
+    #[inline(always)]
+    fn into(self) -> ((imw::Listbox, ImVersion19200), sys::ImVec2) {
+        (
+            Default::default(),
+            ImSpaces(self.size().unwrap_or(imw::Listbox::SIZE_NONE)).into(),
+        )
+    }
+}
+impl<'ui, S, F> ImWidget<Ui<'ui>> for (&'ui imw::Listbox, S, (), F)
+where
+    F: Into<((imw::Listbox, ImVersion19200), sys::ImVec2)>,
+    S: ImStrExt,
+{
+    type Output = Option<UiTokenDyn<'ui>>;
+    #[inline]
+    fn draw_widget(self, _ui: &mut Ui<'ui>) -> Self::Output {
+        let (_, label, (), flags) = self;
+        let (_, size) = flags.into();
+        <dyn ImStr>::with_cstr(label, move |label| {
+            unsafe { sys::igBeginListBox(label.as_ptr(), size) }
+        })
+        .then(|| unsafe { UiTokenFn::new_fn_item(&mut im192_container_end_listbox) })
     }
 }
 impl Into<((imw::Combo, ImVersion19200), sys::ImGuiComboFlags)> for imw::DynArgsWidget {

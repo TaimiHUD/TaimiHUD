@@ -48,6 +48,7 @@ pub mod prelude {
                 ImContextStateExt as _,
                 ImDrawIo,
                 ImIo,
+                ImIoExt as _,
                 ImPlatformIo,
                 ImUi,
                 ImUiContextExt as _,

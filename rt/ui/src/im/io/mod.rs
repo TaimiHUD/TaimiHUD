@@ -242,7 +242,10 @@ pub trait ImIo {
     fn want_capture_mouse(&self) -> bool;
     fn want_capture_keyboard(&self) -> bool;
     fn key_is_down_untyped(&self, c: usize) -> bool;
-    fn key_is_down_alphanum(&self, c: u8) -> bool;
+    fn key_is_pressed_untyped(&self, c: usize) -> bool;
+    fn key_from_alphanum(&self, c: u8) -> usize;
+    fn button_is_down_untyped(&self, b: usize) -> bool;
+    fn button_is_pressed_untyped(&self, b: usize) -> bool;
 }
 impl ImIo for () {
     fn display_size(&self) -> ImSize2<f32> {
@@ -263,8 +266,33 @@ impl ImIo for () {
     fn key_is_down_untyped(&self, _: usize) -> bool {
         false
     }
-    fn key_is_down_alphanum(&self, _: u8) -> bool {
+    fn key_is_pressed_untyped(&self, _: usize) -> bool {
         false
+    }
+    fn key_from_alphanum(&self, _: u8) -> usize {
+        0
+    }
+    fn button_is_down_untyped(&self, _: usize) -> bool {
+        false
+    }
+    fn button_is_pressed_untyped(&self, _: usize) -> bool {
+        false
+    }
+}
+pub trait ImIoExt {
+    fn key_is_pressed_alphanum(&self, c: u8) -> bool;
+    fn key_is_down_alphanum(&self, c: u8) -> bool;
+}
+impl<T> ImIoExt for T where
+    T: ?Sized + ImIo,
+{
+    #[inline]
+    fn key_is_pressed_alphanum(&self, c: u8) -> bool {
+        self.key_is_pressed_untyped(self.key_from_alphanum(c))
+    }
+    #[inline]
+    fn key_is_down_alphanum(&self, c: u8) -> bool {
+        self.key_is_down_untyped(self.key_from_alphanum(c))
     }
 }
 /// TODO

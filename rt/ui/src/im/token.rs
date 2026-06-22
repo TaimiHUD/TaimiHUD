@@ -571,6 +571,13 @@ impl<'ui> Drop for UiTokenDyn<'ui> {
         unsafe { self.token.token_pop_mut_unchecked() }
     }
 }
+impl fmt::Debug for UiTokenDyn<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("UiTokenDyn")
+            .field(&(&*self.token as *const dyn UiToken))
+            .finish()
+    }
+}
 /// marker trait for a [UiToken] that pops itself on drop
 ///
 /// see also: [UiTokenGuard], [ImGuard]

@@ -159,6 +159,12 @@ impl<'ui> ImDrawText for &'_ Ui<'ui> {
             out.assume_init()
         })
     }
+    #[inline]
+    fn text_line_height(&self) -> f32 {
+        unsafe {
+            sys::igGetTextLineHeight()
+        }
+    }
     #[cfg(todo)]
     fn text_unformatted_dyn(&mut self, text: &mut dyn ImStr) {
         <dyn ImStr>::display_to(text, &mut |text| unsafe {
@@ -243,6 +249,10 @@ impl<'ui> ImDrawText for Ui<'ui> {
     #[inline(always)]
     fn calc_text_size_dyn(&self, text: &mut dyn ImStr) -> ImSize2 {
         ImDrawText::calc_text_size_dyn(&self, text)
+    }
+    #[inline(always)]
+    fn text_line_height(&self) -> f32 {
+        ImDrawText::text_line_height(&self)
     }
     #[inline(always)]
     fn text_unformatted_dyn(&mut self, text: &mut dyn ImStr) {
