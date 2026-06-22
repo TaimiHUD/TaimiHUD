@@ -46,8 +46,13 @@ use crate::exports::runtime::textures::TextureKey;
 use crate::marker::format::MarkerSet;
 #[cfg(feature = "extension-nexus")]
 use crate::render::machine::FrameState;
+#[cfg(feature = "paths")]
+use crate::render::{
+    message_window::{MessageAttrValue, MessageItemDesc, MessageKey, MessageWindowState},
+    PathingWindowState,
+};
 #[cfg(feature = "space")]
-use crate::{render::PathingWindowState, space::Engine};
+use crate::space::Engine;
 
 pub enum RenderEvent {
     TimerData(Vec<Arc<TimerFile>>),
@@ -60,6 +65,25 @@ pub enum RenderEvent {
     AlertStart(TextAlert),
     AlertEnd(Arc<TimerFile>),
     AlertNotify(String, Option<core::time::Duration>),
+    #[cfg(feature = "paths")]
+    MessageInfo {
+        key: MessageKey,
+        item: MessageItemDesc,
+    },
+    #[cfg(feature = "paths")]
+    #[cfg(todo = "unused")]
+    MessageUpdateAttr {
+        key: MessageKey,
+        item: MessageAttrValue,
+    },
+    #[cfg(feature = "paths")]
+    MessageDismiss {
+        key: MessageKey,
+    },
+    #[cfg(feature = "paths")]
+    MessageDismissMatching {
+        filter: Box<dyn for<'a> FnMut(&'a MessageKey) -> bool + Send>,
+    },
     ClipboardSend(String, Option<String>),
     ContextMenuOpen {
         menus: TaimiControls,
@@ -128,10 +152,12 @@ pub struct RenderState {
     pub edit_marker_window: EditMarkerWindowState,
     #[cfg(feature = "markers")]
     pub marker_window: MarkerWindowState,
-    #[cfg(feature = "space")]
+    #[cfg(feature = "paths")]
     pub pathing_window: PathingWindowState,
     #[cfg(feature = "paths")]
     pub pathing_menu_open: bool,
+    #[cfg(feature = "paths")]
+    pub message_window: MessageWindowState,
     pub(super) timer_window: TimerWindowState,
     receiver: Receiver<RenderEvent>,
     alert: Option<TextAlert>,
@@ -165,10 +191,12 @@ impl RenderState {
             edit_marker_window: EditMarkerWindowState::new(),
             #[cfg(feature = "markers")]
             marker_window: MarkerWindowState::new(),
-            #[cfg(feature = "space")]
+            #[cfg(feature = "paths")]
             pathing_window: PathingWindowState::new(),
             #[cfg(feature = "paths")]
             pathing_menu_open: false,
+            #[cfg(feature = "paths")]
+            message_window: MessageWindowState::new(),
             state_errors: Default::default(),
         }
     }
@@ -258,6 +286,23 @@ impl RenderState {
                     },
                     AlertReset(timer) => {
                         self.timer_window.remove_phase(&timer);
+                    },
+                    #[cfg(feature = "paths")]
+                    MessageInfo { key, item } => {
+                        self.message_window.register_item_with_ui(ui, key, item);
+                    },
+                    #[cfg(feature = "paths")]
+                    #[cfg(todo = "unused")]
+                    MessageUpdateAttr { key, item } => {
+                        self.message_window.update_item_attr(&key, item);
+                    },
+                    #[cfg(feature = "paths")]
+                    MessageDismiss { key } => {
+                        self.message_window.remove_item(&key);
+                    },
+                    #[cfg(feature = "paths")]
+                    MessageDismissMatching { filter } => {
+                        self.message_window.clear_items_matching(filter);
                     },
                     #[cfg(any(feature = "markers", feature = "space"))]
                     UiMapOpen(open) =>
@@ -365,9 +410,13 @@ impl RenderState {
         self.marker_window.draw(ui);
         #[cfg(feature = "markers-edit")]
         self.edit_marker_window.draw(ui);
-        #[cfg(feature = "space")]
+        #[cfg(feature = "paths")]
         self.pathing_window
             .draw(ui, &mut self.machine, self.engine.as_mut());
+        #[cfg(feature = "paths")]
+        if self.message_window.pre_draw() {
+            self.message_window.draw_window(ui);
+        }
         self.draw_context_menu(ui);
         let mut items_to_delete = Vec::new();
         for (entry_name, errory) in &self.state_errors {
@@ -388,6 +437,13 @@ impl RenderState {
         }
 
         true
+    }
+    fn post_draw<'ui, U>(&mut self, _ui: &mut U, _context: DrawContextInput<'ui>)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        #[cfg(feature = "paths")]
+        self.message_window.post_render();
     }
     pub fn marker_icon<'ui, U>(ui: &mut U, height: Option<f32>, marker: &MarkerType)
     where
@@ -579,9 +635,9 @@ impl RenderState {
         let window = ui.begin_window_with(c"TAIMIHUD_ALERT_AREA", None, window_flags);
         if let Some(_window) = imw::BeginVisible::pop_open(window) {
             let checkpoint = ui.cursor_pos();
-            ui.set_cursor_pos((checkpoint - Vec2::splat(1.0)));
+            ui.set_cursor_pos((checkpoint - ImVec2::splat(1.0)));
             ui.text_colored([1.0; 4], &text);
-            ui.set_cursor_pos((checkpoint + Vec2::splat(1.0)));
+            ui.set_cursor_pos((checkpoint + ImVec2::splat(1.0)));
             ui.text_colored([0.0, 0.0, 0.0, 1.0], &text);
             ui.set_cursor_pos(checkpoint);
             ui.text(text);
@@ -727,10 +783,33 @@ impl RenderState {
 
     /// per-frame state setup
     pub fn pre_render_ui(&mut self) {
+        #[cfg(feature = "scripts")]
+        {
+            self.machine.plug_ui_state.pre_render();
+            self.primary_window.plug_state.applicable = self.machine.plug_ui_state.enabled;
+        }
         #[cfg(feature = "paths")]
         {
             use crate::render::element::pack::PackVisibility;
+
+            #[cfg(feature = "scripts")]
+            if self.machine.plug_ui_state.process_dirty_for_packs() {
+                use crate::controller::script::PackScriptPath;
+                #[cfg(todo)]
+                {
+                    self.machine
+                        .pack_ui_state
+                        .update_from(&*self.machine.plug_ui_state.plugs_rx);
+                }
+                let plugs = self.machine.plug_ui_state.plugs_rx.get_mut();
+                for (path, pack) in self.machine.pack_ui_state.pack_state.iter_mut() {
+                    let path: PackScriptPath = path.pivot_from();
+                    pack.state.plug = plugs.packs.get(&path).cloned();
+                }
+            }
+
             self.pathing_window.pre_render();
+            self.message_window.pre_render();
             let visibility = self.pathing_window.window_visibility();
             let pack_visibility = self
                 .pathing_window
@@ -870,6 +949,7 @@ impl RenderState {
             state.shutdown();
             lock.take();
         } else {
+            state.post_draw(ui, context);
             let render_slot = (match () {
                 #[cfg(feature = "space")]
                 () => &mut state.engine,

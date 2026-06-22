@@ -24,7 +24,7 @@ use {
 use {
     crate::{
         controller::Controller,
-        exports::runtime::{self as rt, imgui, statistics::MetricsSwitch},
+        exports::runtime::{self as rt, statistics::MetricsSwitch},
         render::RenderState,
         settings::Settings,
     },
@@ -52,6 +52,8 @@ pub use self::{
     mumblelink::{MumblelinkFrames, MumblelinkTick},
     tasks::{RenderTask, RenderTaskPriority, RenderTaskQueue},
 };
+#[cfg(feature = "scripts")]
+use crate::render::plug::PlugElements;
 
 mod diag;
 mod map;
@@ -130,6 +132,8 @@ pub struct RenderMachine {
     pub pathing: Option<Arc<PathingShared>>,
     #[cfg(feature = "paths")]
     pub pack_ui_state: PackElements,
+    #[cfg(feature = "scripts")]
+    pub plug_ui_state: PlugElements,
     pub metrics_switch: MetricsSwitch,
     pub metrics_checkpoint: Option<Instant>,
     pub metrics_checkpoint_render: Option<Instant>,
@@ -217,6 +221,8 @@ impl RenderMachine {
             pathing: None,
             #[cfg(feature = "paths")]
             pack_ui_state: PackElements::default(),
+            #[cfg(feature = "scripts")]
+            plug_ui_state: PlugElements::default(),
             metrics_switch: Default::default(),
             metrics_checkpoint: Default::default(),
             metrics_checkpoint_render: Default::default(),

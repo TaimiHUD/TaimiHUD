@@ -63,9 +63,12 @@ struct MarkerInput {
 };
 #define FADE_RESOLUTION_NEAR 8.0f
 #define FADE_RESOLUTION_FAR 4.0f
-#define GET_FADE_START(f) (GET_PAIR0f(f) / FADE_RESOLUTION_NEAR)
+#define GET_FADE_START(f) (GET_PAIR0f(f) * FADE_RESOLUTION_NEAR)
 //#define GET_FADE_RANGE(f, start) (GET_FADE_FAR(f) - start)
-#define GET_FADE_RANGE(f, _start) (GET_PAIR1f(f) / FADE_RESOLUTION_FAR)
+#define GET_FADE_RANGE(f, _start) (GET_PAIR1f(f) * FADE_RESOLUTION_FAR)
+//#define GET_FADE_SCALE(f, _start) (RECIP(GET_FADE_RANGE(f, _start)))
+#define FADE_SCALE_FAR (1.0f / FADE_RESOLUTION_FAR)
+#define GET_FADE_SCALE(f, _start) (FADE_SCALE_FAR / GET_PAIR1f(f))
 
 struct TrailInputV {
     float3 position: POSITION;
@@ -255,3 +258,9 @@ static const float DepthBiasMin = -DepthBiasMax;
 #define MAD(v, m, a) ((v) * (m) + (a))
 //#define RECIP(v) (rcp(v))
 #define RECIP(v) (1.0 / (v))
+// pow() is undefined for negative values - even if exponent is a whole number (depending on implementation?)
+#define POWMAG(v, e) (sign(v) * pow(abs(v), e))
+//#define POW3(v) POWMAG(v, 3)
+#define POW3(v) ((v) * (v) * (v))
+//#define POW2(v) (pow(abs(v), 2))
+#define POW2(v) ((v) * (v))

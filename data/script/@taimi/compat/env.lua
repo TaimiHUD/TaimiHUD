@@ -110,6 +110,20 @@ function Context.pack_for_pack(pack_info_key, Pack, genv)
 			rawset(genv, "Teh", nil)
 		elseif src == "scripts/Utility/Throw Helper" and genv.HMP ~= nil then
 			ok, res = pcall(assets.Require, assets, "scripts/General/Throw Helper.lua")
+		elseif src == "Data/TehsTrails/Scripts/skyscaleinfo.lua" and genv.Teh ~= nil then
+			-- Teh.triggerRangeReduced does not exist and breaks a condition guard
+			-- causes marker+prefs updates every tick if not fixed
+			ok = true
+			res = assets:Require(src)
+			if genv.Teh.skyscale ~= nil then
+				local typo_mt = {}
+				function typo_mt:__index(k)
+					if k == "triggerRangeReduced" then
+						return rawget(self, "skyscale")[k]
+					end
+				end
+				setmetatable(genv.Teh, typo_mt)
+			end
 		end
 		return ok, res
 	end
@@ -265,22 +279,60 @@ function Context.env_for_pack(pack_info, genv, out)
 	local menus = require"@taimi/compat/menu"
 	out.World = {
 		[pack_info_key] = Taimi.ctx.plug,
-		PathableByGuid = function(t, ...) return t[pack_info_key]:GetWorldHandle():PathableByGuid(...) end,
-		PathablesByGuid = function(t, ...) return t[pack_info_key]:GetWorldHandle():PathablesByGuid(...) end,
 		GetClosestMarker = function(t, ...) return t[pack_info_key]:GetSpaceHandle():GetClosestMarker(...) end,
 		GetClosestMarkers = function(t, ...) return t[pack_info_key]:GetSpaceHandle():GetClosestMarkers(...) end,
 	}
-	function out.World:TrailByGuid(...)
+	local function lookup_map_filter(pack_info)
+		local Mumble = require"@taimi/core/mumblelink".Mumble
+		if Mumble.IsAvailable then
+			return Mumble.CurrentMap.Id
+		else
+			return nil
+		end
+	end
+	function out.World:PathablesByGuid(guid)
 		local pack_info = self[pack_info_key]
-		local trail = pack_info:GetWorldHandle():TrailByGuid(...)
+		local markers = pack_info:GetWorldHandle():PathablesByGuid(guid, lookup_map_filter(pack_info))
+		if markers ~= nil then
+			for i,marker in ipairs(markers) do
+				local targetty = marker.PathableTagType
+				if targetty == pois.Poi.tag_type then
+					markers[i] = pois.Poi.wrap(marker)
+				elseif targetty == trails.Trail.tag_type then
+					markers[i] = trails.Trail.wrap(marker)
+				else
+					-- TODO: if rt.is_debug_idk then error("unrecognized marker type tag") end
+				end
+			end
+		end
+		return markers
+	end
+	function out.World:PathableByGuid(guid)
+		local pack_info = self[pack_info_key]
+		local marker = pack_info:GetWorldHandle():PathableByGuid(guid, lookup_map_filter(pack_info))
+		if marker ~= nil then
+			local targetty = marker.PathableTagType
+			if targetty == pois.Poi.tag_type then
+				marker = pois.Poi.wrap(marker)
+			elseif targetty == trails.Trail.tag_type then
+				marker = trails.Trail.wrap(marker)
+			else
+				-- TODO: if rt.is_debug_idk then error("unrecognized marker type tag") end
+			end
+		end
+		return marker
+	end
+	function out.World:TrailByGuid(guid)
+		local pack_info = self[pack_info_key]
+		local trail = pack_info:GetWorldHandle():TrailByGuid(guid, lookup_map_filter(pack_info))
 		if trail ~= nil then
 			trail = trails.Trail.wrap(trail, pack_info)
 		end
 		return trail
 	end
-	function out.World:MarkerByGuid(...)
+	function out.World:MarkerByGuid(guid)
 		local pack_info = self[pack_info_key]
-		local poi = pack_info:GetWorldHandle():MarkerByGuid(...)
+		local poi = pack_info:GetWorldHandle():MarkerByGuid(guid, lookup_map_filter(pack_info))
 		if poi ~= nil then
 			poi = pois.Poi.wrap(poi, pack_info)
 		end

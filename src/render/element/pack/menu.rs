@@ -45,7 +45,7 @@ where
     U: ?Sized + ImDrawWindow<'ui> + 'u,
 {
     /// TODO: split this up (lifetime woes)
-    pub fn draw_menu(&mut self) {
+    pub fn draw_menu(&mut self, unfiltered: bool) {
         let _id = self.ui.push_id(self.state.ui_id());
         let categories = match self.state.unloaded.as_ref() {
             None if self.state.pack.is_some() => self.categories.map(|state| {
@@ -55,6 +55,7 @@ where
                 if self.last_menu_open.is_some() {
                     cats.act_open.reserve(0x10);
                 }
+                cats.unfiltered = unfiltered;
                 cats
             }),
             _reason => None,
@@ -87,12 +88,14 @@ where
         }
     }
     pub fn draw_menu_unloaded(&mut self) {
-        let mut menu = DrawCategoryMenu::new(self.prepare_header(), true);
-        let (act, token) = menu.draw_start();
-        if let Some(..) = &token {
+        let mut header = self.prepare_header();
+        header.is_leaf = None;
+        let mut menu = DrawCategoryMenu::new(header, true);
+        let (mut act, mut stub) = menu.draw_start();
+        if let Some(..) = &stub.token {
             menu.draw.ui.text("uhhhh wasn't I a leaf?");
         }
-        menu.draw_end(token);
+        act = act.or(stub.draw_end(&mut *self.ui));
         let act = match act {
             Some(UiAction::Hovered) => Some(CategoryAction::HoverTooltip),
             Some(UiAction::Primary | UiAction::RIGHT_CLICK | UiAction::LEFT_CLICK) =>
@@ -175,12 +178,12 @@ where
     }
 }
 impl super::PackElement {
-    pub fn draw_menu<'ui, U>(&mut self, ui: &mut U)
+    pub fn draw_menu<'ui, U>(&mut self, ui: &mut U, unfiltered: bool)
     where
         U: ?Sized + ImDrawWindow<'ui>,
     {
         let mut roots = self.prepare_draw(ui);
-        roots.draw_menu();
+        roots.draw_menu(unfiltered);
         let DrawPackRoots { mut act_cat, act_pack, .. } = roots;
         if let Some((path, CategoryAction::Open(Some(opened)))) = act_cat {
             #[cfg(taimi_debug)]
@@ -209,7 +212,10 @@ impl super::PackElement {
         }
         self.act_post_draw(ui, act_cat, act_pack, false);
     }
-    pub fn draw_menu_advanced(&self, ui: &Ui) {
+    pub fn draw_menu_advanced<'ui, U>(&self, ui: &mut U)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let display_name = self
             .state
             .display_name()
@@ -311,79 +317,82 @@ impl super::PackElement {
     }
 }
 impl super::PackElements {
-    pub fn draw_menu_advanced(&mut self, ui: &Ui) {
+    pub fn draw_menu_advanced<'ui, U>(&mut self, ui: &mut U)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         ui.text_disabled("debug menu");
         let mut act_pathing = None;
-        if MenuItem::new("scan for packs").build(ui) {
+        if ui.menu_item(c"scan for packs", false) {
             act_pathing = Some(PathingEvent::Refresh { include_datasources: true });
         }
-        if MenuItem::new("scan for packs (sans datasources)").build(ui) {
+        if ui.menu_item(c"scan for packs (sans datasources)", false) {
             act_pathing = Some(PathingEvent::Refresh { include_datasources: false });
         }
         ui.separator();
-        if MenuItem::new("refresh vis").build(ui) {
+        if ui.menu_item(c"refresh vis", false) {
             act_pathing = Some(PathingEvent::RequestRebuildVis {
                 pack_path: None,
                 partial: false,
                 notify: None,
             });
         }
-        if MenuItem::new("rebuild vis (force)").build(ui) {
+        if ui.menu_item(c"rebuild vis (force)", false) {
             act_pathing = Some(PathingEvent::RequestRebuildVis {
                 pack_path: None,
                 partial: false,
                 notify: Some(true),
             });
         }
-        if MenuItem::new("rebuild vis (partial)").build(ui) {
+        if ui.menu_item(c"rebuild vis (partial)", false) {
             act_pathing = Some(PathingEvent::RequestRebuildVis {
                 pack_path: None,
                 partial: true,
                 notify: Some(true),
             });
         }
-        if MenuItem::new("rebuild space").build(ui) {
+        if ui.menu_item(c"rebuild space", false) {
             act_pathing = Some(PathingEvent::RequestRebuildSpace { entities: None, bvh: None });
         }
-        if MenuItem::new("rebuild space (force)").build(ui) {
+        if ui.menu_item(c"rebuild space (force)", false) {
             act_pathing = Some(PathingEvent::RequestRebuildSpace { entities: Some(true), bvh: Some(true) });
         }
-        if MenuItem::new("rebuild space (bvh only)").build(ui) {
+        if ui.menu_item(c"rebuild space (bvh only)", false) {
             act_pathing =
                 Some(PathingEvent::RequestRebuildSpace { entities: Some(false), bvh: Some(true) });
         }
-        if MenuItem::new("nuke space bvh").build(ui) {
+        if ui.menu_item(c"nuke space bvh", false) {
             act_pathing =
                 Some(PathingEvent::RequestRebuildSpace { entities: Some(true), bvh: Some(false) });
         }
         ui.separator();
         #[cfg(feature = "paths-interact")]
-        if MenuItem::new("rebuild interact").build(ui) {
+        if ui.menu_item(c"rebuild interact", false) {
             act_pathing = Some(PathingEvent::InteractControl(InteractMessage::RequestRebuild));
         }
         #[cfg(feature = "paths-interact")]
-        if MenuItem::new("rebuild interact (bvh only)").build(ui) {
+        if ui.menu_item(c"rebuild interact (bvh only)", false) {
             act_pathing = Some(PathingEvent::InteractControl(InteractMessage::BvhRebuild));
         }
         ui.separator();
-        if MenuItem::new("collect garbage").build(ui) {
+        if ui.menu_item(c"collect garbage", false) {
             act_pathing = Some(PathingEvent::CollectGarbage { tick: 1, aggressive: false });
         }
-        if MenuItem::new("collect garbage timidly").build(ui) {
+        if ui.menu_item(c"collect garbage timidly", false) {
             act_pathing = Some(PathingEvent::COLLECT_GARBAGE_PRUNE_ONLY);
         }
-        if MenuItem::new("collect garbage aggressively").build(ui) {
+        if ui.menu_item(c"collect garbage aggressively", false) {
             act_pathing = Some(PathingEvent::COLLECT_GARBAGE_NOW);
         }
-        if MenuItem::new("report resources").build(ui) {
+        if ui.menu_item(c"report resources", false) {
             act_pathing = Some(PathingEvent::RequestResourceReport { pack_path: None });
         }
-        if MenuItem::new("release resources").build(ui) {
+        if ui.menu_item(c"release resources", false) {
             act_pathing = Some(PathingEvent::RequestResourceRelease { pack_path: None });
         }
         #[cfg(todo = "unnecessary")]
         #[cfg(feature = "paths-interact")]
-        if MenuItem::new("reload interact settings").build(ui) {
+        if ui.menu_item(c"reload interact settings", false) {
             act_pathing = Some(PathingEvent::InteractControl(InteractMessage::RefreshSettings));
         }
         if let Some(pmsg) = act_pathing {
@@ -391,10 +400,10 @@ impl super::PackElements {
         }
         ui.separator();
         let mut act_space = None;
-        if MenuItem::new("invalidate shaders").build(ui) {
+        if ui.menu_item(c"invalidate shaders", false) {
             act_space = Some(SpaceEvent::ReloadShaders(false));
         }
-        if MenuItem::new("reload all shaders").build(ui) {
+        if ui.menu_item(c"reload all shaders", false) {
             act_space = Some(SpaceEvent::ReloadShaders(true));
         }
         if let Some(emsg) = act_space {
@@ -435,12 +444,26 @@ where
     pub fn is_leaf(&self) -> bool {
         matches!(self.draw.is_leaf, Some(true) | None)
     }
-    pub fn draw_start(&mut self) -> (Option<UiAction>, Option<UiTokenDyn<'ui>>) {
+    pub fn draw_start(&mut self) -> (Option<UiAction>, DrawCategoryMenuStub<'ui>) {
         self.draw_spacing();
-        match self.is_leaf() {
+        let is_leaf = self.is_leaf();
+        let (action, token) = match is_leaf {
             true => (self.draw_leaf(), None),
             _ => self.draw_branch(),
-        }
+        };
+        let stub = DrawCategoryMenuStub {
+            token,
+            is_leaf,
+            is_decorative: self.draw.is_decorative,
+            is_copyable: self.is_copyable,
+            toggle_state: self.draw.toggle_state,
+            has_toggle: self.has_toggle,
+            has_info: self.has_info,
+            filtered_inactive: self.filtered_inactive,
+            drawn_bounds: self.drawn_bounds,
+            is_empty: false,
+        };
+        (action, stub)
     }
     fn draw_leaf(&mut self) -> Option<UiAction> {
         let decorative = self.draw.is_decorative;
@@ -488,63 +511,7 @@ where
 
         (self.resolve_action(), menu)
     }
-    /// explicit enable item at the bottom of the menu
-    pub fn draw_trailing_toggle(&mut self) -> Option<UiAction> {
-        if Self::dead_zone_spacing(&mut *self.draw.ui, false) {
-            self.draw.ui.separator();
-        }
-        let label = match self.draw.toggle_state {
-            true => "disable",
-            false => "enable",
-        };
-        let off_map = self.filtered_inactive.then_some(fl!("inactive"));
-        let toggled = self.draw.ui.menu_item_with(fl!(label), false, off_map, true);
-        if self.draw.ui.is_item_hovered() {
-            self.draw
-                .ui
-                .tooltip_text("hint: right-click to quickly toggle any category");
-        }
-        toggled
-            .then_some(UiAction::Primary)
-            .or_else(|| self.resolve_action_secondary())
-    }
 
-    fn draw_end(&mut self, token: Option<UiTokenDyn<'ui>>) -> Option<UiAction> {
-        drop(token);
-        let act = self.resolve_action();
-        if !self.draw.is_decorative || !self.is_leaf() {
-            self.draw_spacing();
-        }
-        act
-    }
-    pub fn draw_decoration_with<R, F: FnOnce(&Self) -> R>(&mut self, f: F) -> Option<R> {
-        if self.drawn_bounds.is_empty() {
-            return None
-        }
-        let checkpoint = self.draw.ui.cursor_pos();
-        let mut top_right = self.drawn_bounds.origin;
-        top_right.x += self.drawn_bounds.size.width;
-        self.draw.ui.set_cursor_pos(top_right);
-        let res = f(&*self);
-        self.draw.ui.set_cursor_pos(checkpoint);
-        Some(res)
-    }
-    /// for use within [self.draw_decoration_with()]
-    pub fn draw_decoration_info(&mut self) {
-        let tooltip_hint = match self.has_info {
-            true => "❓",
-            #[cfg(todo)]
-            true => "(?)",
-            _ => "",
-        };
-        let state_postfix = match self.has_toggle {
-            true if !self.draw.toggle_state => " ×",
-            _ => "",
-        };
-        if !tooltip_hint.is_empty() || !state_postfix.is_empty() {
-            self.draw.ui.text(format!(" {tooltip_hint}{state_postfix}"));
-        }
-    }
     /// TODO: double-check if these checks must follow branch menu token drop or not
     fn resolve_action(&self) -> Option<UiAction> {
         let act = self.draw.ui.is_item_clicked().then_some(UiAction::LEFT_CLICK);
@@ -577,14 +544,146 @@ where
         }
     }
     fn draw_spacing(&mut self) -> bool {
-        Self::dead_zone_spacing(self.draw.ui, !self.is_leaf())
+        let is_branch = !self.is_leaf();
+        Self::dead_zone_spacing(&mut *self.draw.ui, is_branch)
+    }
+}
+#[derive(Debug)]
+pub struct DrawCategoryMenuStub<'ui> {
+    pub is_empty: bool,
+    pub is_decorative: bool,
+    pub is_leaf: bool,
+    pub is_copyable: bool,
+    pub has_toggle: bool,
+    pub toggle_state: bool,
+    pub filtered_inactive: bool,
+    pub has_info: bool,
+    pub token: Option<UiTokenDyn<'ui>>,
+    pub drawn_bounds: Rect<WindowSpace>,
+}
+impl<'ui> DrawCategoryMenuStub<'ui> {
+    pub fn empty() -> Self {
+        Self {
+            is_empty: true,
+            is_decorative: false,
+            is_leaf: true,
+            is_copyable: false,
+            toggle_state: true,
+            has_toggle: false,
+            filtered_inactive: false,
+            has_info: false,
+            token: None,
+            drawn_bounds: Rect::ZERO,
+        }
+    }
+    fn draw_end<U>(&mut self, ui: &mut U) -> Option<UiAction>
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        let token = self.token.take();
+        if self.is_empty {
+            return None
+        }
+        let mut act = None;
+        if token.is_some() && !self.is_leaf {
+            act = self.draw_trailing_toggle(ui);
+        }
+        token.end();
+        let act = Self::resolve_action(ui).or(act);
+        if !self.is_leaf && (self.has_info | (self.has_toggle & !self.toggle_state)) {
+            self.draw_decoration_with(ui, |this, ui| this.draw_decoration_info(ui));
+        }
+        if !self.is_decorative || !self.is_leaf {
+            DrawCategoryMenu::dead_zone_spacing(ui, !self.is_leaf);
+        }
+        act
+    }
+    /// TODO: double-check if these checks must follow branch menu token drop or not
+    fn resolve_action<U>(ui: &mut U) -> Option<UiAction>
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        let act = ui.is_item_clicked().then_some(UiAction::LEFT_CLICK);
+        act.or_else(|| Self::resolve_action_secondary(ui))
+    }
+    fn resolve_action_secondary<U>(ui: &mut U) -> Option<UiAction>
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        if ui.is_item_right_clicked() {
+            Some(UiAction::RIGHT_CLICK)
+        } else if ui.is_item_hovered() {
+            Some(UiAction::Hovered)
+        } else {
+            None
+        }
+    }
+    /// explicit enable item at the bottom of the menu
+    fn draw_trailing_toggle<U>(&mut self, ui: &mut U) -> Option<UiAction>
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        if DrawCategoryMenu::dead_zone_spacing(ui, false) {
+            ui.separator();
+        }
+        let label = match self.toggle_state {
+            true => "disable",
+            false => "enable",
+        };
+        let off_map = self.filtered_inactive.then_some(fl!("inactive"));
+        let toggled = ui.menu_item_with(fl!(label), false, off_map, true);
+        if ui.is_item_hovered() {
+            ui.tooltip_text("hint: right-click to quickly toggle any category");
+        }
+        toggled
+            .then_some(UiAction::Primary)
+            .or_else(|| Self::resolve_action_secondary(ui))
+    }
+    fn draw_decoration_with<R, F: FnOnce(&mut Self, &mut U) -> R, U>(
+        &mut self,
+        ui: &mut U,
+        f: F,
+    ) -> Option<R>
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        if self.drawn_bounds.is_empty() {
+            return None
+        }
+        let checkpoint = ui.cursor_pos();
+        let mut top_right = self.drawn_bounds.origin;
+        top_right.x += self.drawn_bounds.size.width;
+        ui.set_cursor_pos(top_right);
+        let res = f(&mut *self, &mut *ui);
+        ui.set_cursor_pos(checkpoint);
+        Some(res)
+    }
+    /// for use within [self.draw_decoration_with()]
+    fn draw_decoration_info<U>(&mut self, ui: &mut U)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        let tooltip_hint = match self.has_info {
+            true => "❓",
+            #[cfg(todo)]
+            true => "(?)",
+            _ => "",
+        };
+        let state_postfix = match self.has_toggle {
+            true if !self.toggle_state => " ×",
+            _ => "",
+        };
+        if !tooltip_hint.is_empty() || !state_postfix.is_empty() {
+            ui.text(im_fmt!(" {tooltip_hint}{state_postfix}"));
+        }
     }
 }
 pub struct DrawCategoryCollectionMenu<'a, 'u, 'ui, U: ?Sized + 'u> {
     pub draw: DrawCategoryCollection<'a, 'u, 'ui, U>,
-    pub menu_stack: Vec<(Option<UiTokenDyn<'ui>>, DrawCategoryMenu<'a, 'u, U>)>,
+    pub menu_stack: Vec<DrawCategoryMenuStub<'ui>>,
     pub act: CategoryActionSlot,
     pub act_open: Vec<CategoryPath>,
+    pub unfiltered: bool,
 }
 impl<'a, 'u, 'ui, U> DrawCategoryCollectionMenu<'a, 'u, 'ui, U>
 where
@@ -596,6 +695,7 @@ where
             menu_stack: Vec::new(),
             act: Default::default(),
             act_open: Vec::new(),
+            unfiltered: false,
         }
     }
     pub fn draw_root(&mut self, path: CategoryPath, pseudo_root: bool) {
@@ -624,24 +724,30 @@ where
     }
 
     pub fn push_and_draw(&mut self, path: CategoryPath, pseudo_root: Option<bool>) -> Option<()> {
-        self.draw.ui.text(c"TODO: menus");
-        None
-    }
-    #[cfg(todo)]
-    pub fn push_and_draw(&mut self, path: CategoryPath, pseudo_root: Option<bool>) -> Option<()> {
         self.draw.push(path)?;
-        let toggle = self.draw.prepare_toggle(path, pseudo_root);
+        let cat_filtered = !self
+            .draw
+            .state
+            .category_is_loaded(self.draw.pack, path)
+            .unwrap_or(false);
+        let unfiltered = self.unfiltered;
+        if matches!(pseudo_root, Some(true) | None) && !unfiltered && cat_filtered {
+            self.menu_stack.push(DrawCategoryMenuStub::empty());
+            return None
+        }
+        let mut toggle = self.draw.prepare_toggle(path, pseudo_root);
         let mut menu = toggle.prepare_menu();
-        let (act, token) = menu.draw_start();
-        let res = token.as_ref().map(drop);
-        let act = Self::act_to_action(&menu, act);
-        self.menu_stack.push((token, menu));
+        menu.filtered_inactive = cat_filtered;
+        let (act, stub) = menu.draw_start();
+        let descend = stub.token.is_some();
+        let act = Self::act_to_action(&stub, act);
+        self.menu_stack.push(stub);
         if let Some(act) = act {
             let clobbered = act.clobber(path, &mut self.act);
             CategoryAction::warn_clobbered(&self.act, clobbered);
         }
 
-        if res.is_some() {
+        if descend {
             if self.draw.path_stack.len() > self.act_open.len() {
                 self.act_open.clone_from(&self.draw.path_stack);
             } else if self.draw.path_stack.len() == self.act_open.len()
@@ -655,16 +761,15 @@ where
                 );
             }
         }
-        res
+        descend.then_some(())
     }
-    fn act_to_action(menu: &DrawCategoryMenu<'_, '_, U>, act: Option<UiAction>) -> Option<CategoryAction> {
-        let is_leaf = menu.is_leaf();
+    fn act_to_action(menu: &DrawCategoryMenuStub, act: Option<UiAction>) -> Option<CategoryAction> {
         match act {
-            Some(UiAction::Primary) if is_leaf && menu.is_copyable => Some(CategoryAction::Copy),
+            Some(UiAction::Primary) if menu.is_leaf && menu.is_copyable => Some(CategoryAction::Copy),
             Some(UiAction::LEFT_CLICK) if menu.is_copyable => Some(CategoryAction::Copy),
-            Some(UiAction::Primary) if is_leaf => Some(CategoryAction::Enable(None)),
+            Some(UiAction::Primary) if menu.is_leaf => Some(CategoryAction::Enable(None)),
             Some(UiAction::RIGHT_CLICK) => Some(CategoryAction::Enable(None)),
-            Some(UiAction::LEFT_CLICK) if !is_leaf => Some(CategoryAction::Enable(None)),
+            Some(UiAction::LEFT_CLICK) if !menu.is_leaf => Some(CategoryAction::Enable(None)),
             Some(UiAction::Hovered) => Some(CategoryAction::HoverTooltip),
             Some(act) => {
                 #[cfg(taimi_debug)]
@@ -675,9 +780,9 @@ where
         }
     }
     pub fn pop(&mut self) -> Option<CategoryPath> {
-        let act = if let Some((token, mut menu)) = self.menu_stack.pop() {
-            let act = menu.draw_end(token);
-            Some((menu, act))
+        let act = if let Some(mut stub) = self.menu_stack.pop() {
+            let act = stub.draw_end(&mut *self.draw.ui);
+            Some((stub, act))
         } else {
             None
         };
@@ -686,7 +791,7 @@ where
             (Some(path), Some((menu, act))) => Self::act_to_action(&menu, act).map(|act| (act, menu, path)),
             _ => None,
         };
-        if let Some((act, _menu, path)) = act {
+        if let Some((act, _stub, path)) = act {
             let clobbered = act.clobber(path, &mut self.act);
             CategoryAction::warn_clobbered(&self.act, clobbered);
         }
@@ -896,33 +1001,35 @@ where
         "cat-context"
     }
 }
-pub struct DrawPackAdvancedMenu<'a, 'ui> {
-    pub ui: &'a Ui<'ui>,
+pub struct DrawPackAdvancedMenu<'u, U: ?Sized + 'u> {
+    pub ui: &'u mut U,
     pub path: PackPath,
     pub act_pathing: Option<PathingEvent>,
 }
-impl<'a, 'u> DrawPackAdvancedMenu<'a, 'u> {
+impl<'u, 'ui, U> DrawPackAdvancedMenu<'u, U>
+where
+    U: ?Sized + ImDrawWindow<'ui> + 'u,
+{
     pub fn draw(&mut self) {
-        let ui = self.ui;
-        if MenuItem::new("rebuild vis").build(ui) {
+        if self.ui.menu_item(c"rebuild vis", false) {
             self.act_pathing = Some(PathingEvent::RequestRebuildVis {
                 pack_path: Some(self.path),
                 partial: false,
                 notify: Some(true),
             });
         }
-        if MenuItem::new("rebuild vis (partial)").build(ui) {
+        if self.ui.menu_item(c"rebuild vis (partial)", false) {
             self.act_pathing = Some(PathingEvent::RequestRebuildVis {
                 pack_path: Some(self.path),
                 partial: true,
                 notify: None,
             });
         }
-        ui.separator();
-        if MenuItem::new("report resources").build(ui) {
+        self.ui.separator();
+        if self.ui.menu_item(c"report resources", false) {
             self.act_pathing = Some(PathingEvent::RequestResourceReport { pack_path: Some(self.path) });
         }
-        if MenuItem::new("release resources").build(ui) {
+        if self.ui.menu_item(c"release resources", false) {
             self.act_pathing = Some(PathingEvent::RequestResourceRelease { pack_path: Some(self.path) });
         }
     }

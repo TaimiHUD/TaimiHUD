@@ -1,3 +1,5 @@
+#[cfg(feature = "paths-filter")]
+use taimi_pack::attributes::{cell::GetAttrDynExt, keys};
 use {
     crate::{
         controller::pathing::{
@@ -23,7 +25,11 @@ use {
             VisibilityFlagsExt,
         },
         exports::runtime::{self as rt, bindings::TaimiControls},
-        settings::{pathing::PathingSave, state::SaveState, Settings},
+        settings::{
+            pathing::{PathingSave, PathingSettings},
+            state::SaveState,
+            Settings,
+        },
         space::{engine::SpaceEvent, Engine},
     },
     anyhow::Context,
@@ -485,7 +491,11 @@ impl PathingController {
             };
             #[cfg(feature = "paths-filter")]
             if let Some(filter_state) = guid_filter_state {
-                let inverted = filters.as_ref().map(|f| f.invert_behavior()).unwrap_or(false);
+                let inverted: bool = filters
+                    .as_ref()
+                    .and_then(|f| f.clone_attr_of::<keys::InvertBehaviour>())
+                    .unwrap_or_default()
+                    .into();
                 // TODO: use GroupConfig properly here and move most of this into a method!
                 let marker_path: MarkerPath<PackPath> =
                     MarkerPath::with_parts(_lpath.root.root, _marker_path.path);
@@ -569,9 +579,21 @@ impl PathingController {
                     .as_ref()
                     .map(|i| Self::can_interact(i))
                     .unwrap_or(false);
+            #[cfg(feature = "paths-lua")]
+            #[cfg(todo = "unnecessary")]
+            let can_interact = can_interact
+                || attrs
+                    .script
+                    .as_ref()
+                    .map(|s| s.script_focus.is_some() | s.script_trigger.is_some())
+                    .unwrap_or(false);
             if can_interact {
                 return true
             }
+        }
+        #[cfg(feature = "paths-lua")]
+        if attrs.script.as_ref().is_some() {
+            return true
         }
 
         false

@@ -6,13 +6,16 @@ pub use {
             LoadReport,
             SharedGracePeriod,
             SharedLoaderPacksInfo,
+            SharedPackAllocation,
             SharedPackConfig,
+            SharedPackDynamics,
             SharedPackInfo,
             SharedPackLoad,
             SharedPackLoaded,
             SharedPacks,
             SharedResourceRequests,
             SharedResourceRequestsTx,
+            StaticMarkerRanges,
         },
         maps::{
             LoadedMarkerRef,
@@ -28,6 +31,7 @@ pub use {
             SharedTrailRef,
         },
         space::{
+            LoadResult,
             SpacePackShared,
             TextureLoadRequests,
             TextureLoadRequestsTx,
@@ -88,7 +92,7 @@ impl PathingSender {
         achievements: &watched::Tx<Arc<AchievementState>>,
         raids: &watched::Tx<Arc<RaidState>>,
     ) -> (Self, PathingReceiver) {
-        let (command, command_rx) = mpsc::channel(48);
+        let (command, command_rx) = mpsc::channel(Self::EVENT_BUFFER_SIZE);
         let sender = Self {
             shared: Arc::new(PathingShared::new()),
             command,
@@ -135,6 +139,10 @@ impl PathingSender {
 
         (sender, rx)
     }
+    #[cfg(feature = "paths-lua")]
+    const EVENT_BUFFER_SIZE: usize = 96;
+    #[cfg(not(feature = "paths-lua"))]
+    const EVENT_BUFFER_SIZE: usize = 48;
 }
 
 pub struct PathingReceiver {

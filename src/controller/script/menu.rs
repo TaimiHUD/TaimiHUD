@@ -231,14 +231,14 @@ impl GetAttr<keys::IsSeparator> for PlugMenuState {
         true
     }
     fn get_attr(&self) -> Option<Cow<'_, keys::IsSeparator>> {
-        Some(Cow::Owned(self.checked.is_some().into()))
+        Some(Cow::Owned(self.checked.is_none().into()))
     }
 }
 impl SetAttr<keys::IsSeparator> for PlugMenuState {
     fn set_attr(&mut self, value: keys::IsSeparator) {
         match bool::from(value) {
-            true if self.checked.is_none() => self.checked = Some(false),
-            false if self.checked.is_some() => self.checked = None,
+            false if self.checked.is_none() => self.checked = Some(false),
+            true if self.checked.is_some() => self.checked = None,
             _ => (),
         }
     }

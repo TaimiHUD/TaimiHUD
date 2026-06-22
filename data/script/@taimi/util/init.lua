@@ -144,6 +144,25 @@ function taimi_util.table_iter_get_keys(keys, t)
 	end
 	return taimi_util.iter_map2(map, ipairs(keys))
 end
+local function iter_once(state, cont)
+	if cont ~= nil then
+		return nil
+	end
+	return state
+end
+local function iter_once_i(state, cont)
+	if cont ~= nil then
+		return nil
+	end
+	return 1, state
+end
+function taimi_util.iter_once(s)
+	return iter_once, s, nil
+end
+-- ipairs for a single value
+function taimi_util.iter_once_i(s)
+	return iter_once_i, s, nil
+end
 function taimi_util.table_inherit(keys, t, out)
 	return taimi_util.iter_collect(out or {}, taimi_util.table_iter_get_keys(keys))
 end

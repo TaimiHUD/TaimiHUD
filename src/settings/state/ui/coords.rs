@@ -63,6 +63,19 @@ impl UiVec2 {
     pub const fn y(&self) -> f32 {
         self.vec2.y
     }
+
+    #[inline]
+    pub const fn to_vector<U: glamour::Unit<Scalar = f32>>(self) -> glamour::Vector2<U> {
+        glamour::Vector2::new(self.vec2.x, self.vec2.y)
+    }
+    #[inline]
+    pub const fn to_size<U: glamour::Unit<Scalar = f32>>(self) -> glamour::Size2<U> {
+        glamour::Size2::new(self.vec2.x, self.vec2.y)
+    }
+    #[inline]
+    pub const fn to_point<U: glamour::Unit<Scalar = f32>>(self) -> glamour::Point2<U> {
+        glamour::Point2::new(self.vec2.x, self.vec2.y)
+    }
 }
 impl ops::MulAssign<Self> for UiVec2 {
     #[inline]
@@ -170,6 +183,36 @@ impl<T: glamour::Unit<Scalar = f32>> From<UiVec2> for glamour::Vector2<T> {
     #[inline]
     fn from(pos: UiVec2) -> Self {
         glamour::Vector2::from_raw(pos.vec2)
+    }
+}
+impl<T: glamour::Unit<Scalar = f32>> From<UiVec2> for glamour::Size2<T> {
+    #[inline]
+    fn from(pos: UiVec2) -> Self {
+        glamour::Size2::from_raw(pos.vec2)
+    }
+}
+impl<T: glamour::Unit<Scalar = f32>> From<UiVec2> for glamour::Point2<T> {
+    #[inline]
+    fn from(pos: UiVec2) -> Self {
+        glamour::Point2::from_raw(pos.vec2)
+    }
+}
+impl<T: glamour::Unit<Scalar = f32>> From<glamour::Vector2<T>> for UiVec2 {
+    #[inline]
+    fn from(pos: glamour::Vector2<T>) -> Self {
+        Self::from(pos.to_raw())
+    }
+}
+impl<T: glamour::Unit<Scalar = f32>> From<glamour::Size2<T>> for UiVec2 {
+    #[inline]
+    fn from(pos: glamour::Size2<T>) -> Self {
+        Self::from(pos.to_raw())
+    }
+}
+impl<T: glamour::Unit<Scalar = f32>> From<glamour::Point2<T>> for UiVec2 {
+    #[inline]
+    fn from(pos: glamour::Point2<T>) -> Self {
+        Self::from(pos.to_raw())
     }
 }
 impl From<UiVec2> for [f32; 2] {

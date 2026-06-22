@@ -20,6 +20,7 @@ use {
                 CategoryHandleMut,
                 InstanceTexture,
                 InstanceVec3,
+                MapFilterArg,
                 MarkerType,
                 MenuInstance,
                 PackHandle,
@@ -50,6 +51,7 @@ use {
         Lua,
         MetaMethod,
         MultiValue,
+        ObjectLike,
         Result as LuaResult,
         String as LuaString,
         Table,
@@ -394,36 +396,48 @@ where
     where
         U: Borrow<T>,
     {
-        reg.add_method("PathableByGuid", |lua, this, (guid,): (LuaGuid,)| {
-            this.borrow()
-                .pathable_by_guid(guid)
-                .map_err(to_lua_error)
-                .and_then(|h| h.map(|h| h.to_lua_handle(lua)).transpose())
-        });
+        reg.add_method(
+            "PathableByGuid",
+            |lua, this, (guid, filter): (LuaGuid, MapFilterArg)| {
+                this.borrow()
+                    .pathable_by_guid(guid, filter)
+                    .map_err(to_lua_error)
+                    .and_then(|h| h.map(|h| h.to_lua_handle(lua)).transpose())
+            },
+        );
         reg.add_method("PathableByTag", |lua, this, (tag,): (u32,)| {
             this.borrow()
                 .pathable_by_tag(tag)
                 .map_err(to_lua_error)
                 .and_then(|h| h.map(|h| h.to_lua_handle(lua)).transpose())
         });
-        reg.add_method("PathablesByGuid", |lua, this, (guid,): (LuaGuid,)| {
-            this.borrow()
-                .pathables_by_guid(guid)
-                .map_err(to_lua_error)
-                .and_then(|b| lua.create_sequence_from(b.into_iter().map(|b| HandleToLua(b))))
-        });
-        reg.add_method("MarkerByGuid", |lua, this, (guid,): (LuaGuid,)| {
-            this.borrow()
-                .poi_by_guid(guid)
-                .map_err(to_lua_error)
-                .and_then(|h| h.map(|h| h.to_lua_handle(lua)).transpose())
-        });
-        reg.add_method("TrailByGuid", |lua, this, (guid,): (LuaGuid,)| {
-            this.borrow()
-                .trail_by_guid(guid)
-                .map_err(to_lua_error)
-                .and_then(|h| h.map(|h| h.to_lua_handle(lua)).transpose())
-        });
+        reg.add_method(
+            "PathablesByGuid",
+            |lua, this, (guid, filter): (LuaGuid, MapFilterArg)| {
+                this.borrow()
+                    .pathables_by_guid(guid, filter)
+                    .map_err(to_lua_error)
+                    .and_then(|b| lua.create_sequence_from(b.into_iter().map(|b| HandleToLua(b))))
+            },
+        );
+        reg.add_method(
+            "MarkerByGuid",
+            |lua, this, (guid, filter): (LuaGuid, MapFilterArg)| {
+                this.borrow()
+                    .poi_by_guid(guid, filter)
+                    .map_err(to_lua_error)
+                    .and_then(|h| h.map(|h| h.to_lua_handle(lua)).transpose())
+            },
+        );
+        reg.add_method(
+            "TrailByGuid",
+            |lua, this, (guid, filter): (LuaGuid, MapFilterArg)| {
+                this.borrow()
+                    .trail_by_guid(guid, filter)
+                    .map_err(to_lua_error)
+                    .and_then(|h| h.map(|h| h.to_lua_handle(lua)).transpose())
+            },
+        );
         reg.add_method("MarkersInCategory", |lua, this, (id,): (BorrowedStr<'_>,)| {
             this.borrow()
                 .pois_in_category(&id[..])
@@ -666,6 +680,27 @@ where
         });
         reg.add_field_method_get("PathableTagType", |_lua, this| {
             Ok(this.borrow().pathable_tag_type())
+        });
+        reg.add_meta_function(MetaMethod::Eq.name(), |lua, (lhs, rhs): (LuaValue, LuaValue)| {
+            let lhs = match lhs {
+                LuaValue::Nil => return Ok(false),
+                LuaValue::Integer(idx) => Ok(idx as u32),
+                LuaValue::Table(v) => v.get::<u32>("PathableTagIndex"),
+                LuaValue::UserData(ud) => ud.get::<u32>("PathableTagIndex"),
+                #[cfg(todo)]
+                v => u32::from_lua(v, lua),
+                _ => return Ok(false),
+            }?;
+            let rhs = match rhs {
+                LuaValue::Nil => return Ok(false),
+                LuaValue::Integer(idx) => Ok(idx as u32),
+                LuaValue::Table(v) => v.get::<u32>("PathableTagIndex"),
+                LuaValue::UserData(ud) => ud.get::<u32>("PathableTagIndex"),
+                #[cfg(todo)]
+                v => u32::from_lua(v, lua),
+                _ => return Ok(false),
+            }?;
+            Ok(lhs == rhs)
         });
     }
 }

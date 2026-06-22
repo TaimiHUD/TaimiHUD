@@ -124,6 +124,7 @@ paths = [
   "paths-edit",
 ]
 paths-edit = [
+  "paths-dyn",
 ]
 paths-filter = [
   # this mostly works but so few packs care to use it...
@@ -135,10 +136,12 @@ paths-interact = [
 paths-schedule = [
   "dep:croner",
 ]
+paths-dyn = []
 paths-lua = [
   "scripts-lua",
   "scripts",
   "taimi_pack/script",
+  "paths-dyn",
 ]
 
 scripts = [

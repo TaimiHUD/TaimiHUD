@@ -18,6 +18,7 @@ use {
     taimi_meta::packs::{MapIndex, MarkerId},
     taimi_pack::attributes::{
         self as attr,
+        cell::GetAttrDynExt,
         keys::{self, Guid},
         Festivals,
         FilterAttributes,
@@ -66,41 +67,43 @@ impl FilterConfig {
         Self::filters_is_empty(&self.filters)
     }
     pub(crate) fn filters_is_empty(filters: &FilterAttributes) -> bool {
-        if !filters.festivals().is_empty() {
+        if filters.has_attr_of::<attr::Festival>() {
             return false
         }
-        if !filters.mounts().is_empty() {
+        if filters.has_attr_of::<attr::Mount>() {
             return false
         }
-        if !filters.professions().is_empty() {
+        if filters.has_attr_of::<attr::Profession>() {
             return false
         }
-        if !filters.races().is_empty() {
+        if filters.has_attr_of::<attr::Race>() {
             return false
         }
-        if !filters.specializations().is_empty() {
+        if filters.has_attr_of::<keys::Specialization>() {
             return false
         }
-        if !filters.map_types().is_empty() {
+        if filters.has_attr_of::<keys::MapTypes>() {
             return false
         }
         #[cfg(feature = "paths-schedule")]
-        if !filters.schedule().is_empty() {
+        if filters.has_attr_of::<keys::ScheduleStart>() {
             return false
         }
-        if !filters.raids().is_empty() {
+        if filters.has_attr_of::<keys::Raid>() {
             return false
         }
-        if !filters.achievement_id().is_none() {
+        if filters.has_attr_of::<keys::AchievementId>() {
             return false
         }
         true
     }
     fn filters_achievement(filters: &FilterAttributes) -> Option<AchievementConfig> {
-        filters.achievement_id().map(|id| AchievementConfig {
-            id: id.into(),
-            bit: filters.achievement_bit().map(Into::into),
-        })
+        filters
+            .clone_attr_of::<keys::AchievementId>()
+            .map(|id| AchievementConfig {
+                id: id.into(),
+                bit: filters.clone_attr_of::<keys::AchievementBit>().map(Into::into),
+            })
     }
     /// may not include full functionality of [FilterConfig] that requires
     /// pre-processing (atm this means cron schedule and achievementid)
@@ -125,18 +128,9 @@ impl FilterConfig {
             filters
                 .specializations
                 .as_ref()
-                .map(keys::Specializations::from_attrlist)
                 .map(FilterFor::<_, S>::dyn_from_ref),
-            filters
-                .map_types
-                .as_ref()
-                .map(keys::MapTypes::from_attrlist)
-                .map(FilterFor::<_, S>::dyn_from_ref),
-            filters
-                .raids
-                .as_ref()
-                .map(keys::Raids::from_attrlist)
-                .map(FilterFor::<_, S>::dyn_from_ref),
+            filters.map_types.as_ref().map(FilterFor::<_, S>::dyn_from_ref),
+            filters.raids.as_ref().map(FilterFor::<_, S>::dyn_from_ref),
             //(!raids.is_empty()).then_some(raids).map(FilterFor::<_, S>::dyn_from_ref),
             #[cfg(todo)]
             filters

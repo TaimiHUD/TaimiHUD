@@ -70,12 +70,18 @@ impl RenderState {
             | TaimiControls::TIMER_TRIGGERS.bits()
             | TaimiControls::TIMER_RESET.bits(),
     );
-    #[cfg(feature = "space")]
+    #[cfg(feature = "paths")]
     const MENU_CONTROLS_PATHING: TaimiControls = TaimiControls::from_bits_retain(
         TaimiControls::WINDOW_PRIMARY.bits()
             | TaimiControls::WINDOW_PATHING.bits()
             | TaimiControls::PATHING_TOGGLES.bits(),
     );
+    #[cfg(feature = "scripts")]
+    const MENU_CONTROLS_PLUG: TaimiControls = TaimiControls::from_bits_retain(
+        TaimiControls::WINDOW_PRIMARY.bits() | TaimiControls::WINDOW_PATHING.bits(),
+    );
+    #[cfg(not(feature = "scripts"))]
+    const MENU_CONTROLS_PLUG: TaimiControls = TaimiControls::empty();
     /// Quick access right-click menu
     pub fn draw_context_popup<'ui, U>(&mut self, ui: &mut U, control: TaimiControls)
     where
@@ -92,12 +98,32 @@ impl RenderState {
         } else {
             false
         };
-        #[cfg(feature = "space")]
+        #[cfg(feature = "paths")]
         let need_sep = if control.intersects(Self::MENU_CONTROLS_PATHING) {
             if need_sep {
                 ui.separator()
             }
             self.draw_context_pathing(ui, control != TaimiControls::WINDOW_PRIMARY);
+            true
+        } else {
+            false
+        };
+        #[cfg(feature = "scripts")]
+        let need_sep = if control.intersects(Self::MENU_CONTROLS_PLUG) {
+            if need_sep {
+                ui.separator()
+            }
+            self.draw_context_plug(ui, false);
+            true
+        } else {
+            false
+        };
+        #[cfg(any(feature = "paths-interact", feature = "scripts"))]
+        let need_sep = if control.intersects(Self::MENU_CONTROLS_PLUG | Self::MENU_CONTROLS_PATHING) {
+            if need_sep {
+                ui.separator()
+            }
+            self.draw_context_message(ui, false);
             true
         } else {
             false
@@ -123,7 +149,7 @@ impl RenderState {
             }
         }
     }
-    #[cfg(feature = "space")]
+    #[cfg(feature = "paths")]
     pub fn draw_context_pathing<'ui, U>(&mut self, ui: &mut U, inline: bool)
     where
         U: ?Sized + ImDrawWindow<'ui>,
@@ -269,6 +295,34 @@ impl RenderState {
                 with_i18n!("context-click-notice", |msg| ui.tooltip_text(&msg));
                 // TODO: just steal nexus "((000102))"? could be useful to have a way to load those if available...
             }
+        }
+    }
+    #[cfg(feature = "scripts")]
+    pub fn draw_context_plug<'ui, U>(&mut self, ui: &mut U, inline: bool)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        if !inline && !self.primary_window.plug_state.applicable {
+            return
+        }
+        let plugs = (!inline).then(|| ui.begin_menu(c"plugs"));
+        if let None | Some(Some(..)) = plugs {
+            self.pathing_window.draw_context_menu_plugs(ui, &mut self.machine);
+        }
+        plugs.end();
+    }
+    #[cfg(any(feature = "paths-interact", feature = "scripts"))]
+    pub fn draw_context_message<'ui, U>(&mut self, ui: &mut U, _inline: bool)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        let messages_open = self.message_window.window_visibility();
+        if ui.selectable(fl!("message-window-toggle"), messages_open.is_active()) {
+            #[cfg(todo)]
+            {
+                messages_open.toggle_open();
+            }
+            control_window(crate::WINDOW_MESSAGES, None);
         }
     }
     #[cfg(feature = "markers")]

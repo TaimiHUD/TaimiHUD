@@ -27,7 +27,7 @@ pub struct LoadedMapPack {
     pub pois: Box<[LoadedPoi]>,
     pub poi_guids: Arc<[Guid]>,
     pub trails: Box<[LoadedTrail]>,
-    pub trail_guids: Box<[Guid]>,
+    pub trail_guids: Arc<[Guid]>,
     pub categories: Arc<[LoadedCategory]>,
     #[cfg(todo)]
     pub filters: MapFilters,
@@ -212,7 +212,7 @@ impl LoadedMapPack {
     {
         let trails = info.trails().zip(self.ltrails().paths());
         info.trail_guid_filter(trails)
-            .zip(&self.trail_guids)
+            .zip(self.trail_guids.iter())
             .lazy_map(|((p, lp), g)| (p, lp, g))
     }
     pub fn marker_guids<'a, 'i>(

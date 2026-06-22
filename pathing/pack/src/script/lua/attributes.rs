@@ -1,6 +1,7 @@
 use {
     crate::{
         attributes::{
+            self,
             cell::{
                 AttrKeyValue,
                 GetAttrDyn,
@@ -16,7 +17,7 @@ use {
         category::{id, CategoryId},
         script::{
             format_err,
-            lua::{to_lua_error, IColour, LuaProxyOf, ScriptApiTable},
+            lua::{to_lua_error, IColour, LuaProxyOf, LuaStringlike, ScriptApiTable},
             pathing::imp::MarkerType,
             Result,
         },
@@ -64,6 +65,18 @@ pathable_attr! { all;
         [ScriptTick]: ScriptTick,
         [ScriptFilter]: ScriptFilter,
         [ScriptOnce]: ScriptOnce,
+        // filters are a fun one...
+        [AchievementId]: AchievementId,
+        [AchievementBit]: AchievementBit,
+        [AllowedMounts]: Mounts,
+        [AllowedRaces]: Races,
+        [AllowedFestivals]: Festivals,
+        [AllowedMapTypes]: MapTypes,
+        [AllowedProfessions]: Professions,
+        [AllowedSpecializations]: Specializations,
+        [Raids]: Raids,
+        [CronExpression]: ScheduleStart,
+        [Duration]: ScheduleDuration,
     }
     impl CategoryHandleAttr for {
         // valid on categories but not markers themselves...
@@ -115,6 +128,8 @@ pathable_attr! { all;
         [ShowCategory]: ShowCategory,
         [HideCategory]: HideCategory,
         [ToggleCategory]: ToggleCategory,
+        // a filter and behaviour attr, very strange
+        [Behavior]: Behaviour,
     }
 }
 #[cfg(todo)]
@@ -296,6 +311,177 @@ impl IntoLua for keys::Bounce {
 impl FromLua for keys::Bounce {
     fn from_lua(value: LuaValue, lua: &Lua) -> LuaResult<Self> {
         BorrowedStr::from_lua(value, lua).and_then(|s| s[..].parse::<keys::Bounce>().map_err(to_lua_error))
+    }
+}
+impl IntoLua for keys::AchievementId {
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        self.0.into_lua(lua)
+    }
+}
+impl FromLua for keys::AchievementId {
+    fn from_lua(value: LuaValue, lua: &Lua) -> LuaResult<Self> {
+        FromLua::from_lua(value, lua).map(Self)
+    }
+}
+impl IntoLua for keys::AchievementBit {
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        self.0.into_lua(lua)
+    }
+}
+impl FromLua for keys::AchievementBit {
+    fn from_lua(value: LuaValue, lua: &Lua) -> LuaResult<Self> {
+        FromLua::from_lua(value, lua).map(Self)
+    }
+}
+impl IntoLua for keys::Behaviour {
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        self.value().into_lua(lua)
+    }
+}
+impl FromLua for keys::Behaviour {
+    fn from_lua(value: LuaValue, lua: &Lua) -> LuaResult<Self> {
+        u8::from_lua(value, lua).and_then(|v| Self::try_from(v).map_err(to_lua_error))
+    }
+}
+/// TODO: what even is on the type CronExpression, public fns/accessors idk...
+#[cfg(todo)]
+impl FromLua for keys::ScheduleStart {}
+/// TODO: what even is on the type CronExpression, public fns/accessors idk...
+#[cfg(todo)]
+impl IntoLua for keys::ScheduleStart {}
+/// TODO: this is a TimeSpan
+#[cfg(todo)]
+impl FromLua for keys::ScheduleDuration {}
+/// TODO: this is a TimeSpan
+#[cfg(todo)]
+impl IntoLua for keys::ScheduleDuration {}
+/// TODO: this is apparently a tuple of `(name, args)`
+#[cfg(todo)]
+impl FromLua for keys::Script {}
+/// TODO: this is apparently a tuple of `(name, args)`
+#[cfg(todo)]
+impl IntoLua for keys::Script {}
+impl IntoLua for keys::Mounts {
+    fn into_lua(self, _lua: &Lua) -> LuaResult<LuaValue> {
+        Ok(LuaValue::Integer(self.0.bits() as _))
+    }
+    #[cfg(todo)]
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        lua.create_sequence_from(self.0.into_iter())
+    }
+}
+impl FromLua for keys::Mounts {
+    fn from_lua(value: LuaValue, lua: &Lua) -> LuaResult<Self> {
+        u16::from_lua(value, lua).map(|b| keys::Mounts(attributes::Mounts::from_bits_retain(b)))
+    }
+}
+impl IntoLua for keys::Races {
+    fn into_lua(self, _lua: &Lua) -> LuaResult<LuaValue> {
+        Ok(LuaValue::Integer(self.0.bits() as _))
+    }
+    #[cfg(todo)]
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        lua.create_sequence_from(self.0.into_iter())
+    }
+}
+impl FromLua for keys::Races {
+    fn from_lua(value: LuaValue, lua: &Lua) -> LuaResult<Self> {
+        u8::from_lua(value, lua).map(|b| keys::Races(attributes::Races::from_bits_retain(b)))
+    }
+}
+impl IntoLua for keys::Professions {
+    fn into_lua(self, _lua: &Lua) -> LuaResult<LuaValue> {
+        Ok(LuaValue::Integer(self.0.bits() as _))
+    }
+    #[cfg(todo)]
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        lua.create_sequence_from(self.0.into_iter())
+    }
+}
+impl FromLua for keys::Professions {
+    fn from_lua(value: LuaValue, lua: &Lua) -> LuaResult<Self> {
+        u16::from_lua(value, lua).map(|b| keys::Professions(attributes::Professions::from_bits_retain(b)))
+    }
+}
+impl IntoLua for keys::Festivals {
+    fn into_lua(self, _lua: &Lua) -> LuaResult<LuaValue> {
+        Ok(LuaValue::Integer(self.0.bits() as _))
+    }
+    #[cfg(todo)]
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        lua.create_sequence_from(self.0.into_iter())
+    }
+}
+impl FromLua for keys::Festivals {
+    fn from_lua(value: LuaValue, lua: &Lua) -> LuaResult<Self> {
+        u16::from_lua(value, lua).map(|b| keys::Festivals(attributes::Festivals::from_bits_retain(b)))
+    }
+}
+impl IntoLua for keys::MapTypes {
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        lua.create_sequence_from(self.into_iter()).map(LuaValue::Table)
+    }
+}
+/// TODO: switch to collect!
+impl FromLua for keys::MapTypes {
+    fn from_lua(value: LuaValue, lua: &Lua) -> LuaResult<Self> {
+        Vec::<attributes::MapType>::from_lua(value, lua).map(|v| keys::MapTypes::from(v))
+    }
+}
+impl IntoLua for attributes::MapType {
+    fn into_lua(self, _lua: &Lua) -> LuaResult<LuaValue> {
+        Ok(LuaValue::Integer(self as _))
+    }
+}
+impl FromLua for attributes::MapType {
+    fn from_lua(value: LuaValue, lua: &Lua) -> LuaResult<Self> {
+        match value {
+            LuaValue::Integer(v) => attributes::MapType::try_from(v as i32).map_err(to_lua_error),
+            v => LuaStringlike::from_lua(v, lua)
+                .and_then(|s| s[..].parse::<attributes::MapType>().map_err(to_lua_error)),
+        }
+    }
+}
+impl IntoLua for keys::Raids {
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        lua.create_sequence_from(self.into_iter()).map(LuaValue::Table)
+    }
+}
+/// TODO: switch to collect!
+impl FromLua for keys::Raids {
+    fn from_lua(value: LuaValue, lua: &Lua) -> LuaResult<Self> {
+        Vec::<keys::Raid>::from_lua(value, lua).map(|v| keys::Raids::from(v))
+    }
+}
+impl IntoLua for keys::Raid {
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        self.0.into_lua(lua)
+    }
+}
+impl FromLua for keys::Raid {
+    fn from_lua(value: LuaValue, lua: &Lua) -> LuaResult<Self> {
+        FromLua::from_lua(value, lua).map(Self)
+    }
+}
+impl IntoLua for keys::Specializations {
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        lua.create_sequence_from(self.into_iter()).map(LuaValue::Table)
+    }
+}
+/// TODO: switch to collect!
+impl FromLua for keys::Specializations {
+    fn from_lua(value: LuaValue, lua: &Lua) -> LuaResult<Self> {
+        Vec::<keys::Specialization>::from_lua(value, lua).map(|v| keys::Specializations::from(v))
+    }
+}
+impl IntoLua for keys::Specialization {
+    fn into_lua(self, lua: &Lua) -> LuaResult<LuaValue> {
+        self.0.into_lua(lua)
+    }
+}
+impl FromLua for keys::Specialization {
+    fn from_lua(value: LuaValue, lua: &Lua) -> LuaResult<Self> {
+        FromLua::from_lua(value, lua).map(Self)
     }
 }
 impl IntoLua for CategoryId {
