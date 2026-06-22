@@ -607,6 +607,19 @@ impl super::PackElement {
                 } => {
                     *context_menu = Some(None);
                 },
+                PackAction::Cat {
+                    action: CategoryAction::EnableChildren(new_state),
+                    path: _,
+                } =>
+                    if let Some((cats, ..)) = self.state.info.category_info() {
+                        let paths = cats.root_paths();
+                        let enable = new_state.unwrap_or_else(|| {
+                            !paths
+                                .clone()
+                                .any(|p| self.state.category_get_visibility(p).is_visible())
+                        });
+                        self.act_cat_enables(Some(enable), paths)
+                    },
                 act => {
                     #[cfg(taimi_debug)]
                     log::error!("DELETEME TODO: {} {act:?}", self.state.info);
@@ -1058,10 +1071,7 @@ where
                     }
                 } else {
                     {
-                        let _padding = self
-                            .draw
-                            .ui
-                            .push_style_var(StyleVar::ItemSpacing([f32::EPSILON, f32::EPSILON]));
+                        let _padding = self.draw.ui.push_style_item_spacing(ImVec2::splat(f32::EPSILON));
                         //self.draw.ui.spacing();
                         self.draw.ui.dummy([1.0, 1.0]);
                     }

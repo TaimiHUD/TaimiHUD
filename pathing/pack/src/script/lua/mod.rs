@@ -117,6 +117,15 @@ pub type LuaGuid = Guid;
 /// TODO: accept a handle too
 pub type LuaCategory = LuaString;
 
+/// TODO: [mlua::String] but less strict about coersion
+///
+/// impls [mlua::FromLua] via [RuntimeLua::lua_tostring]
+pub type LuaFromString = LuaString;
+#[cfg(todo)]
+pub struct LuaFromString<'lt> {}
+/// TODO: assert valid utf8 on top of [LuaFromString], Cow style
+pub type LuaStringlike<'a> = mlua::BorrowedStr<'a>;
+
 #[inline]
 pub fn lua2do() -> LuaError {
     anyhow2lua(anyhow!("TODO"))

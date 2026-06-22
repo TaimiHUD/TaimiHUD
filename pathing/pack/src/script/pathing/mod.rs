@@ -31,6 +31,11 @@ pub use self::{
     vector::{InstanceColour, InstanceVec3},
 };
 
+pub type MapFilterArg = Option<MapID>;
+pub type MapID = u32;
+#[cfg(todo)]
+pub type MapIndex = core::num::NonZero<u32>;
+
 /// TODO: consider linking this to a pack handle? but packs can share GUIDs to reuse hidden state...
 pub trait InstanceGuid {
     fn from_base_64<G: ScriptUserStr>(guid: G) -> Result<Self>
@@ -153,13 +158,13 @@ pub trait PathableHandleFactory: PackHandleFactory {
 }
 #[allow(unused_variables)]
 pub trait ScriptApiLookup: PathableHandleFactory {
-    fn trail_by_guid<G>(&self, guid: G) -> Result<Option<Self::Trail>>
+    fn trail_by_guid<G>(&self, guid: G, map_filter: MapFilterArg) -> Result<Option<Self::Trail>>
     where
         G: ScriptUserGuid,
     {
         script_unimpl!()
     }
-    fn poi_by_guid<G>(&self, guid: G) -> Result<Option<Self::Poi>>
+    fn poi_by_guid<G>(&self, guid: G, map_filter: MapFilterArg) -> Result<Option<Self::Poi>>
     where
         G: ScriptUserGuid,
     {
@@ -168,14 +173,14 @@ pub trait ScriptApiLookup: PathableHandleFactory {
     fn pathable_by_tag(&self, tag: u32) -> Result<Option<Self::Pathable>> {
         script_unimpl!()
     }
-    fn pathable_by_guid<G>(&self, guid: G) -> Result<Option<Self::Pathable>>
+    fn pathable_by_guid<G>(&self, guid: G, map_filter: MapFilterArg) -> Result<Option<Self::Pathable>>
     where
         G: ScriptUserGuid,
     {
         script_unimpl!()
     }
     #[cfg(todo)]
-    fn pathable_by_guid<G>(&self, guid: G) -> Result<Option<Self::Pathable>>
+    fn pathable_by_guid<G>(&self, guid: G, map_filter: MapFilterArg) -> Result<Option<Self::Pathable>>
     where
         G: ScriptUserGuid,
     {
@@ -188,7 +193,7 @@ pub trait ScriptApiLookup: PathableHandleFactory {
     type PathablesByGuid<'a>: Iterator<Item = Self::Pathable>
     where
         Self: 'a;
-    fn pathables_by_guid<G>(&self, guid: G) -> Result<Self::PathablesByGuid<'_>>
+    fn pathables_by_guid<G>(&self, guid: G, map_filter: MapFilterArg) -> Result<Self::PathablesByGuid<'_>>
     where
         G: ScriptUserGuid,
     {
@@ -655,7 +660,7 @@ pub trait PathableHandle: PackHandleFactory {
     fn get_guid(&self) -> Result<Self::Guid> {
         script_unimpl!()
     }
-    fn get_map_id(&self) -> Result<u32> {
+    fn get_map_id(&self) -> Result<MapID> {
         script_unimpl!()
     }
 

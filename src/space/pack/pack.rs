@@ -3,6 +3,7 @@ use {
     crate::{
         controller::pathing::{
             registry::{
+                LoadedMarkerPath,
                 LoadedPoiIndex,
                 LoadedPoiNs,
                 LoadedPoiPath,
@@ -10,11 +11,14 @@ use {
                 LoadedTrailNs,
                 LoadedTrailPath,
                 PackIndex,
+                PackMapPath,
+                PackPath,
                 PackRegistryNs,
                 PackVecOf,
                 PoiMapPath,
             },
             shared::{
+                LoadResult,
                 LoadedMarkerRef,
                 SharedGameplayMap,
                 SharedLoaderPacksInfo,
@@ -81,28 +85,29 @@ use {
         packs::{
             id::{MarkerId, MarkerIndex, MarkerIndexVariant},
             MapIndex,
-            PackMapPath,
             PoiIndex,
             TrailSectionPath,
         },
         spatial::{box3aabb, cull::BvhQuery},
         ui::{LocalContext, MapCalibration, MapContext},
     },
-    taimi_pack::attributes::{keys, BounceBehavior},
+    taimi_pack::attributes::{
+        cell::GetAttrDynExt,
+        keys::{self, GetAttr},
+        BounceBehavior,
+    },
     taimi_sync::{
         arcs::ArcPtrCmp,
         watched::{watch, Watched},
     },
 };
 #[cfg(feature = "paths-lua")]
+#[cfg(deleteme)]
 use {
     crate::controller::script::{PackPlugShared, ScriptMessage},
     std::borrow::Cow,
     taimi_pack::{
-        attributes::{
-            cell::{pack_attr, GetAttrDyn, PackKeyId, PackValueCell, SetAttrDyn},
-            keys::{self, GetAttr},
-        },
+        attributes::cell::{pack_attr, GetAttrDyn, PackKeyId, PackValueCell, SetAttrDyn},
         script::pathing::imp::{
             MarkerLoc,
             MarkerOverrides,
@@ -122,10 +127,14 @@ pub struct PackRenderData {
     pub pois: IndexedList<LoadedPoiNs, LoadedPoiIndex, Vec<PoiRender>>,
     pub trails: IndexedList<LoadedTrailNs, LoadedTrailIndex, Vec<TrailRender>>,
     pub render_poi_bookmark: usize,
+    #[cfg(todo)]
+    pub trail_tints: BTreeMap<LoadedTrailIndex, (Vec4, Vec4)>,
 
     #[cfg(feature = "paths-lua")]
+    #[cfg(deleteme)]
     pub(crate) script_data: Option<Arc<PackPlugShared>>,
     #[cfg(feature = "paths-lua")]
+    #[cfg(deleteme)]
     pub script_capable: bool,
 }
 
@@ -139,8 +148,10 @@ impl PackRenderData {
             trails: Default::default(),
             render_poi_bookmark: 0,
             #[cfg(feature = "paths-lua")]
+            #[cfg(deleteme)]
             script_data: Default::default(),
             #[cfg(feature = "paths-lua")]
+            #[cfg(deleteme)]
             script_capable: Default::default(),
         }
     }
@@ -210,9 +221,11 @@ impl PackRenderData {
         let dirty_pois = dirty_pois.as_ref().into_iter().flat_map(|p| p.iter_ones());
         for poi_idx in dirty_pois {
             #[cfg(feature = "paths-lua")]
+            #[cfg(deleteme)]
             let (bvh, ibd, ibd_map) = ActivePoi::update(self, poi_idx);
             let poi = LazyCell::new(|| unsafe { self.active_pois.get_index(poi_idx).unwrap_unchecked().1 });
             #[cfg(feature = "paths-lua")]
+            #[cfg(deleteme)]
             {
                 let ib_update = (ibd && self.render_poi_bookmark > 0)
                     .then_some(poi_common.world_ib.as_ref())
@@ -249,11 +262,13 @@ impl PackRenderData {
     }
 
     #[cfg(feature = "paths-lua")]
+    #[cfg(deleteme)]
     pub fn has_scripts(&self) -> bool {
         self.script_data.is_some()
     }
 
     /// TODO: go and apply attrs as if a late map load had happened?
+    #[cfg(deleteme)]
     #[cfg(feature = "paths-lua")]
     fn script_start(
         &mut self,
@@ -263,6 +278,7 @@ impl PackRenderData {
     ) {
         let _overrides = self.script_data.insert(shared);
     }
+    #[cfg(deleteme)]
     #[cfg(feature = "paths-lua")]
     fn script_create_trail(
         &mut self,
@@ -317,6 +333,7 @@ impl PackRenderData {
         self.dirty_trails.push(!complete);
         true
     }
+    #[cfg(deleteme)]
     #[cfg(feature = "paths-lua")]
     fn script_build_trail(
         &mut self,
@@ -350,6 +367,7 @@ impl PackRenderData {
         assert!(_replaced.is_none());
         Ok((active_trail_idx, is_complete))
     }
+    #[cfg(deleteme)]
     #[cfg(feature = "paths-lua")]
     fn script_create_poi(
         &mut self,
@@ -405,6 +423,7 @@ impl PackRenderData {
         self.dirty_pois.push(!complete);
         true
     }
+    #[cfg(deleteme)]
     #[cfg(feature = "paths-lua")]
     fn script_build_poi(
         &mut self,
@@ -435,6 +454,7 @@ impl PackRenderData {
         assert!(_replaced.is_none());
         Ok((active_poi_idx, is_complete))
     }
+    #[cfg(deleteme)]
     #[cfg(feature = "paths-lua")]
     fn script_update_trail(
         &mut self,
@@ -518,6 +538,7 @@ impl PackRenderData {
             }
         }
     }
+    #[cfg(deleteme)]
     #[cfg(feature = "paths-lua")]
     fn script_update_poi(
         &mut self,
@@ -606,6 +627,17 @@ impl PackRenderData {
 
     pub fn map_path(&self) -> Option<PackMapPath> {
         self.map_info.as_ref().map(|i| i.path)
+    }
+
+    /// TODO: probably only needed for legacy renderer?
+    #[inline]
+    pub fn trail_draw_tint(
+        &self,
+        _trail: &TrailRender,
+        _lpath: LoadedTrailPath,
+        _ctx: LocalContext,
+    ) -> Option<glam::Vec4> {
+        None
     }
 }
 
@@ -820,7 +852,7 @@ impl PackRender {
                                 pack.pois.values_mut().zip(map_info.pois_iter()).skip(dirty_start);
                             for (poi, info) in dirty_pois {
                                 let attrs = info.poi_attrs();
-                                poi.occlude = attrs.occlude();
+                                poi.occlude = attrs.attr_or_default::<keys::Occlude>().into();
                                 if poi.occlude && attrs.icon_file.is_none() {
                                     poi.icon = Some(TextureSlot::Unavailable);
                                 }
@@ -923,25 +955,42 @@ impl PackRender {
                     continue
                 };
                 let res = match trail_incoming {
-                    geometry if geometry.is_empty() => None,
-                    geometry => rt::log::error_ok(
-                        trail
-                            .setup_geometry(device, geometry, arcrender())
-                            .context("loading trail geometry"),
-                    ),
+                    LoadResult::Failed => Ok(LoadResult::Failed),
+                    LoadResult::Invalidate => Ok(LoadResult::Invalidate),
+                    LoadResult::Loaded(geometry) if geometry.is_empty() => Ok(LoadResult::Failed),
+                    LoadResult::Loaded(geometry) => trail
+                        .setup_geometry(device, geometry, arcrender())
+                        .context("loading trail geometry")
+                        .map(LoadResult::Loaded),
                 };
-                if res.is_none() {
-                    trail.disable();
-                } else {
-                    self.render_list.mark_dirty();
+                match rt::log::error_ok(res) {
+                    Some(LoadResult::Failed) | None => trail.disable(),
+                    Some(LoadResult::Invalidate) => trail.invalidate(),
+                    Some(LoadResult::Loaded(())) => {
+                        #[cfg(todo)]
+                        let (tint, map_tint) = pack_data
+                            .map_info
+                            .as_ref()
+                            .and_then(|info| info.trails().lookup_ref(&path))
+                            .map(|ltrail| {
+                                (
+                                    ltrail.attrs().clone_attr_of::<keys::Tint>(),
+                                    ltrail.attrs().clone_attr_of::<keys::MapTint>(),
+                                )
+                            });
+                        #[cfg(todo)]
+                        if let Some(Some(tint)) = tint {
+                            self.trail_tints.insert(blah);
+                        } else {
+                            self.trail_tints.remove(blah);
+                        }
+                        self.render_list.mark_dirty();
+                    },
                 }
             }
             for (marker_path, texture) in self.texture_rx.try_recv_fulfilled() {
                 // texture loader should be notified, so no need to do anything really?
                 let id = MarkerId::for_marker(marker_path);
-                if texture.is_none() {
-                    log::error!("request for tex {marker_path} failed");
-                }
                 if marker_path.root.path != map_id {
                     log::info!("received outdated tex for {marker_path}");
                     continue
@@ -959,11 +1008,11 @@ impl PackRender {
                             continue
                         };
                         match texture {
-                            Some(key) => {
-                                poi.icon_handle = Some(key);
+                            LoadResult::Loaded(..) | LoadResult::Invalidate => {
+                                poi.icon_handle = texture.get();
                                 poi.icon = None;
                             },
-                            None => {
+                            LoadResult::Failed => {
                                 poi.icon = Some(TextureSlot::Unavailable);
                             },
                         }
@@ -975,12 +1024,12 @@ impl PackRender {
                             continue
                         };
                         match texture {
-                            Some(key) => {
-                                trail.texture_handle = Some(key);
-                                trail.texture = None;
-                            },
-                            None => {
+                            LoadResult::Failed => {
                                 trail.texture = Some(TextureSlot::Unavailable);
+                            },
+                            LoadResult::Loaded(..) | LoadResult::Invalidate => {
+                                trail.texture_handle = texture.get();
+                                trail.texture = None;
                             },
                         }
                     },
@@ -1136,15 +1185,20 @@ impl PackRender {
             .and_then(|map_info| map_info.pois().lookup_ref(&lpoi_path))
             .map(|info| {
                 let i = info.interaction_attrs();
-                (i.bounce_behavior, i.bounce_duration(), i.bounce_delay())
+                (
+                    i.clone_attr_of::<keys::Bounce>(),
+                    i.attr_or_default::<keys::BounceDuration>(),
+                    i.attr_or_default::<keys::BounceDelay>().into(),
+                )
             })
             .unwrap_or((
                 None,
-                keys::BounceDuration::DEFAULT.into(),
-                keys::BounceDelay::DEFAULT.into(),
+                keys::BounceDuration::default(),
+                keys::BounceDelay::default(),
             ));
-        let bounce = bounce_behavour.unwrap_or(BounceBehavior::Bounce);
-        let elapsed = (elapsed - bounce_delay).max(0.0);
+        let bounce = bounce_behavour.map(|b| b.0).unwrap_or(BounceBehavior::Bounce);
+        let bounce_duration = f32::from(bounce_duration);
+        let elapsed = (elapsed - f32::from(bounce_delay)).max(0.0);
         let rem = match bounce {
             BounceBehavior::Bounce => bounce_duration - elapsed % bounce_duration,
             BounceBehavior::Rise => {
@@ -1213,6 +1267,97 @@ impl PackRender {
         }
     }
 
+    #[cfg(feature = "paths-dyn")]
+    pub(crate) fn invalidate_marker_ib(
+        &mut self,
+        device: &Dx11Device,
+        machine: Option<&RenderMachine>,
+        lpath: LoadedMarkerPath<PackMapPath>,
+    ) {
+        if self.render_list.spacepacks.map_id != Some(lpath.root.path) {
+            return
+        }
+        #[cfg(todo = "unused")]
+        if lpath.root.root.path == PackIndex::MAX {
+            let paths = self.pack_data.paths();
+            for pack_path in paths {
+                let lpath =
+                    pack_path.rel(lpath.root.path, MarkerIndex::new_invalid(lpath.path.namespace()));
+                self.invalidate_marker_ib(device, machine, lpath);
+            }
+        }
+        let wildcard = lpath.path == MarkerIndex::UNK || lpath.path.index() == MarkerIndex::INDEX_INVALID;
+        match lpath.path.namespace() {
+            _ if wildcard => (),
+            MarkerIndex::NS_POI | MarkerIndex::NS_TRAIL if self.resources.entities_ib.is_some() => {
+                let idx = self.pack_data.lookup_ref(&lpath.root.root).and_then(|pack| {
+                    self.resources
+                        .find_ib_idx(
+                            lpath.root.root,
+                            lpath.unscope(),
+                            self.spacepacks.render_entities.entities.iter().map(|e| e.id),
+                        )
+                        .and_then(|idx| {
+                            unsafe { device.GetImmediateContext().ok() }.map(|c| (c, pack, idx))
+                        })
+                });
+                if let Some((context, pack, (idx, lp))) = idx {
+                    if self
+                        .resources
+                        .update_ib_at(&context, &pack, &self.draw_state, lp, idx)
+                    {
+                        if let (Some(pc), MarkerIndex::NS_POI) =
+                            (&self.resources.poi_common, lpath.path.namespace())
+                        {
+                            pc.update_ib_at(
+                                &context,
+                                &pack,
+                                machine,
+                                lpath.path.index_poi_unchecked() as usize,
+                            );
+                        }
+                        return
+                    }
+                }
+            },
+            #[cfg(todo)]
+            MarkerIndex::NS_POI => {
+                if self.resources.poi_common.update_ib_at(
+                    &context,
+                    &pack,
+                    machine,
+                    lpath.path.index_poi_unchecked() as _,
+                ) {
+                    return
+                }
+            },
+            _ => (),
+        };
+        self.mark_buffers_dirty();
+    }
+    #[cfg(feature = "paths-dyn")]
+    pub(crate) fn invalidate_trail_vb(&mut self, lpath: LoadedMarkerPath<PackMapPath>) {
+        if self.render_list.spacepacks.map_id != Some(lpath.root.path) {
+            return
+        }
+        #[cfg(todo = "unused")]
+        if lpath.root.root.path == PackIndex::MAX {
+            let paths = self.pack_data.paths();
+            for pack_path in paths {
+                let lpath =
+                    pack_path.rel(lpath.root.path, MarkerIndex::new_invalid(lpath.path.namespace()));
+                self.invalidate_trail_vb(lpath);
+            }
+        }
+        let Some(pack) = self.pack_data.lookup_mut(&lpath.root.root) else { return };
+        let lpath: LoadedTrailPath = match lpath.path.namespace() {
+            MarkerIndex::NS_TRAIL => LoadedTrailPath::new_path(lpath.path.trail_index_unchecked()),
+            _ => return,
+        };
+        let Some(trail) = pack.trails.lookup_mut(&lpath) else { return };
+        trail.invalidate();
+    }
+
     #[cfg(all(deleteme, notreallythoughjust, todo))]
     pub fn update(&mut self, machine: &RenderMachine, _: &Dx11Device, context: &Dx11Context) {
         for (_, pack) in &mut self.loaded_packs {
@@ -1220,6 +1365,7 @@ impl PackRender {
         }
     }
 
+    #[cfg(deleteme)]
     #[cfg(feature = "paths-lua")]
     pub(crate) fn script_start(
         &mut self,
@@ -1239,6 +1385,7 @@ impl PackRender {
         };
         pack.script_start(device, machine, shared);
     }
+    #[cfg(deleteme)]
     #[cfg(feature = "paths-lua")]
     pub(crate) fn script_update_marker(
         &mut self,
@@ -1271,6 +1418,7 @@ impl PackRender {
             pack.script_update_poi(device, machine, marker_idx, changed_attrs);
         }
     }
+    #[cfg(deleteme)]
     #[cfg(feature = "paths-lua")]
     pub(crate) fn script_create(
         &mut self,
@@ -1374,6 +1522,7 @@ impl PackRender {
             },
         }
     }
+    #[cfg(deleteme)]
     #[cfg(feature = "paths-lua")]
     pub(crate) fn script_mask(
         &mut self,
@@ -1438,6 +1587,8 @@ impl PackRender {
             false => {
                 let mut draw = render::DrawSpacePack {
                     context,
+                    backend,
+                    #[cfg(todo = "unnecessary")]
                     shaders: &backend.shaders,
                     poi_common: match &resources.poi_common {
                         Some(poi_common) => poi_common,
@@ -1445,6 +1596,8 @@ impl PackRender {
                     },
                     state: None,
                     shader_trail: None,
+                    poi_billboarding: render::DrawSpacePack::INIT_POI_BILLBOARDING,
+                    trail_colour: render::DrawSpacePack::INIT_TRAIL_COLOUR,
                 };
                 Self::draw_entities(draw_state, &mut draw, entities);
             },
@@ -1456,10 +1609,6 @@ impl PackRender {
         E: IntoIterator<Item = (&'e PackRenderData, usize, &'e MarkerId)>,
         D: render::DrawSpaceEntity,
     {
-        #[cfg(todo)]
-        let mut trail_colour = None;
-        let mut poi_billboarding = true;
-
         let mut num_drawn = 0usize;
         for (pack_data, space_idx, marker_id) in entities {
             let render_id = marker_id.get_marker_index();
@@ -1477,7 +1626,8 @@ impl PackRender {
                             .map(|ltrail| (trail, ltrail))
                     });
                     let Some((trail, ltrail)) = trail else {
-                        log::error!("Render ID refers to missing {path} in {}", pack_data.info);
+                        #[cfg(taimi_debug)]
+                        log::warn!("Render ID refers to missing {path} in {}", pack_data.info);
                         continue
                     };
                     #[cfg(deleteme)]
@@ -1487,23 +1637,6 @@ impl PackRender {
                     }
                     if trail.report_incomplete(&marker_id, draw_state, path, draw.is_arcrender()) {
                         continue
-                    }
-                    #[cfg(todo)]
-                    let colour = match (trail_colour, trail.tint()) {
-                        (_, Some(tint)) => Some(tint),
-                        (Some(..), None) => Some(glam::Vec4::ONE),
-                        _ => None,
-                    };
-                    #[cfg(todo)]
-                    if let (Some(colour), Some(ib)) = (colour, poi_common.world_ib.as_ref()) {
-                        let coloured = InstanceBufferData { colour, ..InstanceBufferData::IDENTITY };
-                        unsafe {
-                            ib.update_element_at(device_context, &coloured, 0, 0);
-                        }
-                        trail_colour = match colour {
-                            c if c == glam::Vec4::ONE => None,
-                            c => Some(c),
-                        };
                     }
                     if draw.draw_trail_section(pack_data, space_idx, trail, path.root, path.path) {
                         num_drawn += 1;
@@ -1531,14 +1664,6 @@ impl PackRender {
                     if !visible {
                         continue
                     }
-                    let was_billboarding = mem::replace(&mut poi_billboarding, poi.is_billboard());
-                    if was_billboarding != poi_billboarding {
-                        backend.perspective_handler.select_billboard_cb(
-                            device_context,
-                            0,
-                            poi_billboarding,
-                        );
-                    }
                     if draw.draw_poi(pack_data, space_idx, poi, path) {
                         num_drawn += 1;
                     }
@@ -1546,20 +1671,6 @@ impl PackRender {
                 _ => {
                     log::error!("Render ID {render_id} refers to invalid marker {marker_id}");
                 },
-            }
-        }
-        if !poi_billboarding {
-            backend
-                .perspective_handler
-                .select_billboard_cb(device_context, 0, true);
-        }
-        #[cfg(todo)]
-        if trail_colour.is_some() {
-            // reset back to default...
-            if let Some(ib) = poi_common.world_ib.as_ref() {
-                unsafe {
-                    ib.update_element_at(device_context, &InstanceBufferData::IDENTITY, 0, 0);
-                }
             }
         }
         draw.finish();
@@ -1584,7 +1695,6 @@ impl PackRender {
         draw_state.primary_draw_map = true;
         let mut shader_state = ShaderState::None;
         let mut num_drawn = 0usize;
-        #[cfg(todo)]
         let mut trail_colour = None;
         let ctx = LocalContext::/*Map(map)*/MAP;
         for (pack_data, _space_idx, marker_id) in entities {
@@ -1620,13 +1730,11 @@ impl PackRender {
                         poi_common.set_primitive(device_context);
                         poi_common.set_instance(device_context, ctx);
                     }
-                    #[cfg(todo)]
-                    let colour = match (trail_colour, trail.tint_map()) {
+                    let colour = match (trail_colour, pack_data.trail_draw_tint(trail, path.root, ctx)) {
                         (_, Some(tint)) => Some(tint),
                         (Some(..), None) => Some(glam::Vec4::ONE),
                         _ => None,
                     };
-                    #[cfg(todo)]
                     if let (Some(colour), Some(ib)) = (colour, poi_common.map_ib.as_ref()) {
                         let coloured = InstanceBufferData { colour, ..InstanceBufferData::IDENTITY };
                         unsafe {
@@ -1684,7 +1792,6 @@ impl PackRender {
             }
             num_drawn += 1;
         }
-        #[cfg(todo)]
         if trail_colour.is_some() {
             // reset back to default...
             if let Some(ib) = poi_common.map_ib.as_ref() {
@@ -1760,170 +1867,12 @@ impl PackRenderResources {
         draw_state: &mut PackRenderState,
         markers: I,
     ) -> anyhow::Result<()> {
-        use glam::Quat;
-
         let markers = markers.into_iter();
-        let mut out = Vec::with_capacity(markers.size_hint().1.unwrap_or(0));
-        for (idx, mid) in markers.enumerate() {
-            let path = mid
-                .marker_path::<PackMapPath>()
-                .and_then(|path| pack_data.lookup_ref(&path.root.root).map(|p| (p, path)));
-            let mut ib = EntityInstanceData::INVALID;
-            let marker = path.and_then(|(pack, path)| {
-                pack.map_info.as_ref().and_then(|i| {
-                    SharedMarkerRef::from_loaded_path(i, Some(&pack.map_state), path)
-                        .and_then(|m| m.to_loaded())
-                        .map(|m| (m, pack))
-                })
-            });
-            let common = match &marker {
-                Some((LoadedMarkerRef::Poi(poi), pack_data)) => {
-                    let attrs = poi.poi_attrs();
-                    let ib = ib.write_poi(instance::PoiInstanceData {
-                        model: {
-                            let scale = glamour::Vector3::<f32>::splat(attrs.icon_size());
-                            let pos = poi.lpoi().position.to_vector();
-                            let rot = match attrs {
-                                #[cfg(deleteme)]
-                                _ => {
-                                    let rot = attrs.rotate.map(|r| r.map(f32::to_radians));
-                                    use glam::EulerRot;
-                                    let erot = Self::tmp_rot().get();
-                                    let pre = Self::tmp_pre().get() * core::f32::consts::PI;
-                                    //let pre = Quat::from_euler(EulerRot::XYZ, pre.x, pre.y, pre.z);
-                                    let post = Self::tmp_post().get() * core::f32::consts::PI;
-                                    let post = Quat::from_euler(EulerRot::XYZ, post.x, post.y, post.z);
-                                    let xyz = (rot * Self::tmp_mul().get()).to_array();
-                                    let mut swizz = glam::Vec3::ZERO;
-                                    let order = Self::tmp_order().get();
-                                    for (i, out) in
-                                        order.iter().zip([&mut swizz.x, &mut swizz.y, &mut swizz.z])
-                                    {
-                                        *out = xyz[*i];
-                                    }
-                                    //let swizz = rot * Self::tmp_mul().get();
-                                    let rot = //pre *
-                                        Quat::from_euler(erot, swizz.x + pre.x, swizz.y + pre.y, swizz.z + pre.z)
-                                        * post
-                                        ;
-                                    rot
-                                },
-                                #[cfg(todo)]
-                                attrs => attrs
-                                    .rotation()
-                                    .map(|rot| rot * Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2)),
-                                attrs => attrs.rotate().map(|rot|
-                                    // can maybe get away with less fancy math idk...
-                                    Quat::from_euler(glam::EulerRot::XZY, rot.x - core::f32::consts::FRAC_PI_2, rot.y, -rot.z)),
-                            };
-                            glamour::Matrix4::from_scale_rotation_translation(
-                                scale,
-                                rot.unwrap_or(Quat::IDENTITY),
-                                pos.to_untyped(),
-                            )
-                        },
-                        ..instance::PoiInstanceData::INVALID
-                    });
-                    let anim_start = pack_data
-                        .pois
-                        .lookup_ref(&poi.loaded_index())
-                        .and_then(|rpoi| rpoi.anim);
-                    let bounce_args = poi.lpoi_info().get_interaction_attrs().map(|i| {
-                        (
-                            i.bounce_behavior,
-                            i.bounce_height(),
-                            i.bounce_duration(),
-                            i.bounce_delay(),
-                        )
-                    });
-                    let mut bounce_delay: f32 = keys::BounceDelay::DEFAULT.into();
-                    let bounce = match bounce_args {
-                        Some((Some(behaviour), height, duration, delay)) => {
-                            bounce_delay = delay;
-                            Some((behaviour, height, duration))
-                        },
-                        bounce if anim_start.is_some() => Some({
-                            let (height, duration) = bounce
-                                .map(|(_, height, duration, delay)| {
-                                    bounce_delay = delay;
-                                    (height, duration)
-                                })
-                                .unzip();
-                            (
-                                BounceBehavior::Bounce,
-                                height.unwrap_or(keys::BounceHeight::DEFAULT.into()),
-                                duration.unwrap_or(keys::BounceDuration::DEFAULT.into()),
-                            )
-                        }),
-                        _ => None,
-                    };
-                    if let Some((behaviour, height, duration)) = bounce {
-                        let ending = draw_state.anims.contains_key(&poi.loaded_path());
-                        ib.set_bounce(height, duration, behaviour, ending, bounce_delay, anim_start);
-                    } else {
-                        ib.clear_bounce();
-                    }
-                    if attrs.rotate.is_none() {
-                        ib.marker.flags |= instance::MarkerInstanceData::FLAG_BILLBOARD;
-                    }
-                    if attrs.occlude() {
-                        ib.marker.flags |= instance::MarkerInstanceData::FLAG_OPAQUE;
-                    }
-                    if !attrs.scale_on_map_with_zoom() {
-                        ib.marker.flags |= instance::MarkerInstanceData::FLAG_MAP_STATIC_SCALE;
-                    }
-                    // pixels at 1.0 map scale, translated to local space, but quad is 2.0x2.0...
-                    ib.map_scale = attrs.map_display_size() / 2.0;
-                    ib.billboard_scale = attrs.icon_size();
-                    ib.set_size_range(attrs.min_size(), attrs.max_size());
-                    ib.marker.set_depth_bias(idx as u32);
-                    Some((&mut ib.marker, poi.lpoi_info().marker_info()))
-                },
-                Some((LoadedMarkerRef::Trail(trail), _pack_data)) => {
-                    let attrs = trail.trail_attrs();
-                    let ib = ib.write_trail(instance::TrailInstanceData {
-                        ..instance::TrailInstanceData::INVALID
-                    });
-                    ib.marker.set_anim_scale(attrs.anim_speed());
-                    ib.marker.set_depth_bias(idx as u32);
-                    if attrs.is_wall() {
-                        ib.marker.flags |= instance::MarkerInstanceData::FLAG_WALL;
-                    }
-                    Some((&mut ib.marker, trail.ltrail_info().marker_info()))
-                },
-                _ => None,
-            };
-            if let Some((ib, attrs)) = common {
-                use {glam::Vec4Swizzles, taimi_pack::attributes::CullDirection};
-
-                let r = attrs.attrs();
-                let tint = r.tint();
-                ib.colour = tint.xyz().into();
-                ib.set_alpha(tint.w);
-                let can_fade = match r.can_fade() {
-                    // I'd rather not fade all POIs by default...
-                    true if r.can_fade.is_none()
-                        && matches!(marker, Some((LoadedMarkerRef::Poi(..), ..))) =>
-                        false,
-                    f => f,
-                };
-                if !can_fade {
-                    ib.flags |= instance::MarkerInstanceData::FLAG_OBSCURE_FADE;
-                }
-                ib.flags |= match r.cull() {
-                    CullDirection::None => 0,
-                    dir => {
-                        let cull_front = matches!(dir, CullDirection::CounterClockwise)
-                            .then_some(instance::MarkerInstanceData::FLAG_FACE_CULL_FRONT);
-
-                        instance::MarkerInstanceData::FLAG_FACE_CULL | cull_front.unwrap_or(0)
-                    },
-                };
-                ib.set_fade_range(r.fade_near(), r.fade_far());
-            }
-
-            out.push(ib);
-        }
+        let out = markers
+            .into_iter()
+            .enumerate()
+            .map(|(idx, mid)| Self::build_ib_marker_id(pack_data, &*draw_state, mid, idx))
+            .collect::<Vec<_>>();
         let mut res = Ok(());
         let len = out.len();
         self.entities_ib = match out {
@@ -1962,6 +1911,284 @@ impl PackRenderResources {
         );
 
         res
+    }
+    pub fn update_ib_at(
+        &self,
+        device_context: &Dx11Context,
+        pack_data: &PackRenderData,
+        draw_state: &PackRenderState,
+        path: LoadedMarkerPath<PackMapPath>,
+        idx: usize,
+    ) -> bool {
+        let Some(ib) = self.entities_ib.as_ref() else { return true };
+        if idx >= self.len {
+            return false
+        }
+
+        let marker = pack_data.map_info.as_ref().and_then(|i| {
+            SharedMarkerRef::from_loaded_path(i, Some(&pack_data.map_state), path)
+                .and_then(|m| m.to_loaded())
+        });
+        let Some(marker) = marker else {
+            #[cfg(taimi_debug)]
+            log::debug!("can't update ib for missing {path}");
+            return false
+        };
+        let data = Self::build_ib_marker_path(pack_data, draw_state, path, marker, idx);
+        unsafe {
+            ib.update_element_at(device_context, &data, idx, 0);
+        }
+        true
+    }
+    fn find_ib_idx<I: IntoIterator<Item = MarkerId>>(
+        &self,
+        pack_path: PackPath,
+        lpath: LoadedMarkerPath,
+        markers: I,
+    ) -> Option<(usize, LoadedMarkerPath<PackMapPath>)>
+    where
+        I::IntoIter: ExactSizeIterator,
+    {
+        let markers = markers.into_iter();
+        if markers.len() != self.len {
+            #[cfg(taimi_debug)]
+            log::debug!("find_ib_idx len mismatch");
+            return None
+        }
+        markers
+            .enumerate()
+            .find_map(|(idx, mid)| match mid.marker_path::<PackMapPath>() {
+                Some(p) if p.root.root == pack_path && p.path == lpath.path => Some((idx, p)),
+                _ => None,
+            })
+    }
+    pub fn build_ib_marker_id(
+        pack_data: &IndexedList<PackRegistryNs, PackIndex, [PackRenderData]>,
+        draw_state: &PackRenderState,
+        mid: MarkerId,
+        idx: usize,
+    ) -> EntityInstanceData {
+        let path = mid
+            .marker_path::<PackMapPath>()
+            .and_then(|path| pack_data.lookup_ref(&path.root.root).map(|p| (p, path)));
+        let marker = path.and_then(|(pack, path)| {
+            pack.map_info.as_ref().and_then(|i| {
+                SharedMarkerRef::from_loaded_path(i, Some(&pack.map_state), path)
+                    .and_then(|m| m.to_loaded())
+                    .map(|m| (path, m, pack))
+            })
+        });
+
+        marker
+            .map(|(path, m, pack)| Self::build_ib_marker_path(pack, draw_state, path, m, idx))
+            .unwrap_or(EntityInstanceData::INVALID)
+    }
+    pub fn build_ib_marker_path(
+        pack_data: &PackRenderData,
+        draw_state: &PackRenderState,
+        path: LoadedMarkerPath<PackMapPath>,
+        marker: LoadedMarkerRef<'_>,
+        idx: usize,
+    ) -> EntityInstanceData {
+        use glam::Quat;
+
+        let mut ib = EntityInstanceData::INVALID;
+        let (mib, attrs) = match marker {
+            LoadedMarkerRef::Poi(ref poi) => {
+                let attrs = poi.poi_attrs();
+                let icon_size = f32::from(attrs.attr_or_default::<keys::IconSize>()) * 0.5;
+                let ib = ib.write_poi(instance::PoiInstanceData {
+                    model: {
+                        let scale = glamour::Vector3::splat(icon_size);
+                        let pos = poi.lpoi().position.to_vector();
+                        let rot = match attrs {
+                            #[cfg(deleteme)]
+                            _ => {
+                                let rot = attrs.rotate.map(|r| r.map(f32::to_radians));
+                                use glam::EulerRot;
+                                let erot = Self::tmp_rot().get();
+                                let pre = Self::tmp_pre().get() * core::f32::consts::PI;
+                                //let pre = Quat::from_euler(EulerRot::XYZ, pre.x, pre.y, pre.z);
+                                let post = Self::tmp_post().get() * core::f32::consts::PI;
+                                let post = Quat::from_euler(EulerRot::XYZ, post.x, post.y, post.z);
+                                let xyz = (rot * Self::tmp_mul().get()).to_array();
+                                let mut swizz = glam::Vec3::ZERO;
+                                let order = Self::tmp_order().get();
+                                for (i, out) in order.iter().zip([&mut swizz.x, &mut swizz.y, &mut swizz.z])
+                                {
+                                    *out = xyz[*i];
+                                }
+                                //let swizz = rot * Self::tmp_mul().get();
+                                let rot = //pre *
+                                    Quat::from_euler(erot, swizz.x + pre.x, swizz.y + pre.y, swizz.z + pre.z)
+                                    * post
+                                    ;
+                                rot
+                            },
+                            #[cfg(todo)]
+                            attrs => attrs
+                                .rotation()
+                                .map(|rot| rot * Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2)),
+                            attrs => attrs.get_attr_of::<keys::Rotate>().map(|rot| {
+                                let rot = rot.radians();
+                                // can maybe get away with less fancy math idk...
+                                Quat::from_euler(
+                                    glam::EulerRot::XZY,
+                                    rot.x - core::f32::consts::FRAC_PI_2,
+                                    rot.y,
+                                    -rot.z,
+                                )
+                            }),
+                        };
+                        glamour::Matrix4::from_scale_rotation_translation(
+                            scale,
+                            rot.unwrap_or(Quat::IDENTITY),
+                            pos.to_untyped(),
+                        )
+                    },
+                    ..instance::PoiInstanceData::INVALID
+                });
+                let anim_start = pack_data
+                    .pois
+                    .lookup_ref(&poi.loaded_index())
+                    .and_then(|rpoi| rpoi.anim);
+                let bounce_args = poi.lpoi_info().get_interaction_attrs().map(|i| {
+                    (
+                        i.bounce_behavior,
+                        i.attr_or_default_into::<keys::BounceHeight, f32>(),
+                        i.attr_or_default_into::<keys::BounceDuration, f32>(),
+                        i.attr_or_default_into::<keys::BounceDelay, f32>(),
+                    )
+                });
+                let mut bounce_delay: f32 = keys::BounceDelay::DEFAULT.into();
+                let bounce = match bounce_args {
+                    Some((Some(behaviour), height, duration, delay)) => {
+                        bounce_delay = delay;
+                        Some((behaviour, height, duration))
+                    },
+                    bounce if anim_start.is_some() => Some({
+                        let (height, duration) = bounce
+                            .map(|(_, height, duration, delay)| {
+                                bounce_delay = delay;
+                                (height, duration)
+                            })
+                            .unzip();
+                        (
+                            BounceBehavior::Bounce,
+                            height.unwrap_or(keys::BounceHeight::DEFAULT.into()),
+                            duration.unwrap_or(keys::BounceDuration::DEFAULT.into()),
+                        )
+                    }),
+                    _ => None,
+                };
+                if let Some((behaviour, height, duration)) = bounce {
+                    let ending = draw_state.anims.contains_key(&poi.loaded_path());
+                    ib.set_bounce(height, duration, behaviour, ending, bounce_delay, anim_start);
+                } else {
+                    ib.clear_bounce();
+                }
+                if !attrs.has_attr_of::<keys::Rotate>() {
+                    ib.marker.flags |= instance::MarkerInstanceData::FLAG_BILLBOARD;
+                }
+                #[cfg(taimi_debug)]
+                #[cfg(deleteme)]
+                if !attrs.has_attr_of::<keys::IconFile>() {
+                    ib.set_bounce(1.0, 1.0, BounceBehavior::Spin, false, 0.0, anim_start);
+                }
+                if attrs.attr_or_default_into::<keys::Occlude, bool>() {
+                    ib.marker.flags |= instance::MarkerInstanceData::FLAG_OPAQUE;
+                }
+                if !attrs.attr_or_default_into::<keys::ScaleOnMapWithZoom, bool>() {
+                    ib.marker.flags |= instance::MarkerInstanceData::FLAG_MAP_STATIC_SCALE;
+                }
+                // pixels at 1.0 map scale, translated to local space, but quad is 2.0x2.0...
+                ib.map_scale = attrs.attr_or_default_into::<keys::MapDisplaySize, f32>() / 2.0;
+                ib.billboard_scale = icon_size;
+                let min_size = f32::from(attrs.attr_or_default::<keys::MinSize>());
+                let max_size = match attrs.clone_attr_of::<keys::MaxSize>() {
+                    Some(max) => max.into(),
+                    // 2048 is much too large of a default isn't it?
+                    #[cfg(todo)]
+                    None => (display_size.height * 0.7)
+                        .clamp(768.max(min_size * 1.25), f32::from(keys::MaxSize::DEFAULT)),
+                    None => f32::from(keys::MaxSize::DEFAULT) * 0.7,
+                };
+                ib.set_size_range(min_size, max_size);
+                ib.marker.set_depth_bias(idx as u32);
+                (&mut ib.marker, poi.lpoi_info().marker_info())
+            },
+            LoadedMarkerRef::Trail(ref trail) => {
+                let attrs = trail.trail_attrs();
+                let ib =
+                    ib.write_trail(instance::TrailInstanceData { ..instance::TrailInstanceData::INVALID });
+                ib.marker
+                    .set_anim_scale(attrs.attr_or_default::<keys::AnimSpeed>().into());
+                ib.marker.set_depth_bias(idx as u32);
+                if attrs.attr_or_default_into::<keys::IsWall, bool>() {
+                    ib.marker.flags |= instance::MarkerInstanceData::FLAG_WALL;
+                }
+                (&mut ib.marker, trail.ltrail_info().marker_info())
+            },
+        };
+        Self::apply_ib_marker_common(mib, &**attrs.attrs(), path.path.namespace());
+        match marker {
+            LoadedMarkerRef::Poi(ref poi)
+                if !poi.lpoi_info().marker_info.has_attr_of::<keys::IconFile>()
+                    && !poi.lpoi_info().marker_info.has_attr_of::<keys::Occlude>() =>
+            {
+                // face culling makes assumptions about POIs
+                // TODO: alternate shader for real geometry
+                mib.flags &= !(instance::MarkerInstanceData::FLAG_BILLBOARD
+                    | instance::MarkerInstanceData::FLAG_FACE_CULL
+                    | instance::MarkerInstanceData::FLAG_FACE_CULL_FRONT);
+            },
+            _ => (),
+        }
+
+        ib
+    }
+    pub fn apply_ib_marker_common<R>(mib: &mut instance::MarkerInstanceData, r: &R, marker_ns: u32)
+    where
+        R: GetAttr<keys::Tint>
+            + GetAttr<keys::Alpha>
+            + GetAttr<keys::Cull>
+            + GetAttr<keys::FadeNear>
+            + GetAttr<keys::FadeFar>
+            + GetAttr<keys::CanFade>
+            // ew break this into two :<
+            + GetAttrDynExt,
+    {
+        use {glam::Vec4, taimi_pack::attributes::CullDirection};
+
+        let mut tint = Vec4::from(r.attr_or_default::<keys::Tint>());
+        if let Some(alpha) = r.clone_attr_of::<keys::Alpha>() {
+            tint.w *= f32::from(alpha);
+        }
+        mib.set_alpha(tint.w);
+        mib.colour = tint.truncate().into();
+        let cant_fade = match r.clone_attr_of::<keys::CanFade>() {
+            // maybe make the default fallback an option or something?
+            #[cfg(todo)]
+            None if marker_ns == MarkerIndex::NS_POI => true,
+            can => !bool::from(can.unwrap_or_default()),
+        };
+        if cant_fade {
+            mib.flags |= instance::MarkerInstanceData::FLAG_OBSCURE_FADE;
+        }
+        mib.flags |= match r.attr_or_default::<keys::Cull>().0 {
+            CullDirection::None => 0,
+            dir => {
+                let cull_front = matches!(dir, CullDirection::CounterClockwise)
+                    .then_some(instance::MarkerInstanceData::FLAG_FACE_CULL_FRONT);
+
+                instance::MarkerInstanceData::FLAG_FACE_CULL | cull_front.unwrap_or(0)
+            },
+        };
+        let fadenear = r.attr_or_default::<keys::FadeNear>().inches()
+            * taimi_meta::coords::MapLocalScale::METRES_PER_INCH;
+        let fadefar = r.attr_or_default::<keys::FadeFar>().inches()
+            * taimi_meta::coords::MapLocalScale::METRES_PER_INCH;
+        mib.set_fade_range(fadenear, fadefar);
     }
     #[cfg(deleteme)]
     pub fn prepare_shaders(&mut self, shaders: &ShaderLoader) -> anyhow::Result<()> {
@@ -2670,11 +2897,11 @@ impl ArcrenderSettings {
         shared_v.render.camera_dir = camera_dir.cast();
         shared_v.render.view = view;
         shared_v.render.projection = projection;
-        shared_v.render.viewport_pixel_scale = 1.0 / viewport_size.height;
-        #[cfg(todo = "unnecessary")]
-        {
-            shared_v.render.viewport_pixel_scale = viewport_size.dot(viewport_size).sqrt() * 2.0;
-        }
+        shared_v.render.viewport_pixel_scale = match viewport_size {
+            sz => instance::RenderConstantDataV::HEIGHT_SCALE_BASE / sz.height,
+            #[cfg(todo = "unnecessary")]
+            sz => shared_v.render.viewport_pixel_scale = 2.2 / sz.length(),
+        };
         shared_v.poi.billboard = taimi_meta::coords::billboard_from_look(view.into());
         shared_v.poi.map_scale = map_calibration.local_space().scale.abs().y;
     }

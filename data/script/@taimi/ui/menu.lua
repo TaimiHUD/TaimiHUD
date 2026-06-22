@@ -52,6 +52,8 @@ function MenuItem.mt:__index(k)
 	local attrname = MenuItem.attrkeys[k]
 	if k == "Checkable" then
 		return not rawget(self, "attrs"):GetAttrByKey(attrname)
+	elseif k == "CanCheck" then
+		return not rawget(self, "attrs"):GetAttrByKey("isseparator")
 	elseif attrname ~= nil then
 		return rawget(self, "attrs"):GetAttrByKey(attrname)
 	elseif k == "Id" then
@@ -64,6 +66,8 @@ function MenuItem.mt:__newindex(k, v)
 	local attrname = MenuItem.attrkeys[k]
 	if k == "Checkable" then
 		rawget(self, "attrs"):SetAttrByKey(attrname, not v)
+	elseif k == "CanCheck" then
+		rawget(self, "attrs"):SetAttrByKey("isseparator", not v)
 	elseif attrname ~= nil then
 		rawget(self, "attrs"):SetAttrByKey(attrname, v)
 		if k == "NameId" or k == "ParentId" then
@@ -144,26 +148,30 @@ end
 MenuHandle.s.attrkeys = MenuItem.attrkeys
 function MenuHandle.mt:__index(k)
 	local attrname = ud.static_of(self).attrkeys[k]
-	if attrname ~= nil then
-		return ud.unwrap(self):GetAttrByKey(attrname)
-	elseif k == "Checkable" then
+	if k == "Checkable" then
+		return not ud.unwrap(self):GetAttrByKey(attrname)
+	elseif k == "CanCheck" then
 		return not ud.unwrap(self):GetAttrByKey("isseparator")
 	elseif k == "Checked" then
 		return self:GetState()
 	elseif k == "Id" then
 		return self:GetId()
+	elseif attrname ~= nil then
+		return ud.unwrap(self):GetAttrByKey(attrname)
 	else
 		return ud.instance_mt.__index(self, k)
 	end
 end
 function MenuHandle.mt:__newindex(k, v)
 	local attrname = ud.static_of(self).attrkeys[k]
-	if attrname ~= nil then
-		ud.unwrap(self):SetAttrByKey(attrname, v)
-	elseif k == "Checkable" then
+	if k == "Checkable" then
+		ud.unwrap(self):SetAttrByKey(attrname, not v)
+	elseif k == "CanCheck" then
 		ud.unwrap(self):SetAttrByKey("isseparator", not v)
 	elseif k == "Checked" then
 		return self:SetState(v)
+	elseif attrname ~= nil then
+		ud.unwrap(self):SetAttrByKey(attrname, v)
 	else
 		return ud.instance_mt.__newindex(self, k, v)
 	end

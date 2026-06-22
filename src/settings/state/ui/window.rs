@@ -26,6 +26,8 @@ pub struct WindowState {
     pub anchor_screen: AnchorPosition,
 }
 impl WindowState {
+    pub const MIN_SIZE: UiVec2 = UiVec2::new(48.0, 72.0);
+
     pub fn is_empty(&self) -> bool {
         match self {
             Self { size, .. } if !size.is_zero() => false,

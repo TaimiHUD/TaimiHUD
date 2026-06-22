@@ -190,6 +190,7 @@ pub const WINDOW_PRIMARY: &'static str = "primary";
 pub const WINDOW_TIMERS: &'static str = "timers";
 pub const WINDOW_MARKERS: &'static str = "markers";
 pub const WINDOW_PATHING: &'static str = "pathing";
+pub const WINDOW_MESSAGES: &'static str = "message";
 
 fn marker_icon_data(marker_type: MarkerType) -> Option<Vec<u8>> {
     let arrow = include_bytes!("../data/icons/markers/cmdrArrow.png");

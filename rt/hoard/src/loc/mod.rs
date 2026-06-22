@@ -1,4 +1,4 @@
-use core::{cmp, fmt, mem};
+use core::{borrow::Borrow, cmp, fmt, mem};
 
 pub mod indexed;
 
@@ -231,16 +231,51 @@ impl<N: PhantomNamespace, L> Locator<N, L> {
 }
 impl<'a, N, L> Locator<&'a N, &'a L> {
     #[inline]
-    pub fn borrowed_path(self) -> &'a Locator<N, L>
+    pub fn to_path_ref(self) -> &'a Locator<N, L>
     where
         N: PhantomNamespace,
     {
         Locator::from_path_ref(self.path)
     }
     #[inline(always)]
-    pub const fn borrowed_path_const(self) -> &'a Locator<N, L>
+    pub const fn to_path_ref_const(self) -> &'a Locator<N, L>
     where
         N: PhantomNamespace,
+    {
+        Locator::from_path_ref_const(self.path)
+    }
+    #[inline(always)]
+    pub const fn copied(self) -> Locator<N, L>
+    where
+        N: Copy,
+        L: Copy,
+    {
+        Locator::with_parts(*self.root, *self.path)
+    }
+    #[inline(always)]
+    pub fn cloned(self) -> Locator<N, L>
+    where
+        N: Clone,
+        L: Clone,
+    {
+        Locator::with_parts(self.root.clone(), self.path.clone())
+    }
+}
+impl<'a, N, L> Locator<N, &'a L>
+where
+    N: PhantomNamespace,
+{
+    #[inline]
+    pub fn into_path_ref(self) -> &'a Locator<N, L>
+    where
+        N: PhantomNamespace,
+    {
+        Locator::from_path_ref(self.path)
+    }
+    #[inline(always)]
+    pub const fn into_path_ref_const(self) -> &'a Locator<N, L>
+    where
+        N: PhantomNamespace + Copy,
     {
         Locator::from_path_ref_const(self.path)
     }
@@ -362,7 +397,6 @@ impl<'a, N: PhantomNamespace, L> From<&'a L> for &'a Locator<N, L> {
         Locator::from_path_ref(path)
     }
 }
-#[cfg(todo)]
 impl<N: PhantomNamespace, L> Borrow<L> for Locator<N, L> {
     fn borrow(&self) -> &L {
         &self.path

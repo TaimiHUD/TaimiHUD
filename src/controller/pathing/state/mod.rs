@@ -1,3 +1,5 @@
+#[cfg(feature = "paths-dyn")]
+use taimi_pack::attributes::cell::PackValueSet;
 use {
     crate::controller::pathing::{
         info::{MapPackInfo, EMPTY_RENDER_ATTRS},
@@ -144,6 +146,15 @@ impl LoadedMapInfo {
             .lazy_map(|(p, map_info)| (*p, &map_info.info))
     }
 
+    pub fn find_marker_index(
+        &self,
+        path: MarkerPath<PackPath>,
+        map: MapPath,
+    ) -> Option<MarkerPath<PackMapPath>> {
+        let map_path = path.root.rel(map.path);
+        self.lookup_ref(&map_path)
+            .and_then(move |map_info| map_info.marker_index(path.unscope()).map(|i| i.pivot(map_path)))
+    }
     pub fn find_marker_path(&self, lpath: MarkerPath<PackMapPath>) -> Option<MarkerPath<PackPath>> {
         let root = lpath.root.root;
         self.lookup_ref(&lpath.root)
@@ -664,10 +675,16 @@ impl TaimiSet<MapPath> for LoadedPacks {
 #[derive(Debug, Clone, Default)]
 pub struct LoadedCategory {
     pub visibility: VisibilityFlags,
+    #[cfg(feature = "paths-dyn")]
+    pub attrs: PackValueSet,
 }
 
 impl LoadedCategory {
-    pub const INVALID: Self = Self { visibility: VisibilityFlags::empty() };
+    pub const INVALID: Self = Self {
+        visibility: VisibilityFlags::empty(),
+        #[cfg(feature = "paths-dyn")]
+        attrs: PackValueSet::new(),
+    };
 }
 
 fn get_overrides_mut<'a>(

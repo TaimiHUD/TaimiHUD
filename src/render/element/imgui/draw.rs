@@ -46,7 +46,7 @@ pub trait ImDrawWindowExt<'ui>: ImDrawWindow<'ui> {
         S: fmt::Display,
         //S: taimi_ui::im::text::ImStr, I: taimi_ui::im::text::IntoImStrId,
     {
-        const MIN_SIZE: ImSize2<ImSpace> = ImSize2::new(192.0f32, 96.0f32);
+        use crate::settings::state::ui::window::WindowState;
 
         let args = match self.imgui_version_num() {
             #[cfg(taimi_imgui = "180")]
@@ -65,8 +65,8 @@ pub trait ImDrawWindowExt<'ui>: ImDrawWindow<'ui> {
             )),
             _ => Default::default(),
         };
-        let min_size = MIN_SIZE.min(size.0.into());
-        let min_size = self.window_prepare_push_size_min_dyn(min_size);
+        let min_size = WindowState::MIN_SIZE.vec2.min(size.0.into());
+        let min_size = self.window_prepare_push_size_min_dyn(im::ImSpaces(min_size).into());
         self.window_prepare_size(size.0, size.1);
         let token = self.begin_window_with(ImStrId::new(id, label), Some(open), args);
         min_size.end();

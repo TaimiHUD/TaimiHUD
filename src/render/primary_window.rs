@@ -173,11 +173,6 @@ impl PrimaryWindowState {
                     desc: &PlugConfigDesc { ..Default::default() },
                     state: &mut self.plug_state,
                     scratch: &mut self.plug_scratch,
-                    #[cfg(feature = "paths")]
-                    engine: match slot {
-                        (Some(Ok(e)),) => Some(&mut *e),
-                        _ => None,
-                    },
                 }
                 .draw_on_window(ui, context);
             }
@@ -211,11 +206,6 @@ impl PrimaryWindowState {
                     desc: &PlugConfigDesc { ..Default::default() },
                     state: &mut self.plug_state,
                     scratch: &mut self.plug_scratch,
-                    #[cfg(feature = "paths")]
-                    engine: match slot {
-                        (Some(Ok(e)),) => Some(&mut *e),
-                        _ => None,
-                    },
                 }
                 .draw_on_window(ui, context);
             }

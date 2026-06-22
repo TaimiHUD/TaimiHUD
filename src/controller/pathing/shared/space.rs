@@ -88,10 +88,28 @@ impl SharedPackInfo {
         SpacePackShared::setup_texture(key, slot, self, texture)
     }
 }
-pub type TrailGeometryRequests = SharedResourceRequests<LoadedTrailPath<PackMapPath>, LoadedTrailGeometry>;
+pub enum LoadResult<T> {
+    Loaded(T),
+    /// produce fallback or disable entity etc
+    Failed,
+    /// drop cache and request again if still needed
+    Invalidate,
+}
+impl<T> LoadResult<T> {
+    #[doc(alias = "ok")]
+    pub fn get(self) -> Option<T> {
+        match self {
+            Self::Loaded(v) => Some(v),
+            _ => None,
+        }
+    }
+}
+pub type TrailGeometryRequests =
+    SharedResourceRequests<LoadedTrailPath<PackMapPath>, LoadResult<LoadedTrailGeometry>>;
 pub type TrailGeometryRequestsTx =
-    SharedResourceRequestsTx<LoadedTrailPath<PackMapPath>, LoadedTrailGeometry>;
-pub type TextureLoadRequests = SharedResourceRequests<LoadedMarkerPath<PackMapPath>, Option<TextureKey>>;
+    SharedResourceRequestsTx<LoadedTrailPath<PackMapPath>, LoadResult<LoadedTrailGeometry>>;
+pub type TextureLoadRequests =
+    SharedResourceRequests<LoadedMarkerPath<PackMapPath>, LoadResult<TextureKey>>;
 pub type TextureLoadRequestsTx =
-    SharedResourceRequestsTx<LoadedMarkerPath<PackMapPath>, Option<TextureKey>>;
+    SharedResourceRequestsTx<LoadedMarkerPath<PackMapPath>, LoadResult<TextureKey>>;
 pub type TrailGeometrySections = Arc<[LoadedTrailSection]>;

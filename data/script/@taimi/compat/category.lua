@@ -54,28 +54,54 @@ function Category.i:Remove()
 	self.pack_info:GetPackHandle():RemoveCategory(ud.unwrap(self))
 end
 function Category.i:GetMarkers(recursive)
-	local out
+	local pois
 	if recursive then
-		out = self.pack_info:GetWorldHandle():MarkersUnderCategory(self.Namespace)
+		pois = self.pack_info:GetWorldHandle():MarkersUnderCategory(self.Namespace)
 	else
-		out = self.pack_info:GetWorldHandle():MarkersInCategory(self.Namespace)
+		pois = self.pack_info:GetWorldHandle():MarkersInCategory(self.Namespace)
 	end
 	local Poi = require("@taimi/compat/poi").Poi
-	return util.table_map_collect(
-		function(m) return Poi.wrap(m, self.pack_info) end,
-		out)
+	-- return util.table_map_collect(function(m) return Poi.wrap(m, self.pack_info) end, out)
+	-- filter by current map, much like the guid query methods...
+	local Mumble = require"@taimi/core/mumblelink".Mumble
+	local current_map = Mumble.IsAvailable and Mumble.CurrentMap.Id or nil
+	local out = current_map and {}
+	for i,poi in ipairs(pois) do
+		if current_map == nil or current_map == poi:GetAttrByKey("mapid") then
+			poi = Poi.wrap(poi, self.pack_info)
+			if out ~= nil then
+				table.insert(out, poi)
+			else
+				pois[i] = poi
+			end
+		end
+	end
+	return out or pois
 end
 function Category.i:GetTrails(recursive)
-	local out
+	local trails
 	if recursive then
-		out = self.pack_info:GetWorldHandle():TrailsUnderCategory(self.Namespace)
+		trails = self.pack_info:GetWorldHandle():TrailsUnderCategory(self.Namespace)
 	else
-		out = self.pack_info:GetWorldHandle():TrailsInCategory(self.Namespace)
+		trails = self.pack_info:GetWorldHandle():TrailsInCategory(self.Namespace)
 	end
 	local Trail = require("@taimi/compat/trail").Trail
-	return util.table_map_collect(
-		function(m) return Trail.wrap(m, self.pack_info) end,
-		out)
+	-- return util.table_map_collect(function(m) return Trail.wrap(m, self.pack_info) end, out)
+	-- filter by current map, much like the guid query methods...
+	local Mumble = require"@taimi/core/mumblelink".Mumble
+	local current_map = Mumble.IsAvailable and Mumble.CurrentMap.Id or nil
+	local out = current_map and {}
+	for i,trail in ipairs(trails) do
+		if current_map == nil or current_map == trail:GetAttrByKey("mapid") then
+			trail = Trail.wrap(trail, self.pack_info)
+			if out ~= nil then
+				table.insert(out, trail)
+			else
+				trails[i] = trail
+			end
+		end
+	end
+	return out or trails
 end
 function Category.i:GetChildren(recursive)
 	local out

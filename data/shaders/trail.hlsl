@@ -84,14 +84,14 @@ static const float3 FeatherOffset = float3(FEATHER_OFFSET.xy, 1.0 + FEATHER_OFFS
 PSOutput PSMain(VSOutput input)
 {
     PSOutput output;
-    float2 newtex = float2(input.tex.x, 1 - input.tex.y);
+    float2 newtex = float2(input.tex.x, 1.0f - input.tex.y);
     float4 textureColour = input.color * shaderTexture.Sample(SampleType, newtex);
     if (textureColour.w < DISCARD_ALPHA || input.position.z < DiscardZ) { discard; }
 
     float3 displacement = input.distance.xyz;
     float distance_squared = dot(displacement, displacement);
 
-    float distance_intensity = saturate(1.0 - distance_squared / (DistanceParam.y * DistanceParam.y));
+    float distance_intensity = saturate(1.0f - distance_squared / (DistanceParam.y * DistanceParam.y));
 
     float2 viewport_size_1 = float2(ViewportParam.x, ViewportParam.y);
     float3 feather_scale = float3(DistanceParam.z, DistanceParam.w, FEATHER_SCALE_Z);
@@ -99,7 +99,7 @@ PSOutput PSMain(VSOutput input)
         abs(FeatherOffset.xy - input.position.xy * viewport_size_1),
         FeatherOffset.z - input.position.z * FEATHER_SIZE_Z /* / input.position.w */
     );
-    float3 feather3 = saturate((float1(1.0).xxx - feather_offset) * feather_scale);
+    float3 feather3 = saturate((float1(1.0f).xxx - feather_offset) * feather_scale);
     float feather = feather3.x * feather3.y;
 
     float intensity = INTENSITY_PARAM_2 * distance_intensity * distance_intensity + INTENSITY_PARAM_1 * distance_intensity + INTENSITY_PARAM_0;

@@ -4,6 +4,7 @@ use {
     crate::settings::pathing::TriggerKind,
     tokio::sync::broadcast,
 };
+#[cfg(deleteme)]
 #[cfg(feature = "paths-lua")]
 use {
     crate::controller::script::PackPlugShared,
@@ -77,6 +78,9 @@ use {
     taimi_d3d::dx11,
 };
 
+#[cfg(feature = "paths-dyn")]
+use crate::controller::pathing::registry::{LoadedMarkerPath, PackMapPath};
+
 #[derive(Component)]
 struct Render {
     disabled: bool,
@@ -119,6 +123,12 @@ pub enum SpaceEvent {
     UiResize(Option<Size2<ScreenSpace>>),
     ProcessShader(&'static str, ShaderKind, taimi_d3d::blob::Blob, String),
     ReloadShaders(bool),
+    /// attr change requires updating instance buffer
+    #[cfg(feature = "paths-dyn")]
+    DirtyMarkerI(LoadedMarkerPath<PackMapPath>),
+    /// attr change requires regenerating geometry vertex buffer
+    #[cfg(feature = "paths-dyn")]
+    DirtyTrailV(LoadedMarkerPath<PackMapPath>),
     #[cfg(deleteme)]
     #[cfg(feature = "goggles")]
     GogglesRefreshLens {
@@ -130,12 +140,14 @@ pub enum SpaceEvent {
     GogglesClearLens,
     #[cfg(feature = "goggles")]
     RefreshEdgeScale,
+    #[cfg(deleteme)]
     #[cfg(feature = "paths-lua")]
     ScriptStart {
         generation: usize,
         pack_idx: usize,
         shared: Arc<PackPlugShared>,
     },
+    #[cfg(deleteme)]
     #[cfg(feature = "paths-lua")]
     ScriptOverrideUpdate {
         generation: usize,
@@ -145,12 +157,14 @@ pub enum SpaceEvent {
         overrides: MarkerOverridesShared,
         changed: (Option<PackKeyId>, BTreeSet<PackKeyId>),
     },
+    #[cfg(deleteme)]
     #[cfg(feature = "paths-lua")]
     ScriptCreate {
         generation: usize,
         pack_idx: usize,
         marker_path: MarkerLoc,
     },
+    #[cfg(deleteme)]
     #[cfg(feature = "paths-lua")]
     ScriptMask {
         generation: usize,
@@ -187,14 +201,14 @@ fn handle_direction_timings(mut commands: Commands, mut query: Query<(Entity, &D
     let now = Instant::now();
     for (entity, direction, mut render) in &mut query {
         let start = direction.phase.start_for_set(direction.direction.offset_set());
-        if now > direction.direction.end(start) {
+        if now > direction.direction.end(start).into_std() {
             log::trace!(
                 "Entity {} reached end after {}, despawning.",
                 entity,
                 direction.direction.duration
             );
             commands.entity(entity).despawn();
-        } else if now > direction.direction.start(start) && render.disabled {
+        } else if now > direction.direction.start(start).into_std() && render.disabled {
             log::trace!(
                 "Entity {} reached start at {}!",
                 entity,
@@ -645,7 +659,21 @@ impl Engine {
                     },
                     MarkerFeed(phase_state) => self.new_phase(phase_state).context("marker new phase")?,
                     MarkerReset(timer) => self.remove_phase(timer).context("marker remove phase")?,
+                    #[cfg(feature = "paths-dyn")]
+                    DirtyMarkerI(lpath) => {
+                        // TODO: move impl into pack collection or w/e
+                        self.packs
+                            .invalidate_marker_ib(&self.render_backend.device, Some(machine), lpath);
+                        // quick to process and want to do so quickly!
+                        return Ok(Some(false))
+                    },
+                    #[cfg(feature = "paths-dyn")]
+                    DirtyTrailV(lpath) => {
+                        self.packs.invalidate_trail_vb(lpath);
+                        return Ok(Some(false))
+                    },
                     #[cfg(feature = "paths-lua")]
+                    #[cfg(deleteme)]
                     ScriptStart { generation, pack_idx, shared } => {
                         self.packs.script_start(
                             &self.render_backend.device,
@@ -656,6 +684,7 @@ impl Engine {
                         return Ok(Some(false))
                     },
                     #[cfg(feature = "paths-lua")]
+                    #[cfg(deleteme)]
                     ScriptOverrideUpdate {
                         generation,
                         pack_idx,
@@ -673,6 +702,7 @@ impl Engine {
                         return Ok(Some(false))
                     },
                     #[cfg(feature = "paths-lua")]
+                    #[cfg(deleteme)]
                     ScriptCreate { generation, pack_idx, marker_path } => {
                         self.packs.script_create(
                             &self.render_backend.device,
@@ -683,6 +713,7 @@ impl Engine {
                         return Ok(Some(false))
                     },
                     #[cfg(feature = "paths-lua")]
+                    #[cfg(deleteme)]
                     ScriptMask { generation, pack_idx, marker_path } => {
                         self.packs.script_mask(
                             &self.render_backend.device,
@@ -1421,9 +1452,8 @@ impl Engine {
             (true, true) => 0.075,
         };
         let cull = MapFrustum::from_camera_data(
-            machine.get_fov().y,
             camera,
-            machine.get_aspect_ratio(),
+            (machine.get_aspect_ratio(), machine.get_fov().y),
             depth.start * cull_near..depth.end.min(distance_max),
         );
         (camera, depth, cull)
@@ -1604,6 +1634,8 @@ impl Engine {
                 .perspective_handler
                 .set_map_cb(device_context, Self::PERSPECTIVE_SLOT);
 
+            state.mark_shaders_dirty();
+
             let map_query = PackRenderList::map_bounds_to_query(map_ctx, local_bounds);
             let entities = self.packs.render_list.iter_markers_map(
                 self.packs.pack_data.map_ref_as_slice(),
@@ -1737,9 +1769,8 @@ impl Engine {
                 let cull = match goggles_2pass {
                     Some((_, Some(obscured_dist))) if obscured_dist >= depth.start => {
                         cull_alt = MapFrustum::from_camera_data(
-                            machine.get_fov().y,
                             camera,
-                            machine.get_aspect_ratio(),
+                            (machine.get_aspect_ratio(), machine.get_fov().y),
                             depth.start..obscured_dist,
                         );
                         &cull_alt
@@ -1810,9 +1841,8 @@ impl Engine {
                 // TODO: reuse obscured distance setting for this
                 let far = (depth.end - depth.start) * 0.5 + near;
                 cull_alt = MapFrustum::from_camera_data(
-                    machine.get_fov().y,
                     cam_alt,
-                    machine.get_aspect_ratio(),
+                    (machine.get_aspect_ratio(), machine.get_fov().y),
                     near..far,
                 );
                 (&cam_alt, &cull_alt)
@@ -1833,9 +1863,8 @@ impl Engine {
                 let far = depth.end - depth.start + near;
                 // TODO: slight angle adjustment for refraction or something idk how light works sorry
                 cull_alt = MapFrustum::from_camera_data(
-                    machine.get_fov().y,
                     camera,
-                    machine.get_aspect_ratio(),
+                    (machine.get_aspect_ratio(), machine.get_fov().y),
                     near..far,
                 );
                 (&camera, &cull_alt)
@@ -1999,6 +2028,8 @@ impl Engine {
             self.setup_draw_space_legacy(machine, device_context, desc);
             self.render_backend.perspective_handler.update_cb(device_context);
         }
+
+        state.mark_shaders_dirty();
 
         match desc.pass.get_pass() {
             #[cfg(feature = "goggles2-project")]
@@ -2292,10 +2323,12 @@ impl Engine {
                 world: r.backing.render.metadata.model_matrix,
                 colour: glam::Vec3::ONE.extend(m.marker.opacity),
             };
-            r.backing
-                .set_and_draw(perspective_slot, &self.render_backend.device, &device_context, &[
-                    ibd,
-                ])?;
+            let _res = r.backing.set_and_draw(
+                Self::PERSPECTIVE_SLOT,
+                &self.render_backend.device,
+                &device_context,
+                &[ibd],
+            );
         }
         if !fixed_rot.is_empty() {
             let orig_billboard = core::mem::replace(
@@ -2320,9 +2353,12 @@ impl Engine {
                     world,
                     colour: glam::Vec3::ONE.extend(opacity),
                 };
-                backing.set_and_draw(perspective_slot, &self.render_backend.device, &device_context, &[
-                    ibd,
-                ])?;
+                let _res = backing.set_and_draw(
+                    Self::PERSPECTIVE_SLOT,
+                    &self.render_backend.device,
+                    &device_context,
+                    &[ibd],
+                );
             }
 
             self.render_backend
@@ -2334,6 +2370,18 @@ impl Engine {
                 .update_cb_v(&device_context);
         }
         let mut query_dirs = self.world.query::<(&mut Render, &Direction)>();
+        let trail_params = core::cell::LazyCell::new({
+            let settings = self.settings.as_ref();
+            move || {
+                let mut params = settings
+                    .map(crate::controller::pathing::registry::PackLoader::trail_params_for)
+                    .unwrap_or_default();
+                // none of this is helpful for 2-point trails
+                params.resolution = None;
+                params.smoothing = Some(None);
+                params
+            }
+        });
         for (r, dir) in query_dirs
             .iter(&self.world)
             .into_iter()
@@ -2375,33 +2423,46 @@ impl Engine {
                 .player
                 .truncate();
             let target = dir.direction.destination.to_vec3();
-            let mut vertices = Vec::new();
-            #[cfg(all(todo, deletemenotreally))]
-            {
-                super::pack::trail::ActiveTrail::gen_points(
-                    &mut vertices,
-                    &[player_pos.into(), target.into()],
-                    super::pack::trail::TrailParams::DEFAULT_WIDTH,
-                    1.0,
-                    false,
-                    glam::Vec3::ONE,
-                );
-                drawn = true;
-            }
+            let y_off = 1.0f32;
+            let trl = taimi_pack::trail::TrailData {
+                header: Default::default(),
+                sections: IntoIterator::into_iter([
+                    // just the one section :3
+                    taimi_pack::trail::TrailSection::with_points([
+                        glamour::Point3::<f32>::from(player_pos),
+                        target.into(),
+                    ]),
+                ])
+                .collect(),
+            };
+            // TODO: setting for this
+            let trail_scale = 1.0;
+            let vertices = crate::controller::pathing::state::LoadedTrail::vertices_with_data(
+                &trl,
+                &*trail_params,
+                trail_scale,
+                false,
+                y_off,
+                glamour::Vector3::ONE,
+                None,
+            )
+            .vertices;
             // TODO: cap size and reuse one buffer here
             let vbuffer = crate::resources::Model::from_vertices(vertices)
                 .to_buffer(&self.render_backend.device)
-                .context("direction buffer")?;
+                .context("direction buffer");
+            let Some(vbuffer) = rt::log::error_ok(vbuffer) else { continue };
             let ibd = super::dx11::InstanceBufferData {
                 world: glam::Mat4::IDENTITY,
                 colour: glam::Vec3::ONE.extend(dir.direction.opacity),
             };
             // overriding vb with trail to destination, so do this manually instead of r.backing.set_and_draw()...
             let render = &r.backing.render;
-            render.update_instance_buffer(&self.render_backend.device, &device_context, &[ibd])?;
+            let _res = render.update_instance_buffer(&self.render_backend.device, &device_context, &[ibd]);
             render.set_shaders(&device_context);
-            render.set_texture(perspective_slot, &device_context);
-            taimi_d3d::dx11::VertexBuffer::set_all(&device_context, perspective_slot, &[
+            state.mark_shaders_dirty();
+            render.set_texture(Self::PERSPECTIVE_SLOT, &device_context);
+            taimi_d3d::dx11::VertexBuffer::set_all(&device_context, Self::PERSPECTIVE_SLOT, &[
                 &vbuffer,
                 render.instance_buffer(),
             ]);
@@ -2944,7 +3005,11 @@ impl Engine {
         let sender = crate::SPACE_SENDER.try_read();
         let sender = sender.as_ref().map(|s| &**s);
         if let Ok(Some(sender)) = sender {
-            let _ = sender.try_send(e);
+            let _res = sender.try_send(e);
+            #[cfg(taimi_debug)]
+            if _res.is_err() {
+                log::error!("space rx overflow!");
+            }
         }
     }
 
@@ -3777,6 +3842,8 @@ pub struct DrawStateSpace {
     pub bound_target_render: usize,
 }
 impl DrawStateSpace {
+    pub const SHADER_UNDEF: &'static str = "";
+    pub const SHADER_UNSET: &'static str = "NULL";
     pub const ID_EMPTY: DrawStateId = 0;
     pub const SHADER_MASK_NAME: &'static str = "mask";
     /// for drawing maps
@@ -3815,20 +3882,26 @@ impl DrawStateSpace {
             false
         }
     }
+    /// TODO: better integration with legacy+arc renderer
+    pub fn mark_shaders_dirty(&mut self) {
+        self.bound_shader_v = Self::SHADER_UNDEF;
+        self.bound_shader_p = Self::SHADER_UNDEF;
+    }
     pub fn unset_shader_v(&mut self, context: &Dx11Context, _backend: &RenderBackend) {
-        if self.bound_shader_v.is_empty() {
+        #[cfg(todo = "unnecessary")]
+        if matches!(self.bound_shader_v, Self::SHADER_UNSET) {
             return
         }
-        self.bound_shader_v = Default::default();
+        self.bound_shader_v = Self::SHADER_UNSET;
         None::<dx11::ShaderV>.set(context);
         None::<dx11::shader::InputLayout>.set(context);
         // TODO: IASetVertexBuffers?
     }
     pub fn unset_shader_p(&mut self, context: &Dx11Context, _backend: &RenderBackend) {
-        if self.bound_shader_p.is_empty() {
+        if matches!(self.bound_shader_p, Self::SHADER_UNSET) {
             return
         }
-        self.bound_shader_p = Default::default();
+        self.bound_shader_p = Self::SHADER_UNSET;
         None::<dx11::ShaderP>.set(context);
     }
 
@@ -3976,8 +4049,12 @@ impl DrawStateSpace {
     pub fn cleanup(&mut self, context: &Dx11Context, backend: &RenderBackend) {
         self.unset_target(context);
         self.unsetup(context, backend);
-        self.unset_shader_v(context, backend);
-        self.unset_shader_p(context, backend);
+        if !matches!(self.bound_shader_v, Self::SHADER_UNDEF) {
+            self.unset_shader_v(context, backend);
+        }
+        if !matches!(self.bound_shader_p, Self::SHADER_UNDEF) {
+            self.unset_shader_p(context, backend);
+        }
         self.unset_depth_state(context, backend);
         self.unset_blend_state(context, backend);
         self.set_minimap_scissor(context, backend, None);

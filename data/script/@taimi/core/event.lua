@@ -70,8 +70,9 @@ local ScriptSignal = {
 	Pending = 101,
 	Ended = 102,
 	Resume = 103,
-	PathingHideMarker = 104,
-	PathingShowMarker = 105,
+	Restart = 104,
+	PathingHideMarker = 105,
+	PathingShowMarker = 106,
 }
 
 return {

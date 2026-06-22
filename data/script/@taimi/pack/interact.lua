@@ -61,6 +61,112 @@ local CompatNames = {
 			Category = "hide",
 		},
 	},
+	StandardBehaviorFilter = {
+		-- this one is both a filter and a behaviour (has interact/focus methods + IsFiltered)
+		mask = int.TriggerMask.Behaviour,
+		kind = int.TriggerMask.Behaviour,
+		filter_mask = int.FilterMask.Behaviour,
+		attrnames = {
+			-- TODO: not actually exposed by blish pathing?
+			Behavior = "raid",
+		},
+	},
+	Script = {
+		-- also both a behaviour and filter, but separation is messy...
+		mask = int.TriggerMask.Script,
+		kind = int.TriggerKind.Script,
+		-- TODO: presence = { "script-trigger", "script-focus", "script-filter" }
+		presence = true,
+		attrnames = {
+			TickFunc = "script-tick",
+			FocusFunc = "script-focus",
+			TriggerFunc = "script-trigger",
+			FilterFunc = "script-filter",
+			OnceFunc = "script-once",
+		},
+	},
+	ScriptFilter = {
+		-- TODO: remove/combine or what..?
+		mask = int.FilterMask.Script,
+		kind = int.FilterKind.Script,
+		presence = "script-filter",
+		attrnames = {
+			TickFunc = "script-tick",
+			FocusFunc = "script-focus",
+			TriggerFunc = "script-trigger",
+			FilterFunc = "script-filter",
+			OnceFunc = "script-once",
+		},
+	},
+	AchievementFilter = {
+		-- this one is both a filter and a behaviour (has interact/focus methods)
+		mask = int.TriggerMask.Behaviour,
+		filter_mask = int.FilterMask.Achievement,
+		kind = int.FilterKind.Achievement,
+		presence = "achievementid",
+		attrnames = {
+			AchievementId = "achievementid",
+			AchievementBit = "achievementbit",
+		},
+	},
+	MountFilter = {
+		mask = int.FilterMask.Mount,
+		kind = int.FilterKind.Mount,
+		attrnames = {
+			AllowedMounts = "mount",
+		},
+	},
+	MapTypeFilter = {
+		mask = int.FilterMask.MapType,
+		kind = int.FilterKind.MapType,
+		attrnames = {
+			AllowedMapTypes = "maptype",
+		},
+	},
+	RaceFilter = {
+		mask = int.FilterMask.Race,
+		kind = int.FilterKind.Race,
+		attrnames = {
+			AllowedRaces = "race",
+		},
+	},
+	RaidFilter = {
+		mask = int.FilterMask.Raid,
+		kind = int.FilterKind.Raid,
+		attrnames = {
+			AllowedFestivals = "raid",
+		},
+	},
+	FestivalFilter = {
+		mask = int.FilterMask.Festival,
+		kind = int.FilterKind.Festival,
+		attrnames = {
+			AllowedFestivals = "festival",
+		},
+	},
+	ScheduleFilter = {
+		mask = int.FilterMask.Schedule,
+		kind = int.FilterKind.Schedule,
+		presence = "schedule",
+		attrnames = {
+			CronExpression = "schedule",
+			Duration = "schedule-duration",
+		},
+	},
+	ProfessionFilter = {
+		mask = int.FilterMask.Profession,
+		kind = int.FilterKind.Profession,
+		attrnames = {
+			AllowedProfessions = "profession",
+		},
+	},
+	SpecializationFilter = {
+		mask = int.FilterMask.Specialization,
+		kind = int.FilterKind.Specialization,
+		attrnames = {
+			AllowedSpecializations = "specialization",
+		},
+	},
 	--[[ShowHideModifier = {
 		mask = bitop.bor(int.TriggerMask.Show, int.TriggerMask.Hide),
 		getters = {
@@ -73,6 +179,11 @@ for _,c in pairs(CompatNames) do
 	if c.presence == nil then
 		local _,p = next(c.attrnames)
 		c.presence = p
+	elseif c.presence == true then
+		c.presence = {}
+		for p,_ in pairs(c.attrnames) do
+			table.insert(c.presence, p)
+		end
 	end
 end
 
@@ -115,13 +226,19 @@ function IBehaviour.new(...)
 	return IBehaviour:New(...)
 end
 function IBehaviour.i:Interact(auto)
-	error("TODO: interact", 2)
+	self.marker:Interact(auto)
 end
 function IBehaviour.i:Focus()
-	error("TODO: focus", 2)
+	self.marker:Focus()
 end
 function IBehaviour.i:Unfocus()
-	error("TODO: unfocus", 2)
+	self.marker:Unfocus()
+end
+function IBehaviour.i:IsFiltered()
+	return self.marker.BehaviorFiltered
+end
+function IBehaviour.i:FilterReason()
+	return self.name
 end
 
 
@@ -144,11 +261,18 @@ function export.compat_has_named(marker, name)
 	end
 	b = CompatNames[name]
 	if b == nil then return nil end
-	if marker:GetAttrByKey(b.presence) ~= nil then
-		return name
+	local presence
+	if type(b.presence) == "table" then
+		presence = ipairs
 	else
-		return nil
+		presence = util.iter_once_i
 	end
+	for _,pkey in presence(b.presence) do
+		if marker:GetAttrByKey(pkey) ~= nil then
+			return name
+		end
+	end
+	return nil
 end
 function export.compat_get_named(marker, name)
 	name = export.compat_has_named(marker, name)

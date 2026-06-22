@@ -877,7 +877,7 @@ impl Controller {
             LoadTextureIntegrated(identifier, data) => self.load_texture_integrated(identifier, data).await,
             UiTick(tick) => {
                 #[cfg(feature = "scripts")]
-                if let Some(m) = script::LuaMessage::tick(Some(tick.ui_tick())) {
+                if let Some(m) = script::ScriptMessage::tick(Some(tick.ui_tick())) {
                     m.try_send();
                 }
 
@@ -1109,7 +1109,10 @@ impl ControllerSender {
             &api.raids,
         );
         #[cfg(feature = "scripts")]
-        let (scripting, scripting_rx) = ScriptSender::new();
+        let (scripting, scripting_rx) = ScriptSender::new(
+            #[cfg(feature = "paths-interact")]
+            &pathing.shared,
+        );
 
         let receiver = ControllerReceiver {
             gameplay: Some(gameplay.subscribe()),

@@ -113,6 +113,9 @@ where
                     }
                 }
                 categories.pop_all();
+                if let Some(unfilter) = categories.unfilter_interest {
+                    self.unfilter_interest = Some(unfilter);
+                }
             }
         }
         if token.is_some() {
@@ -121,13 +124,17 @@ where
             self.ui.table_next_column();
         }
         drop(token);
-        if let Some(unfilter) = categories.unfilter_interest {
-            self.unfilter_interest = Some(unfilter);
-        }
         if let Some(act) = pack_toggle {
             self.act_pack = Some((self.state.pack_path(), PackAction::Cat {
                 path: pseudo_root,
-                action: CategoryAction::Enable(Some(act)),
+                action: match (pseudo_root, act) {
+                    (None, false) => {
+                        #[cfg(taimi_debug)]
+                        log::debug!("MULTIROOT DISABLE HACK");
+                        CategoryAction::EnableChildren(Some(act))
+                    },
+                    _ => CategoryAction::Enable(Some(act)),
+                },
             }));
         }
         let pack_act = match pack_act {
@@ -313,7 +320,10 @@ where
         !self.flags.contains(CategoryFlags::SEPARATOR) && !self.is_lonely
     }
 }
-impl<'a, 'u> DrawCategoryHeader<'a, 'u> {
+impl<'a, 'u, 'ui, U> DrawCategoryHeader<'a, 'u, U>
+where
+    U: ?Sized + ImDrawWindow<'ui> + 'u,
+{
     pub fn draw_toggle_inline(&mut self) -> Option<bool> {
         self.ui.same_line();
         self.ui.dummy([4.0, 0.0]);

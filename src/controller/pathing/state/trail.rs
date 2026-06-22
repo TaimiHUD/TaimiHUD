@@ -17,7 +17,12 @@ use {
         spatial::{irrelevant_box3, IRRELEVANT_MIN},
     },
     taimi_pack::{
-        attributes::{RenderAttributes, TrailAttributes},
+        attributes::{
+            cell::GetAttrDynExt,
+            keys::{self, GetAttr},
+            RenderAttributes,
+            TrailAttributes,
+        },
         trail::{TrailData, TrailSection},
         Pack,
     },
@@ -129,6 +134,37 @@ impl LoadedTrail {
         Self::vertices_with_data(trail_data, params, trail.scale(), trail.is_wall(), colour)
     }
 
+    pub fn load_with_data<A: ?Sized>(
+        trail_data: &TrailData,
+        params: &TrailParams,
+        attrs: &A,
+        y_offset: f32,
+    ) -> LoadedTrailGeometry
+    where
+        A: GetAttr<keys::TrailScale>
+            + GetAttr<keys::IsWall>
+            + GetAttr<keys::Tint>
+            + GetAttr<keys::MapTint>
+            //+ GetAttr<keys::InGameVisibility>
+            //+ GetAttr<keys::MapVisibility> + GetAttr<keys::MinimapVisibility>
+            // TODO: ew remove bound
+            + GetAttrDynExt,
+    {
+        let include_map = true;
+        let mut map = LegacyTrailGeometry::empty();
+        let legacy = Self::vertices_with_data(
+            trail_data,
+            params,
+            attrs.attr_or_default::<keys::TrailScale>().into(),
+            attrs.attr_or_default::<keys::IsWall>().into(),
+            y_offset,
+            glam::Vec4::from(attrs.attr_or_default::<keys::Tint>())
+                .truncate()
+                .into(),
+            include_map.then_some(&mut map),
+        );
+        LoadedTrailGeometry { legacy, map }
+    }
     pub fn vertices_with_data(
         trail_data: &TrailData,
         params: &TrailParams,
@@ -136,36 +172,55 @@ impl LoadedTrail {
         is_wall: bool,
         y_offset: f32,
         colour: Vector3<f32>,
-    ) -> LoadedTrailGeometry {
+        mut map: Option<&mut LegacyTrailGeometry>,
+    ) -> LegacyTrailGeometry {
         let mut params = params.bake();
         params.y_offset = y_offset;
         let mut vertices = Vec::new();
         let mut section_lengths = Vec::with_capacity(trail_data.sections.len());
+        if let Some(map) = &mut map {
+            map.section_lengths.reserve_exact(trail_data.sections.len());
+        }
         for (isec, section) in trail_data.sections.iter().enumerate() {
             params.y_offset = (params.y_offset - TrailParams::Y_OFFSET_SECTION_GAP).max(0.0);
 
             let prior_count = vertices.len();
-            let vertex_count = if section.points.is_empty() {
+            let (prior_count_map, vertices_map) = map
+                .as_mut()
+                .map(|map| {
+                    let count = map.vertices.len();
+                    (count as u32, &mut map.vertices)
+                })
+                .unzip();
+            params.interpolate_section_vertices(
+                &mut vertices,
+                vertices_map,
+                section,
+                scale,
+                is_wall,
+                colour,
+            );
+            let vertex_count = (vertices.len() - prior_count) as u32;
+            #[cfg(taimi_debug)]
+            if vertex_count == 0 {
                 log::trace!("Section {isec} is empty.");
-                0
-            } else {
-                params.interpolate_section_vertices(&mut vertices, section, scale, is_wall, colour);
-                let vertex_count = vertices.len() - prior_count;
-                if log::log_enabled!(log::Level::Trace) {
-                    let point_count = vertex_count / 2;
-                    log::trace!(
-                        "Section {isec} added {} interpolation points ({} -> {}).",
-                        point_count - section.points.len(),
-                        section.points.len(),
-                        point_count,
-                    );
-                }
-                vertex_count as u32
-            };
+            } else if log::log_enabled!(log::Level::Trace) {
+                let point_count = vertex_count / 2;
+                log::trace!(
+                    "Section {isec} added {} interpolation points ({} -> {}).",
+                    point_count - section.points.len() as u32,
+                    section.points.len(),
+                    point_count,
+                );
+            }
             section_lengths.push(vertex_count);
+            if let (Some(map), Some(prior)) = (&mut map, prior_count_map) {
+                let vertex_count_map = map.vertices.len() as u32 - prior;
+                map.section_lengths.push(vertex_count_map);
+            }
         }
 
-        LoadedTrailGeometry { vertices, section_lengths }
+        LegacyTrailGeometry { vertices, section_lengths }
     }
 
     pub fn is_invalid(&self) -> bool {
@@ -236,10 +291,28 @@ impl LoadedTrailSection {
 
 #[derive(Debug, Clone)]
 pub struct LoadedTrailGeometry {
+    pub legacy: LegacyTrailGeometry,
+    pub map: LegacyTrailGeometry,
+    #[cfg(todo)]
+    pub space: ArcrenderTrailGeometry,
+}
+impl LoadedTrailGeometry {
+    pub fn empty() -> Self {
+        Self {
+            legacy: LegacyTrailGeometry::empty(),
+            map: LegacyTrailGeometry::empty(),
+        }
+    }
+    pub fn is_empty(&self) -> bool {
+        self.legacy.is_empty() && self.map.is_empty()
+    }
+}
+#[derive(Debug, Clone)]
+pub struct LegacyTrailGeometry {
     pub vertices: Vec<Vertex>,
     pub section_lengths: Vec<u32>,
 }
-impl LoadedTrailGeometry {
+impl LegacyTrailGeometry {
     pub fn clone_metadata(&self) -> Self {
         Self {
             section_lengths: self.section_lengths.clone(),

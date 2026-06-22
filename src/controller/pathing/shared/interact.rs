@@ -218,11 +218,11 @@ impl NearbyMarkers {
     pub fn remove_pois_sorted_dyn(&mut self, pois: &mut dyn Iterator<Item = NearbyPoiPath>) {
         let mut pois = pois.peekable();
         self.pois.retain(|key, _| {
-            let mut cmp = cmp::Ordering::Less;
+            let mut cmp = cmp::Ordering::Greater;
             while let Some(..) = pois.next_if(|up| {
                 let c = key.cmp(up);
-                cmp = cmp.max(c);
-                cmp.is_le()
+                cmp = cmp.min(c);
+                cmp.is_ge()
             }) {}
             cmp.is_ne()
         });
@@ -321,6 +321,15 @@ impl FollowPlayer {
     }
     pub fn threshold_distance(&self) -> f32 {
         self.threshold_distance_squared.sqrt()
+    }
+    #[inline]
+    pub fn last_tick(&self) -> u32 {
+        self.last_tick
+    }
+    #[inline]
+    #[cfg(todo = "unused")]
+    pub fn cached_tick(&self) -> u32 {
+        self.cached_tick
     }
 }
 impl FollowPlayer {
@@ -434,8 +443,19 @@ impl FollowPlayer {
             self.threshold_time_ticks = Self::threshold_interval_ticks_for(self.threshold_time);
         }
     }
+    #[inline]
+    pub fn threshold_timeout(&self) -> &Duration {
+        &self.threshold_time
+    }
     pub fn readjust_now(&mut self) {
         self.readjust_after(Instant::now());
+    }
+    pub fn position_last_seen(&self) -> Option<PlayerPosition> {
+        if self.last_seen.x.is_infinite() {
+            None
+        } else {
+            Some(self.last_seen)
+        }
     }
     pub fn readjust_after(&mut self, when: Instant) {
         let Some(adj) = when.checked_duration_since(self.last_emitted) else {

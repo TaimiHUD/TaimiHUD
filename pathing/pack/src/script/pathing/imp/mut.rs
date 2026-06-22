@@ -1,7 +1,15 @@
 use {
     crate::{
         attributes::{
-            cell::{AttrKeyValue, GetAttrDyn, PackKeyId, PackValueDyn, PackValueOf, PackValueSet},
+            cell::{
+                AttrKeyValue,
+                GetAttrDyn,
+                PackKeyId,
+                PackKeySet,
+                PackValueDyn,
+                PackValueOf,
+                PackValueSet,
+            },
             keys::{AttrKey, GetAttr, Guid},
             MarkerAttributes,
         },
@@ -60,7 +68,7 @@ impl Into<MarkerLoc> for &'_ PackTrailArc {
 #[derive(Debug, Clone, Default)]
 pub struct MarkerOverrides {
     pub attrs: PackValueSet,
-    pub masked_to_default: BTreeSet<PackKeyId>,
+    pub masked_to_default: PackKeySet,
 }
 impl MarkerOverrides {
     #[inline]
@@ -97,8 +105,8 @@ impl MarkerOverrides {
     #[inline]
     pub fn empty_ref() -> &'static Self {
         static EMPTY: MarkerOverrides = MarkerOverrides {
-            attrs: BTreeSet::new(),
-            masked_to_default: BTreeSet::new(),
+            attrs: PackValueSet::new(),
+            masked_to_default: PackKeySet::new(),
         };
         &EMPTY
     }
@@ -241,13 +249,28 @@ impl PackOverrides {
                 None => return Err(format_err!("ran out of dynamic IDs")),
             };
         }
-        dynamic.insert(path);
-        // ensure an entry for containing attrs is available, since this won't be able to fallback to the pack
-        let _ = overrides.entry(path).or_default();
+        Self::allocate_dynamic_post_inner(dynamic, overrides, path);
         Ok(path)
     }
+    pub fn allocate_dynamic_post(&mut self, loc: MarkerLoc) {
+        Self::allocate_dynamic_post_inner(&mut self.dynamic, &mut self.overrides, loc)
+    }
+    fn allocate_dynamic_post_inner(
+        dynamic: &mut BTreeSet<MarkerLoc>,
+        overrides: &mut BTreeMap<MarkerLoc, MarkerOverridesShared>,
+        loc: MarkerLoc,
+    ) {
+        dynamic.insert(loc);
+        // ensure an entry for containing attrs is available, since this won't be able to fallback to the pack
+        let _ = overrides.entry(loc).or_default();
+    }
     /// NOTE: does not store id in override attrs, must be done immediately after! TODO?
-    pub fn allocate_dynamic_cat(&mut self, id: CategoryId, pack: &'_ Pack) -> Result<MarkerLoc> {
+    pub fn allocate_dynamic_cat(
+        &mut self,
+        id: CategoryId,
+        pack: &'_ Pack,
+        loc: Option<MarkerLoc>,
+    ) -> Result<MarkerLoc> {
         let id_entry = self.cat_overrides.entry(id);
         if let btree_map::Entry::Occupied(e) = id_entry {
             let id = e.key();
@@ -271,12 +294,18 @@ impl PackOverrides {
                 },
             _ => (),
         }
-        let res = Self::allocate_dynamic_inner(
-            &mut self.dynamic,
-            &mut self.overrides,
-            MarkerType::Category,
-            pack,
-        );
+        let res = match loc {
+            None => Self::allocate_dynamic_inner(
+                &mut self.dynamic,
+                &mut self.overrides,
+                MarkerType::Category,
+                pack,
+            ),
+            Some(loc) => {
+                Self::allocate_dynamic_post_inner(&mut self.dynamic, &mut self.overrides, loc);
+                Ok(loc)
+            },
+        };
         if let &Ok((_, cat_idx)) = &res {
             let _ = id_entry.insert_entry(cat_idx);
         }

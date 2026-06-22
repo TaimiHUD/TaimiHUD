@@ -9,12 +9,7 @@ use {
     glamour::{Box3, Point3, Size3},
     taimi_meta::packs::{CategoryIndex, CategoryPath, PoiPath, VisibilityFlags},
     taimi_pack::{
-        attributes::{
-            keys::{self, GetAttr},
-            InteractionAttributes,
-            PoiAttributes,
-            RenderAttributes,
-        },
+        attributes::{cell::GetAttrDynExt, keys, InteractionAttributes, PoiAttributes, RenderAttributes},
         Pack,
         Poi,
     },
@@ -124,35 +119,15 @@ impl LoadedPoi {
         unsafe { overrides.poi.as_mut().unwrap_unchecked() }
     }
 
-    /// TODO: diagonal only relevant if rotation isn't axis-aligned,
-    /// also billboards will always be aligned to the near/far clip planes btw...
     pub fn bounds(&self) -> Box3<DrawSpace> {
-        let max_diagonal = match self.poi_attrs().icon_size {
-            Some(edge_len) => (edge_len.powi(2) * 2.0).sqrt(),
-            None => {
-                const DEFAULT_DIAG: f32 = match taimi_pack::attributes::keys::IconSize::DEFAULT.0 {
-                    1.0 => core::f32::consts::SQRT_2,
-                    #[cfg(todo = "unnecessary")]
-                    ohno => (ohno.powi(2) * 2.0).sqrt(),
-                    _ => panic!("default poi size changed!"),
-                };
-                DEFAULT_DIAG
-            },
-        };
-        let size = Size3::splat(max_diagonal * 0.5).to_vector();
-        let origin = self.position();
-        Box3::new(origin - size, origin + size)
+        self.info().bounds_at(self.position())
     }
     pub fn position(&self) -> Point3<DrawSpace> {
         self.marker_position + self.offset()
     }
 
     pub fn offset(&self) -> Point3<PackSpace> {
-        Point3::ZERO.with_y(
-            GetAttr::<keys::HeightOffset>::get_attr_or_default(self.poi_attrs())
-                .into_owned()
-                .into(),
-        )
+        Point3::ZERO.with_y(self.poi_attrs().attr_or_default::<keys::HeightOffset>().into())
     }
     pub fn marker_position_for(poi: &Poi) -> Point3<PackSpace> {
         Point3::from_raw(poi.position.into())

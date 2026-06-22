@@ -153,10 +153,10 @@ EventLoop.i[event.HostSignal.Exit] = function(self, ev)
 	self.state = ended
 end
 EventLoop.i[event.HostSignal.PathingTick] = EventLoop.i.HandleGeneric
-EventLoop.i[event.HostSignal.PathingMapExit] = function(self, ev)
+function EventLoop.i:HandleMarkerCleanup(ev)
 	local stopped = self:HandleGeneric(ev)
 	if stopped == false then return false end
-	local _map_id = ev:GetArgsPositional()
+	-- local _map_id = ev:GetArgsPositional()
 	-- clean up marker handlers in preparation for incoming...
 	-- TODO: maybe just avoid doing this...
 	local function clear_marker_handlers(s)
@@ -171,6 +171,7 @@ EventLoop.i[event.HostSignal.PathingMapExit] = function(self, ev)
 	clear_marker_handlers(event.HostSignal.PathingFocus)
 	clear_marker_handlers(event.HostSignal.PathingUnfocus)
 end
+EventLoop.i[event.HostSignal.PathingMapExit] = EventLoop.i.HandleMarkerCleanup
 
 local poi_tag, trail_tag, poi_wrap, trail_wrap
 local function marker_wrap(target)
@@ -269,6 +270,39 @@ function EventLoop.i:PrepareMarkerHandlers(pack_info)
 		end
 	end
 	self:RegisterFunc(event.HostSignal.PathingTick, tick_markers)
+	local function request_restart(self, ev, map_id)
+		local prev_map_id = self.__compat_map_id
+		local repeated_start = prev_map_id ~= nil
+		if map_id ~= nil then
+			self.__compat_map_id = map_id
+		else
+			-- wait and see..?
+			repeated_start = false
+		end
+		if repeated_start and prev_map_id == map_id then
+			-- map re-entry may not really be fine but can be?
+			-- let's try to get away with it and see what breaks...
+			repeated_start = false
+			local Mumble = require"@taimi/core/mumblelink".Mumble
+			if Mumble.IsAvailable and Mumble.PlayerCharacter ~= nil then
+				if self.__compat_char_name ~= Mumble.PlayerCharacter.Name then
+					-- except for charsel because tehstrails saves progress per char as an example
+					repeated_start = true
+				end
+			end
+		end
+		if repeated_start then
+			-- request script restart prior to map setup
+			self:QueueMessage(event.ScriptSignal.Restart)
+			return false
+		elseif self.__compat_char_name == nil then
+			local Mumble = require"@taimi/core/mumblelink".Mumble
+			if Mumble.IsAvailable and Mumble.PlayerCharacter ~= nil then
+				self.__compat_char_name = Mumble.PlayerCharacter.Name
+			end
+		end
+	end
+	self:RegisterFunc(event.HostSignal.PathingMapExit, request_restart)
 
 	local binds
 	local pathing_hack_interact = require("@taimi/core/rt").pathing_hack_interact
