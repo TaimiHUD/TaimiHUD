@@ -1,4 +1,5 @@
 use {
+    crate::attributes::keys::{self, GetAttr, SetAttr},
     anyhow::anyhow,
     bitflags::bitflags,
     std::{mem, str::FromStr},
@@ -117,5 +118,32 @@ impl FromIterator<Race> for Races {
 impl<'a> FromIterator<&'a Race> for Races {
     fn from_iter<T: IntoIterator<Item = &'a Race>>(iter: T) -> Self {
         iter.into_iter().map(|&f| Self::from(f)).collect()
+    }
+}
+
+impl<T> GetAttr<Race> for T where
+    T: ?Sized + GetAttr<keys::Races>,
+{
+    fn has_attr(&self) -> bool {
+        GetAttr::<keys::Races>::get_attr(self).map(|f|
+            !f.0.is_empty()
+        ).unwrap_or(false)
+    }
+    fn get_attr(&self) -> Option<std::borrow::Cow<'_, Race>> {
+        GetAttr::<keys::Races>::get_attr(self).and_then(|f|
+            f.0.iter_races().next()
+        ).map(std::borrow::Cow::Owned)
+    }
+}
+impl<T> SetAttr<Race> for T where
+    T: ?Sized + SetAttr<keys::Races> + GetAttr<keys::Races>,
+{
+    fn set_attr(&mut self, value: Race) {
+        let mut f = GetAttr::<keys::Races>::get_attr_or_default(self).into_owned();
+        f.0.insert(value.into());
+        SetAttr::<keys::Races>::set_attr(self, f)
+    }
+    fn unset_attr(&mut self) {
+        SetAttr::<keys::Races>::unset_attr(self)
     }
 }

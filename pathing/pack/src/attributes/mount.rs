@@ -1,4 +1,5 @@
 use {
+    crate::attributes::keys::{self, GetAttr, SetAttr},
     anyhow::anyhow,
     bitflags::bitflags,
     std::{mem, str::FromStr},
@@ -160,5 +161,32 @@ impl FromIterator<Mount> for Mounts {
 impl<'a> FromIterator<&'a Mount> for Mounts {
     fn from_iter<T: IntoIterator<Item = &'a Mount>>(iter: T) -> Self {
         iter.into_iter().map(|&f| Self::from(f)).collect()
+    }
+}
+
+impl<T> GetAttr<Mount> for T where
+    T: ?Sized + GetAttr<keys::Mounts>,
+{
+    fn has_attr(&self) -> bool {
+        GetAttr::<keys::Mounts>::get_attr(self).map(|f|
+            !f.0.is_empty()
+        ).unwrap_or(false)
+    }
+    fn get_attr(&self) -> Option<std::borrow::Cow<'_, Mount>> {
+        GetAttr::<keys::Mounts>::get_attr(self).and_then(|f|
+            f.0.iter_mounts().next()
+        ).map(std::borrow::Cow::Owned)
+    }
+}
+impl<T> SetAttr<Mount> for T where
+    T: ?Sized + SetAttr<keys::Mounts> + GetAttr<keys::Mounts>,
+{
+    fn set_attr(&mut self, value: Mount) {
+        let mut f = GetAttr::<keys::Mounts>::get_attr_or_default(self).into_owned();
+        f.0.insert(value.into());
+        SetAttr::<keys::Mounts>::set_attr(self, f)
+    }
+    fn unset_attr(&mut self) {
+        SetAttr::<keys::Mounts>::unset_attr(self)
     }
 }

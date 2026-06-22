@@ -552,10 +552,10 @@ impl<'a> PackBuilder<'a> {
             if poi.map_id == 0 {
                 poi.map_id = category.map_id;
             }
-            let has_achievement_filter = poi.attributes.filters.as_ref().map(|f| f.achievement_id().is_some()).unwrap_or(false);
+            let has_achievement_filter = attributes::keys::GetAttr::<attributes::keys::AchievementId>::has_attr(poi);
             let needs_behaviour = || poi.attributes.interaction.as_ref().map(|i| i.taco_behavior.is_none()).unwrap_or(true);
             if has_achievement_filter && needs_behaviour() {
-                poi.attributes.interaction_mut().taco_behavior = Some(attributes::TacoBehavior::DismissAchievement);
+                poi.attributes.interaction_mut().taco_behavior = Some(attributes::TacoBehavior::TaimiAchievement);
             }
         }
         for trail in &mut pack.trails {

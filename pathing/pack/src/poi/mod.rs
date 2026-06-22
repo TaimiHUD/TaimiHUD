@@ -175,12 +175,6 @@ impl Poi {
             .and_then(|poi| poi.occlude)
             .unwrap_or(keys::Occlude::DEFAULT.into())
     }
-    pub fn rotate(&self) -> Option<Vec3> {
-        self.attributes.get_poi().and_then(|poi| poi.rotate())
-    }
-    pub fn rotation(&self) -> Option<Quat> {
-        self.attributes.get_poi().and_then(|poi| poi.rotation())
-    }
 }
 
 impl fmt::Display for Poi {

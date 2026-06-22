@@ -1,4 +1,5 @@
 use {
+    crate::attributes::keys::{self, GetAttr, SetAttr},
     anyhow::anyhow,
     bitflags::bitflags,
     std::{mem, str::FromStr},
@@ -144,5 +145,32 @@ impl FromIterator<Profession> for Professions {
 impl<'a> FromIterator<&'a Profession> for Professions {
     fn from_iter<T: IntoIterator<Item = &'a Profession>>(iter: T) -> Self {
         iter.into_iter().map(|&f| Self::from(f)).collect()
+    }
+}
+
+impl<T> GetAttr<Profession> for T where
+    T: ?Sized + GetAttr<keys::Professions>,
+{
+    fn has_attr(&self) -> bool {
+        GetAttr::<keys::Professions>::get_attr(self).map(|f|
+            !f.0.is_empty()
+        ).unwrap_or(false)
+    }
+    fn get_attr(&self) -> Option<std::borrow::Cow<'_, Profession>> {
+        GetAttr::<keys::Professions>::get_attr(self).and_then(|f|
+            f.0.iter_professions().next()
+        ).map(std::borrow::Cow::Owned)
+    }
+}
+impl<T> SetAttr<Profession> for T where
+    T: ?Sized + SetAttr<keys::Professions> + GetAttr<keys::Professions>,
+{
+    fn set_attr(&mut self, value: Profession) {
+        let mut f = GetAttr::<keys::Professions>::get_attr_or_default(self).into_owned();
+        f.0.insert(value.into());
+        SetAttr::<keys::Professions>::set_attr(self, f)
+    }
+    fn unset_attr(&mut self) {
+        SetAttr::<keys::Professions>::unset_attr(self)
     }
 }
