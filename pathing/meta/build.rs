@@ -118,10 +118,8 @@ where
         let consumed = buf.written().len();
         src.consume(consumed);
         src_len += consumed;
-        if out.written().len() > out.unwritten().len() || true {
-            dest.write_all(out.written())?;
-            out.reset();
-        }
+        dest.write_all(out.written())?;
+        out.reset();
     }
     while !encoder.finish(&mut out)? {
         assert!(!out.written().is_empty());
