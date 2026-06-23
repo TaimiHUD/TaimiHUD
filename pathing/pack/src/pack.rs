@@ -430,7 +430,7 @@ impl<'a> PackBuilder<'a> {
                     cat
                 },
                 None if id.as_str().is_empty() => {
-                    if warnings_empty.insert(guid.clone()) {
+                    if warnings_empty.insert(*guid) {
                         #[cfg(todo)]
                         let guid = Guid::from_ref(guid);
                         log::warn!("No category provided for {guid}");

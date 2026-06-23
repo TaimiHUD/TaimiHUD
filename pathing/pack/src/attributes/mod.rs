@@ -503,16 +503,16 @@ pub struct FilterAttributes {
 impl FilterAttributes {
     pub fn merge(&mut self, base: &Self) {
         if self.festivals.is_none() {
-            self.festivals = base.festivals.clone();
+            self.festivals = base.festivals;
         }
         if self.mounts.is_none() {
-            self.mounts = base.mounts.clone();
+            self.mounts = base.mounts;
         }
         if self.professions.is_none() {
-            self.professions = base.professions.clone();
+            self.professions = base.professions;
         }
         if self.races.is_none() {
-            self.races = base.races.clone();
+            self.races = base.races;
         }
         if self.specializations.is_none() {
             self.specializations = base.specializations.clone();
