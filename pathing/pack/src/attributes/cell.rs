@@ -33,8 +33,11 @@ impl PackKeyId {
         self.id
     }
 
-    #[inline(never)]
-    pub fn for_type<T: AttrKeyValue>() -> Option<Self> {
+    #[inline]
+    pub fn for_type<T: AttrKeyValue>() -> Self {
+        Self::try_for_type::<T>().expect("pack key registry oom")
+    }
+    pub fn try_for_type<T: AttrKeyValue>() -> Option<Self> {
         let reg = PackKeyRegistration::for_type::<T>();
         PackKeyRegistry::registry_register(reg)
     }
@@ -304,7 +307,12 @@ where
     where
         Self: Sized,
     {
-        PackKeyId::for_type::<Self>().expect("pack key registry oom")
+        // allow "specialization" despite this being a blanket impl
+        match () {
+            #[cfg(todo = "unnecessary")]
+            _ => PackKeyId::for_type::<Self>(),
+            _ => Self::__pack_key_of(),
+        }
     }
     fn clone_dyn(&self) -> Option<Box<dyn AttrKeyValue>> {
         Some(Box::new(self.clone()) as Box<_>)
@@ -1604,12 +1612,9 @@ macro_rules! pack_attr {
         'packkeymatch: loop {
             let pack_id = $id;
             $(
-                let exp_id = {
-                    /// TODO: switch to single array here and index into it?
-                    /// if captures aren't needed could use dyn dispatch for the branches too...
-                    static PACK_ID_OF: ::std::sync::LazyLock<$crate::attributes::cell::PackKeyId> = ::std::sync::LazyLock::new(<$attr as $crate::attributes::cell::AttrKeyValue>::pack_key_of);
-                    *PACK_ID_OF
-                };
+                // TODO: switch to single array here and index into it?
+                // if captures aren't needed could use dyn dispatch for the branches too...
+                let exp_id = <$attr as $crate::attributes::cell::AttrKeyValue>::pack_key_of();
                 if pack_id == exp_id {
                     break 'packkeymatch ($v)
                 }
@@ -1629,10 +1634,7 @@ macro_rules! pack_attr {
             if false { unsafe { ::core::hint::unreachable_unchecked() } }
             $(
                 else if ({
-                    let exp_id = {
-                        static PACK_ID_OF: ::std::sync::LazyLock<$crate::attributes::cell::PackKeyId> = ::std::sync::LazyLock::new(<$attr as $crate::attributes::cell::AttrKeyValue>::pack_key_of);
-                        *PACK_ID_OF
-                    };
+                    let exp_id = <$attr as $crate::attributes::cell::AttrKeyValue>::pack_key_of();
                     pack_id == exp_id
                 }) {
                     let $bind = unsafe { $crate::attributes::cell::PackValueOf::<$attr>::new_unchecked($bind) };

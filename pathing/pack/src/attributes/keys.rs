@@ -37,6 +37,16 @@ pub trait AttrKey: fmt::Debug + Clone {
             .iter()
             .any(|alias| attr.eq_ignore_ascii_case(alias))
     }
+    /// hack to allow "specialization" of the blanket impl for [super::cell::AttrKeyValue::pack_key_of]
+    ///
+    /// implement using a static lazy lock or something to avoid more expensive typeid lookups
+    #[doc(hidden)]
+    fn __pack_key_of() -> super::cell::PackKeyId
+    where
+        Self: Sized + super::cell::AttrKeyValue,
+    {
+        super::cell::PackKeyId::for_type::<Self>()
+    }
 }
 
 #[cfg(todo)]
@@ -2252,6 +2262,16 @@ macro_rules! pack_key {
             type Storage = $ty;
             const ATTR: &'static str = $attr;
             const ATTR_NAMES: &'static [&'static str] = &[$attr $(, $($attr_alias),*)?];
+
+            fn __pack_key_of() -> $crate::attributes::cell::PackKeyId
+            where
+                $ident: $crate::attributes::cell::AttrKeyValue,
+            {
+                static KEY: ::std::sync::LazyLock<$crate::attributes::cell::PackKeyId> = ::std::sync::LazyLock::new(
+                    $crate::attributes::cell::PackKeyId::for_type::<$ident>
+                );
+                *KEY
+            }
         }
 
         $(crate::attributes::keys::pack_key! {
@@ -2277,6 +2297,7 @@ super::cell::pack_attr! {
     impl !Default for ScriptFilter {}
     impl !Default for ScriptOnce {}
     impl !Default for Title {}
+    impl !Default for Text {}
     impl !Default for TitleColour {}
     impl !Default for Info {}
     impl !Default for CopyValue {}
