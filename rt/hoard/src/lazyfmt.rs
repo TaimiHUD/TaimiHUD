@@ -323,7 +323,7 @@ impl<F> StrFmt<F> {
     pub const fn new(f: F) -> Self {
         Self { f, displayed: OnceCell::new() }
     }
-    pub fn from_str<S: Into<Box<str>>>(s: S) -> Self
+    pub fn from_cached<S: Into<Box<str>>>(s: S) -> Self
     where
         F: Default,
     {
