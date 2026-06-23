@@ -73,7 +73,7 @@ impl FileMapping {
         if self.handle.is_invalid() {
             return Ok(())
         }
-        let handle = mem::replace(&mut self.handle, HANDLE::default());
+        let handle = mem::take(&mut self.handle);
         unsafe { CloseHandle(handle) }.context("CloseHandle")
     }
 }
@@ -120,7 +120,7 @@ impl<'a> FileMapped<'a> {
         if self.view.Value.is_null() {
             return Ok(())
         }
-        let view = mem::replace(&mut self.view, Default::default());
+        let view = mem::take(&mut self.view);
         unsafe { UnmapViewOfFile(view) }.context("UnmapViewOfFile")
     }
 
