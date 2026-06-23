@@ -83,6 +83,23 @@ impl LoadedMarkerInfo {
             },
         }
     }
+    pub(crate) fn marker_attrs_mut(&mut self) -> &mut Arc<MarkerAttributes> {
+        let render_attrs = if let Either::Left(a) = &self.attrs {
+            Some(a.clone())
+        } else { None };
+        if let Some(render_attrs) = render_attrs {
+            let mut attrs = MarkerAttributes::default();
+            attrs.render = Some(render_attrs);
+            self.attrs = Either::Right(Arc::new(attrs));
+        }
+        match &mut self.attrs {
+            Either::Right(a) => a,
+            #[cfg(taimi_debug)]
+            Either::Left(..) => unreachable!(),
+            #[cfg(not(taimi_debug))]
+            Either::Left(..) => unsafe { core::hint::unreachable_unchecked() },
+        }
+    }
     pub fn get_filter_attrs(&self) -> Option<&Box<FilterAttributes>> {
         match &self.attrs {
             Either::Right(a) => a.filters.as_ref(),

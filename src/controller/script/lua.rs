@@ -1,16 +1,18 @@
 #[cfg(feature = "paths-lua")]
 use {
-    super::PackLoc,
-    crate::{controller::script::pathing::LuaPackDesc, controller::pathing::registry::SharedLoaderBox as SharedLoader},
+    crate::{
+        controller::script::pathing::{marker_index2loc, LuaPackDesc},
+        controller::pathing::registry::PackPath,
+    },
     core::num::NonZero,
     taimi_hoard::lazyfmt,
     taimi_pack::{
-        pack::Pack,
         script::pathing::{
-            imp::{MarkerLoc, MarkerOverrides, MarkerOverridesAttrs, PackMarkerRef, PackOverrides},
+            imp::{MarkerOverrides, MarkerOverridesAttrs, PackMarkerRef, PackOverrides},
             ScriptApiUser,
         },
     },
+    taimi_meta::packs::MarkerPath,
     tokio::sync::mpsc,
 };
 use {
@@ -26,7 +28,7 @@ use {
         PlugsShared,
         ScriptMessage,
     },
-    crate::{controller::Controller, exports::runtime as rt, space::engine::SpaceEvent},
+    crate::{controller::Controller, exports::runtime as rt},
     anyhow::Context,
     core::{fmt, ops},
     mlua::{
@@ -450,9 +452,8 @@ impl LuaController {
                     let Some(overrides) = PackOverrides::shared_try_read(&desc.shared().overrides) else {
                         continue
                     };
-                    for (tag, status) in focused {
-                        let Some(path @ (MarkerType::Poi, idx)) = LuaPackDesc::pathable_tag_from(*tag)
-                        else {
+                    for (&tag, status) in focused {
+                        let path @ (MarkerType::Poi, idx) = marker_index2loc(tag.path) else {
                             continue
                         };
                         let o = overrides.overrides.get(&path).map(MarkerOverrides::shared_read);
@@ -500,9 +501,8 @@ impl LuaController {
                                 let msg = ScriptMessage::marker_event_bool(
                                     ScriptNotification::PathingFocus,
                                     false,
-                                    path,
-                                    desc.path.generation,
-                                    desc.path.index,
+                                    tag,
+                                    desc.path,
                                 );
                                 match msg {
                                     ScriptMessage::Lua(m) => {
@@ -524,9 +524,8 @@ impl LuaController {
                             let msg = ScriptMessage::marker_event_bool(
                                 ScriptNotification::PathingTrigger,
                                 false,
-                                path,
-                                desc.path.generation,
-                                desc.path.index,
+                                tag,
+                                desc.path,
                             );
                             match msg {
                                 ScriptMessage::Lua(m) => {
@@ -572,12 +571,11 @@ impl LuaController {
                     let Some(overrides) = PackOverrides::shared_try_read(&desc.shared().overrides) else {
                         continue
                     };
-                    for (tag, status) in active.iter_mut() {
+                    for (&tag, status) in active.iter_mut() {
                         if status.focused {
                             continue
                         }
-                        let Some(path @ (MarkerType::Poi, idx)) = LuaPackDesc::pathable_tag_from(*tag)
-                        else {
+                        let path @ (MarkerType::Poi, idx) = marker_index2loc(tag.path) else {
                             continue
                         };
                         let o = overrides.overrides.get(&path).map(MarkerOverrides::shared_read);
@@ -640,9 +638,8 @@ impl LuaController {
                                 let msg = ScriptMessage::marker_event_bool(
                                     ScriptNotification::PathingFocus,
                                     true,
-                                    path,
-                                    desc.path.generation,
-                                    desc.path.index,
+                                    tag,
+                                    desc.path,
                                 );
                                 match msg {
                                     ScriptMessage::Lua(m) => {
@@ -678,11 +675,20 @@ impl LuaController {
                 }
             },
             #[cfg(feature = "paths-lua")]
-            LuaMessage::SpawnPack(pack, loader, entrypoint, generation, idx) => {
+            LuaMessage::DebugFlushMarkerChanges(target) => {
+                let desc = Self::locate_pack_mut(&mut self.packs, target)?;
+                let shared = desc.shared();
+                let mut active = shared.active_markers.lock().ok().context("poison")?;
+                for (&path, s) in active.iter_mut() {
+                    s.flush_changes_to(shared, path);
+                }
+            },
+            #[cfg(feature = "paths-lua")]
+            LuaMessage::SpawnPack(pack_path, entrypoint) => {
                 let res = self
-                    .spawn_pack(&pack, &loader, entrypoint, generation, idx)
+                    .spawn_pack(pack_path, entrypoint)
                     .and_then(|desc| self.start_pack(desc))
-                    .with_context(|| format!("spawning pack.lua for {}", pack.name));
+                    .with_context(|| format!("spawning pack.lua for {}", pack_path));
                 res?;
             },
             LuaMessage::SpawnPlug(path) => {
@@ -824,7 +830,7 @@ impl LuaController {
     }
     #[cfg(feature = "paths")]
     #[inline]
-    fn locate_pack_mut(packs: &mut [LuaPackDesc], loc: PackLoc) -> anyhow::Result<&mut LuaPackDesc> {
+    fn locate_pack_mut(packs: &mut [LuaPackDesc], loc: PackPath) -> anyhow::Result<&mut LuaPackDesc> {
         packs
             .iter_mut()
             .find(|p| p.path() == loc)
@@ -841,7 +847,7 @@ impl LuaController {
     }
     #[cfg(feature = "paths")]
     #[inline]
-    fn locate_pack(packs: &[LuaPackDesc], loc: PackLoc) -> anyhow::Result<&LuaPackDesc> {
+    fn locate_pack(packs: &[LuaPackDesc], loc: PackPath) -> anyhow::Result<&LuaPackDesc> {
         packs
             .iter()
             .find(|p| p.path() == loc)
@@ -903,11 +909,8 @@ impl LuaController {
     #[cfg(feature = "paths-lua")]
     fn spawn_pack(
         &mut self,
-        pack: &Arc<Pack>,
-        loader: &SharedLoader,
+        pack_path: PackPath,
         entrypoint: Box<dyn LoaderAssetReader>,
-        generation: usize,
-        pack_idx: usize,
     ) -> anyhow::Result<LuaPackDesc> {
         let mut pack_lua = Vec::new();
         { entrypoint }
@@ -927,23 +930,23 @@ impl LuaController {
             genv.set_metatable(Some(mt))?;
             genv
         };
+        let shared = PackPlugShared::new(pack_path)?;
         let chunk = lua
             .lua()
             .load(&pack_lua)
-            .set_name(format!("={}/pack.lua", pack.name))
+            .set_name(format!("={}/pack.lua", &shared.plug.name[..]))
             .set_environment(pack_globals.clone());
         let chunk = match lua.is_unsecured() {
             None => chunk.set_mode(mlua::ChunkMode::Text),
             Some(lua::UnsafeRuntime) => chunk,
         }
         .into_function()?;
-        let path = PackLoc::new(generation, pack_idx);
         let mut pack_info = LuaPackDesc {
             plug: LuaPlugBase::with_globals(
                 pack_globals,
-                PackPlugShared::new(path, &pack, Arc::downgrade(loader)),
+                shared,
             ),
-            path,
+            path: pack_path,
         };
 
         let runner = {
@@ -1102,12 +1105,12 @@ impl LuaController {
     #[cfg(feature = "paths-lua")]
     fn start_map_markers<I>(
         &mut self,
-        target: PackLoc,
+        target: PackPath,
         map_id: Option<NonZero<MapID>>,
         markers: I,
     ) -> anyhow::Result<()>
     where
-        I: IntoIterator<Item = MarkerLoc>,
+        I: IntoIterator<Item = MarkerPath>,
     {
         use mlua::ObjectLike;
 
@@ -1142,9 +1145,10 @@ impl LuaController {
         }
 
         let key_once = keys::ScriptOnce::pack_key_of();
-        for loc in markers {
+        for marker_path in markers {
+            let loc = marker_index2loc(marker_path.path);
             if let Some(focus) = &mut marker_focus {
-                focus.insert(LuaPackDesc::pathable_tag_for(loc), Default::default());
+                focus.insert(marker_path, Default::default());
             }
             let marker = unsafe { PackMarkerRef::new_unchecked(pack.clone(), loc) };
             let overrides = PackOverrides::shared_read(&overrides);
@@ -1179,7 +1183,7 @@ impl LuaController {
                 &*(inconspicuous_whisling as *const _ as *const keys::Script)
             }
             let mut has_once = false;
-            let markertag = LuaPackDesc::pathable_tag_for(loc);
+            let markertag = marker_path.path.repr();
             let guid = attrs.clone_attr_dyn_of::<keys::Guid>();
             let name = lazyfmt::fmt_fn(|f| {
                 if let Some(guid) = &guid {
@@ -1253,16 +1257,18 @@ pub enum LuaMessage {
     SpawnPlug(PathBuf),
     #[cfg(todo)]
     #[cfg(feature = "paths")]
-    SpawnPlugLoader(SharedLoader, Box<dyn LoaderAssetReader>),
+    SpawnPlugLoader(SharedLoaderBox, Box<dyn LoaderAssetReader>),
     #[cfg(feature = "paths-lua")]
-    SpawnPack(Arc<Pack>, SharedLoader, Box<dyn LoaderAssetReader>, usize, usize),
+    SpawnPack(PackPath, Box<dyn LoaderAssetReader>),
     #[cfg(feature = "paths-lua")]
     NotifyMapEnter {
-        target: PackLoc,
+        target: PackPath,
         map_id: MapID,
-        active_markers: Box<dyn Iterator<Item = MarkerLoc> + Send>,
+        active_markers: Box<dyn Iterator<Item = MarkerPath> + Send>,
         append: bool,
     },
+    #[cfg(feature = "paths-lua")]
+    DebugFlushMarkerChanges(PackPath),
     #[cfg(todo)]
     SpawnPlug(String, Box<dyn std::io::BufRead>),
     /// signals that [PackPlugShared.pending_start] has some entries to process
@@ -1339,7 +1345,7 @@ pub enum LuaExecContext {
     Global,
     Plugin(usize),
     #[cfg(feature = "paths-lua")]
-    Pack(PackLoc),
+    Pack(PackPath),
 }
 #[derive(Clone)]
 pub struct LuaPlugBase {

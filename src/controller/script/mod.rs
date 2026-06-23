@@ -46,7 +46,10 @@ pub mod ui;
 pub use self::lua::LuaMessage;
 pub use self::menu::{PlugMenusById, PlugMenusShared};
 #[cfg(feature = "paths")]
-pub use self::pathing::{PackLoc, PackPlugShared};
+pub use self::pathing::PackPlugShared;
+#[cfg(feature = "paths")]
+#[deprecated]
+pub(crate) use crate::controller::pathing::registry::PackPath as PackLoc;
 
 pub struct ScriptController {
     pub rx: ScriptReceiver,

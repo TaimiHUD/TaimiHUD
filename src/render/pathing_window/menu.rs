@@ -95,7 +95,7 @@ impl PathingWindowState {
                     drop(script_menus);
                     if let Some(clicked) = clicked {
                         if shared.menu_write(&clicked, |s| s.click_state()).is_some() {
-                            ScriptMessage::menu_clicked_pack(clicked, 0, pack_idx.path as _)
+                            ScriptMessage::menu_clicked_pack(clicked, pack_idx)
                                 .try_send();
                         }
                     }

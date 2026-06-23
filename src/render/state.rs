@@ -711,8 +711,7 @@ impl RenderState {
                 }
                 let plugs = self.machine.plug_ui_state.plugs_rx.get_mut();
                 for (path, pack) in self.machine.pack_ui_state.pack_state.iter_mut() {
-                    let packloc = crate::controller::script::PackLoc::new(0, path.path as usize);
-                    pack.state.plug = plugs.packs.get(&packloc).cloned();
+                    pack.state.plug = plugs.packs.get(&path).cloned();
                 }
             }
 

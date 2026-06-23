@@ -18,14 +18,12 @@ use {
         render::element::prelude::*,
     },
     core::mem,
-    std::{borrow::Cow, fs, path::PathBuf, sync::{Arc, Weak}},
+    std::{borrow::Cow, fs, path::PathBuf, sync::Arc},
     taimi_sync::watched::Watched,
 };
 
 #[cfg(feature = "paths-lua")]
 use crate::controller::pathing::registry::PackPath;
-#[cfg(feature = "paths")]
-use crate::{controller::script::PackLoc, space::Engine};
 
 #[derive(Debug, Clone, Default)]
 pub struct PlugConfigDesc {}
@@ -126,7 +124,7 @@ impl<'a> PlugConfig<'a> {
                     .iter();
                 #[cfg(feature = "paths")]
                 for (&path, pack) in packs {
-                    let _id = ui.push_id(Weak::as_ptr(&pack.pack));
+                    let _id = ui.push_id(Arc::as_ptr(pack));
                     if ui.selectable(
                         im_fmt!("{}", pack.plug.name),
                         *target == LuaExecContext::Pack(path),
@@ -177,26 +175,33 @@ impl<'a> PlugConfig<'a> {
             let label = im_fmt!("{}", pack.plug.name);
             let node = ui.begin_tree_node_framed(
                 ImCondition::startup(false),
-                Weak::as_ptr(&pack.pack) as *const (),
+                Arc::as_ptr(pack) as *const (),
                 label,
                 true,
             );
             let Some(_node) = node else { continue };
             #[cfg(todo)]
+            Self::draw_cats_lua(ui, context, target, pack);
+
+            if ui.button(c"stop") {
+                LuaMessage::Stop { context: target }.try_send();
+                #[cfg(deleteme)] {
+                    // TODO: message instead!
+                    pack.script_data = None;
+                }
+            }
+            #[cfg(todo)]
+            {
+                ui.same_line();
+                if ui.button(c"reset") {}
+            }
+            ui.same_line();
+            if ui.button(c"dbgmarkerrefresh") {
+                LuaMessage::DebugFlushMarkerChanges(path).try_send();
+            }
+            #[cfg(todo)]
             if pack.has_scripts() {
                 Self::draw_cats_lua(ui, context, target, pack);
-                if ui.button(c"stop") {
-                    LuaMessage::Stop { context: target }.try_send();
-                    #[cfg(deleteme)] {
-                        // TODO: message instead!
-                        pack.script_data = None;
-                    }
-                }
-                #[cfg(todo)]
-                {
-                    ui.same_line();
-                    if ui.button(c"reset") {}
-                }
                 ui.same_line();
                 #[cfg(deleteme)]
                 if ui.button(c"reset markers") {
@@ -575,9 +580,9 @@ impl<'a> PlugConfig<'a> {
             );
             let Some(packs) = packs else { return };
             let sharedpacks = packs.packs.borrow();
-            for path in &plugs.available_packs {
+            for &path in &plugs.available_packs {
                 ui.text(im_fmt!("#{}", path.path));
-                let Some(pack) = sharedpacks.lookup_ref(path) else { continue };
+                let Some(pack) = sharedpacks.lookup_ref(&path) else { continue };
                 ui.same_line();
                 ui.text(im_fmt!("{}", pack.info));
                 #[cfg(todo = "unnecessary")]
@@ -603,10 +608,9 @@ impl<'a> PlugConfig<'a> {
                             let asset = l.blocking_lock().load_asset_dyn(crate::controller::script::pathing::PACK_ENTRYPOINT);
                             asset
                             .context("pack.lua")
-                            .map(move |a| (p, l, a))
                         });
-                    if let Some((pack, loader, asset)) = rt::log::error_ok(asset) {
-                        LuaMessage::SpawnPack(pack, loader, asset, 0, path.path as _).try_send();
+                    if let Some(asset) = rt::log::error_ok(asset) {
+                        LuaMessage::SpawnPack(path, asset).try_send();
                     }
                 }
                 ui.unindent();
