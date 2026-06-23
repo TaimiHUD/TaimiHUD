@@ -68,11 +68,8 @@ impl<T: ?Sized> UnsaferCell<T> {
     pub const unsafe fn as_ref_unchecked(&self) -> &T {
         &*self.0.get()
     }
-    #[inline(always)]
-    pub unsafe fn as_mut_unchecked(&self) -> &mut T {
-        &mut *self.0.get()
-    }
 }
+
 impl<T: ?Sized> ops::Deref for UnsaferCell<T> {
     type Target = UnsafeCell<T>;
     #[inline(always)]
