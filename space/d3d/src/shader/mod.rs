@@ -313,9 +313,9 @@ mod defs {
         }
     }
 
-    impl Into<BTreeMap<String, String>> for ShaderDefinitions {
-        fn into(self) -> BTreeMap<String, String> {
-            self.defs.into_iter().map(Into::into).collect()
+    impl From<ShaderDefinitions> for BTreeMap<String, String> {
+        fn from(value: ShaderDefinitions) -> BTreeMap<String, String> {
+            value.defs.into_iter().map(Into::into).collect()
         }
     }
 

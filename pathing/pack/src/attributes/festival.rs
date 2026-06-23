@@ -67,9 +67,9 @@ impl AsRef<str> for Festival {
         self.as_str()
     }
 }
-impl Into<String> for Festival {
-    fn into(self) -> String {
-        self.as_str().into()
+impl From<Festival> for String {
+    fn from(value: Festival) -> String {
+        value.as_str().into()
     }
 }
 
