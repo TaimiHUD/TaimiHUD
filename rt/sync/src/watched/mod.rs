@@ -167,12 +167,12 @@ impl<T> Watcher<T> {
             r.mark_unchanged();
         }
     }
-    pub fn try_mark_changed(&mut self) -> Result<(), ()> {
+    pub fn try_mark_changed(&mut self) -> bool {
         if let Some(r) = self.get_receiver_mut() {
             r.mark_changed();
-            Ok(())
+            true
         } else {
-            Err(())
+            false
         }
     }
     pub fn try_read(&self) -> Option<watch::Ref<'_, T>> {
