@@ -229,6 +229,14 @@ impl LuaController {
                 let mut processed = None;
                 self.signal_markers_started = false;
                 for pack in &self.packs {
+                    {
+                        // XXX: HACK!
+                        if let Ok(mut active) = pack.shared().active_markers.lock() {
+                            for (&path, s) in active.iter_mut() {
+                                s.flush_changes_to(pack.shared(), path);
+                            }
+                        }
+                    }
                     let Ok(mut pending) = pack.shared().pending_start.lock() else { continue };
                     if pending.is_empty() {
                         continue
@@ -1148,7 +1156,7 @@ impl LuaController {
         for marker_path in markers {
             let loc = marker_index2loc(marker_path.path);
             if let Some(focus) = &mut marker_focus {
-                focus.insert(marker_path, Default::default());
+                let _ = focus.entry(marker_path).or_default();
             }
             let marker = unsafe { PackMarkerRef::new_unchecked(pack.clone(), loc) };
             let overrides = PackOverrides::shared_read(&overrides);

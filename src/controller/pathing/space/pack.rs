@@ -9,8 +9,9 @@ use {
             PackInfoSignature,
             PackVecOf,
         },
-        space::DrawSpace,
+        space::{DrawSpace, SpaceContext},
         state::{LoadedMapInfo, LoadedMaps, LoadedPacks},
+        shared::SharedGameplayMap,
     },
     bvh::{aabb, bvh::Bvh},
     glamour::{Box3, Point3},
@@ -38,6 +39,7 @@ use {
         },
         spatial::{box3aabb, cull::BvhQuery, irrelevant_box3, BvhShape, MintConv},
     },
+    taimi_sync::watched::watch,
 };
 
 #[derive(Clone)]
@@ -274,8 +276,7 @@ impl SpaceEntities {
     pub fn rebuild_extra(
         &mut self,
         dirty_indices: Option<&mut dyn Iterator<Item = usize>>,
-        map_info: &LoadedMapInfo,
-        maps: &LoadedMaps,
+        gameplay: &watch::Receiver<SharedGameplayMap>,
     ) {
         let entities_count = match () {
             #[cfg(todo = "unnecessary")]
@@ -291,6 +292,7 @@ impl SpaceEntities {
                 (true, &mut range as &mut dyn Iterator<Item = usize>)
             },
         };
+        let maps = gameplay.borrow();
         for i in indices {
             let Some(extra) = self.extra.get_mut(i) else { continue };
             if dirty_check && !extra.is_invalid() {
@@ -301,13 +303,13 @@ impl SpaceEntities {
                 continue
             }
             let Some(path) = e.value.id.marker_path::<PackMapPath>() else { continue };
-            let map = maps.lookup_with_info(map_info, &path.root);
+            let map = maps.get_state(path.root);
             match path.path.namespace() {
                 MarkerIndex::NS_POI => {
                     let lpath: LoadedPoiPath = LoadedPoiPath::with_path(path.path.index_poi_unchecked());
-                    let lpoi = map.and_then(|(map, _i)| map.lpois().lookup_ref(&lpath));
+                    let lpoi = map.and_then(|map| map.pois().lookup_ref(&lpath));
                     if let Some(lpoi) = lpoi {
-                        extra.position = lpoi.position();
+                        extra.position = lpoi.position;
                     }
                 },
                 MarkerIndex::NS_TRAIL => {
@@ -493,9 +495,8 @@ impl SpacePackCollection {
     fn prepare_entity_update(
         &mut self,
         map_id: MapIndex,
+        gameplay: &watch::Receiver<SharedGameplayMap>,
         packs: &LoadedPacks,
-        map_info: &LoadedMapInfo,
-        maps: &LoadedMaps,
     ) -> EntityUpdateReport {
         let mut report = EntityUpdateReport::new(map_id);
         self.loaded_packs
@@ -503,7 +504,7 @@ impl SpacePackCollection {
             .resize_with(packs.packs.len(), SpacePack::default);
         if self.map_id != report.map_id {
             self.clear();
-            self.prepare_entity_population(map_id, packs, map_info, maps);
+            self.prepare_entity_population(map_id, gameplay);
             return report
         }
 
@@ -514,35 +515,38 @@ impl SpacePackCollection {
             pack_data.clear();
         }
         let pd = self.loaded_packs.map_mut_as_slice();
-        let cx = (maps, map_info, &self.bvh);
-        report.retain_entities(&mut self.render_entities, pd, cx);
-        self.prepare_entity_population(map_id, packs, map_info, maps);
+        {
+            let maps = gameplay.borrow();
+            let cx = (&*maps, &self.bvh);
+            report.retain_entities(&mut self.render_entities, pd, cx);
+        }
+        self.prepare_entity_population(map_id, gameplay);
         report
     }
     fn prepare_entity_population(
         &mut self,
         map_id: MapIndex,
-        packs: &LoadedPacks,
-        map_info: &LoadedMapInfo,
-        maps: &LoadedMaps,
+        gameplay: &watch::Receiver<SharedGameplayMap>,
     ) {
-        for ((path, _pack), pack_data) in packs.packs.iter().zip(self.loaded_packs.values_mut()) {
+        let maps = gameplay.borrow();
+        for (path, pack_data) in self.loaded_packs.iter_mut() {
             let path = path.rel(map_id);
-            let Some((map, _map_info)) = maps.lookup_with_info(map_info, &path) else {
+            let Some(map) = maps.get_state(path) else {
                 continue
             };
             pack_data
                 .populated_pois
-                .extend_to_size(map.lpois().len() as usize, false);
+                .extend_to_size(map.pois().len() as usize, false);
             pack_data
                 .populated_trails
-                .extend_to_size(map.ltrails().len() as usize, false);
+                .extend_to_size(map.trails().len() as usize, false);
         }
     }
     /// `Err(true)` if bvh requires rebuild, `Err(false)` if mutated in-place
     pub fn rebuild_entities(
         &mut self,
         map_id: MapIndex,
+        gameplay: &watch::Receiver<SharedGameplayMap>,
         packs: &LoadedPacks,
         map_info: &LoadedMapInfo,
         maps: &LoadedMaps,
@@ -554,38 +558,40 @@ impl SpacePackCollection {
             mut dirty,
             hidden,
             ..
-        } = self.prepare_entity_update(map_id, packs, map_info, maps);
+        } = self.prepare_entity_update(map_id, gameplay, packs);
         self.map_id = Some(map_id);
 
         let prev_entities_end = self.render_entities.entities.len();
+        let maps = gameplay.borrow();
         for ((path, pack), pack_data) in packs.packs.iter().zip(self.loaded_packs.values_mut()) {
             let path = path.rel(map_id);
-            let map = maps.lookup_with_info(map_info, &path);
+            let map = maps.for_ref(path);
             if map.is_some() || !pack.info.has_map(map_id) {
                 let _info_sig_prev = mem::replace(&mut pack_data.info_sig, pack.info.sig);
             }
-            let Some((map, map_info)) = map else {
+            let Some((map_info, Some(map))) = map else {
                 pack_data.clear_entities();
                 continue
             };
             // to iter of (marker_id, bounds, position)
             let pois = map
-                .lpois()
+                .pois()
                 .into_iter()
+                .zip(map_info.pois().values())
                 .zip(pack_data.populated_pois.iter_mut())
-                .filter(|((_, lpoi), _)| lpoi.visibility.is_visible())
+                .filter(|(((_, lpoi), _), _)| lpoi.visibility.is_visible())
                 .filter_map(|(v, mut populated)| match mem::replace(&mut *populated, true) {
                     false => Some(v),
                     true => None,
                 })
-                .filter_map(move |(lpoi_path, lpoi)| {
+                .filter_map(move |((lpoi_path, lpoi), lpoii)| {
                     let marker_path: MarkerPath = lpoi_path.pivot_to();
                     let mpath = path.rel(marker_path.path);
                     let mid = MarkerId::for_marker(mpath);
-                    Some((mid, lpoi.bounds()))
+                    Some((mid, lpoii.bounds_at(lpoi.position)))
                 });
 
-            let trails = map.ltrails().into_iter().zip(map_info.trail_info.data.iter());
+            let trails = map.trails().into_iter().zip(map_info.trail_info.data.iter());
             let trails = trails
                 .zip(pack_data.populated_trails.iter_mut())
                 .filter(|(((_, ltrail), _), _)| ltrail.visibility.is_visible())
@@ -627,12 +633,13 @@ impl SpacePackCollection {
                 }
             }
         }
+        drop(maps);
         let new_entities = prev_entities_end..self.render_entities.entities.len();
         let dirty_indices = dirty.values().copied().chain(new_entities.clone());
 
         // update extra data that's been invalidated
         self.render_entities
-            .rebuild_extra(Some(&mut dirty_indices.clone()), map_info, maps);
+            .rebuild_extra(Some(&mut dirty_indices.clone()), gameplay);
 
         let removed_count = removed.count_ones();
         let partial_rebuild = {
@@ -1058,7 +1065,7 @@ struct EntityUpdateReport {
     hidden: BTreeMap<MarkerId, usize>,
     map_id: Option<MapIndex>,
 }
-type EntityRetainContext<'a> = (&'a LoadedMaps, &'a LoadedMapInfo, &'a Bvh<f32, 3>);
+type EntityRetainContext<'a> = (&'a SharedGameplayMap, &'a Bvh<f32, 3>);
 impl EntityUpdateReport {
     fn new(map_id: MapIndex) -> Self {
         Self {
@@ -1084,7 +1091,7 @@ impl EntityUpdateReport {
         e: &mut BvhShape<SpaceEntity>,
         extra: Option<&mut SpaceEntityExtra>,
         pack_data: Option<(MarkerPath<PackMapPath>, &mut SpacePack)>,
-        (maps, map_info, bvh): EntityRetainContext<'_>,
+        (maps, bvh): EntityRetainContext<'_>,
     ) -> bool {
         if e.is_invalid() {
             self.unallocated.insert(i);
@@ -1103,15 +1110,16 @@ impl EntityUpdateReport {
             return false
         }
 
-        let Some((map, map_info)) = maps.lookup_with_info(map_info, &map_path.root) else {
+        let Some((map_info, Some(map))) = maps.for_ref(map_path.root) else {
             log::debug!("TODO: {map_path} info missing for {}", e.id);
             return false
         };
         let (vis, bounds) = match map_path.path.namespace() {
             MarkerIndex::NS_POI => {
                 let lpath: LoadedPoiPath = LoadedPoiPath::with_path(map_path.path.index_poi_unchecked());
-                let Some(lpoi) = map.lpois().lookup_ref(&lpath) else { return false };
-                let bounds = lpoi.bounds();
+                let Some(lpoi) = map.pois().lookup_ref(&lpath) else { return false };
+                let Some(lpoii) = map_info.pois().lookup_ref(&lpath) else { return false };
+                let bounds = lpoii.bounds_at(lpoi.position);
                 let bounds = if !vec_eq(bounds.min.to_array(), e.bounds.min.into())
                     || !vec_eq(bounds.max.to_array(), e.bounds.max.into())
                 {
@@ -1126,7 +1134,7 @@ impl EntityUpdateReport {
                     LoadedTrailPath::with_path(map_path.path.trail_index_unchecked());
                 let seci = map_path.path.trail_section_unchecked();
                 let section_path: TrailSectionPath = TrailSectionPath::with_path(seci);
-                let Some(ltrail) = map.ltrails().lookup_ref(&lpath) else { return false };
+                let Some(ltrail) = map.trails().lookup_ref(&lpath) else { return false };
                 let Some(tinfo) = map_info.trail_info.lookup_ref(&lpath) else { return false };
                 let Some(lsection) = tinfo.sections().lookup_ref(&section_path) else {
                     return false

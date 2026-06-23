@@ -10,6 +10,7 @@ use {
                     SharedGameplayMap,
                     SharedPackInfo,
                     TrailGeometrySections,
+                    SharedMapPackLoaded,
                 },
                 state::{
                     LoadedMapInfo,
@@ -211,14 +212,14 @@ impl PathingController {
         self.space.report_load(loaded);
     }
     fn texture_for_loaded_marker(
-        map: &LoadedMapPack,
+        map: &SharedMapPackLoaded,
         path: LoadedMarkerPath,
-        pack_path: PackPath,
+        pack_path: PackMapPath,
     ) -> Option<&AttrString> {
         let tex = match path.path.variant() {
             MarkerIndexVariant::Poi(poii) => {
                 let lpath: LoadedPoiPath = LoadedPoiPath::with_path(poii);
-                let lpoi = map.lpois().lookup_ref(&lpath);
+                let lpoi = map.pois().lookup_ref(&lpath);
                 if lpoi.is_none() {
                     log::debug!("BUG? tex req for missing {lpath} on {}", path.root);
                 }
@@ -226,12 +227,12 @@ impl PathingController {
             },
             MarkerIndexVariant::Trail(traili) | MarkerIndexVariant::TrailSection(traili, _) => {
                 let lpath: LoadedTrailPath = LoadedTrailPath::with_path(traili);
-                map.ltrails().lookup_ref(&lpath)?.trail_attrs().texture.as_ref()
+                map.trails().lookup_ref(&lpath)?.trail_attrs().texture.as_ref()
             },
             _ => None,
         };
         if !crate::built_info::IS_TAGGED_VERSION && tex.is_none() {
-            let path = LocDisplay(pack_path.rel(map.map_id).rel(path));
+            let path = LocDisplay(pack_path.root.rel(path));
             log::debug!("WHY? no texture found on {path}");
         }
         tex
@@ -258,10 +259,8 @@ impl PathingController {
             return false
         }
         let path = id.marker_path::<PackMapPath>().map(|path| {
-            let texture = self
-                .maps
-                .lookup_ref(&path.root)
-                .map(|map| Self::texture_for_loaded_marker(map, path.unscope(), path.root.root).cloned());
+            let texture = self.space.maps_rx.borrow().get_info(path.root)
+                .map(|map| Self::texture_for_loaded_marker(map, path.unscope(), path.root).cloned());
             (path, texture)
         });
         let Some((path, texture)) = path else {
@@ -598,7 +597,7 @@ impl PathingController {
                 let space_packs = Arc::make_mut(&mut self.space.packs);
                 let still_loading = self.loader.shared.packs.read_still_waiting().0;
                 let bvh_dirty =
-                    space_packs.rebuild_entities(map_id, &self.packs, &self.map_info, &self.maps, still_loading);
+                    space_packs.rebuild_entities(map_id, &self.space.maps_rx, &self.packs, &self.map_info, &self.maps, still_loading);
                 match bvh_dirty {
                     Err(true) => {
                         if !still_loading {
@@ -666,7 +665,7 @@ impl PathingController {
                 Some(false) => None,
                 _ => {
                     log::info!("space entity rebuild...");
-                    Some(space_packs.rebuild_entities(map_id, &self.packs, &self.map_info, &self.maps, false))
+                    Some(space_packs.rebuild_entities(map_id, &self.space.maps_rx, &self.packs, &self.map_info, &self.maps, false))
                 },
             }
         };

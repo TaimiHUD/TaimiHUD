@@ -699,6 +699,7 @@ impl RenderState {
         #[cfg(feature = "scripts")]
         {
             self.machine.plug_ui_state.pre_render();
+            self.primary_window.plug_state.applicable = self.machine.plug_ui_state.enabled;
         }
         #[cfg(feature = "paths")]
         {

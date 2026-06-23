@@ -1,5 +1,6 @@
 use {
-    crate::controller::pathing::PathingController,
+    crate::controller::pathing::{space::DrawSpace, PathingController},
+    glamour::{Point3, Box3, Size3},
     futures::future::Either,
     std::{
         ops,
@@ -7,7 +8,7 @@ use {
     },
     taimi_meta::packs::{CategoryIndex, CategoryPath},
     taimi_pack::{
-        attributes::{FilterAttributes, InteractionAttributes, MarkerAttributes, RenderAttributes},
+        attributes::{FilterAttributes, InteractionAttributes, MarkerAttributes, RenderAttributes, PoiAttributes, TrailAttributes},
         trail::TrlPath,
     },
 };
@@ -177,6 +178,12 @@ impl LoadedTrailInfo {
     pub fn marker_info(&self) -> &LoadedMarkerInfo {
         &self.marker_info
     }
+    #[inline(always)]
+    pub fn trail_attrs(&self) -> &Box<TrailAttributes> {
+        unsafe {
+            self.marker_info.attrs().trail.as_ref().unwrap_unchecked()
+        }
+    }
 }
 impl ops::Deref for LoadedTrailInfo {
     type Target = LoadedMarkerInfo;
@@ -212,6 +219,30 @@ impl LoadedPoiInfo {
     #[inline(always)]
     pub fn marker_info(&self) -> &LoadedMarkerInfo {
         &self.marker_info
+    }
+    #[inline(always)]
+    pub fn poi_attrs(&self) -> &Box<PoiAttributes> {
+        unsafe {
+            self.marker_info.attrs().poi.as_ref().unwrap_unchecked()
+        }
+    }
+    /// TODO: diagonal only relevant if rotation isn't axis-aligned,
+    /// also billboards will always be aligned to the near/far clip planes btw...
+    pub fn bounds_at(&self, origin: Point3<DrawSpace>) -> Box3<DrawSpace> {
+        let max_diagonal = match self.poi_attrs().icon_size {
+            Some(edge_len) => (edge_len.powi(2) * 2.0).sqrt(),
+            None => {
+                const DEFAULT_DIAG: f32 = match taimi_pack::attributes::keys::IconSize::DEFAULT.0 {
+                    1.0 => core::f32::consts::SQRT_2,
+                    #[cfg(todo = "unnecessary")]
+                    ohno => (ohno.powi(2) * 2.0).sqrt(),
+                    _ => panic!("default poi size changed!"),
+                };
+                DEFAULT_DIAG
+            },
+        };
+        let size = Size3::splat(max_diagonal * 0.5).to_vector();
+        Box3::new(origin - size, origin + size)
     }
 }
 impl ops::Deref for LoadedPoiInfo {

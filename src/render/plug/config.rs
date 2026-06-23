@@ -124,7 +124,7 @@ impl<'a> PlugConfig<'a> {
                     .iter();
                 #[cfg(feature = "paths")]
                 for (&path, pack) in packs {
-                    let _id = ui.push_id(Arc::as_ptr(pack));
+                    let _id = ui.push_id(Arc::as_ptr(pack) as *const ());
                     if ui.selectable(
                         im_fmt!("{}", pack.plug.name),
                         *target == LuaExecContext::Pack(path),
@@ -133,7 +133,7 @@ impl<'a> PlugConfig<'a> {
                     }
                 }
                 for (&path, plug) in plugs.plugs.iter() {
-                    let _id = ui.push_id(Arc::as_ptr(plug));
+                    let _id = ui.push_id(Arc::as_ptr(plug) as *const ());
                     if ui.selectable(im_fmt!("{}", plug.name), *target == LuaExecContext::Plugin(path)) {
                         *target = LuaExecContext::Plugin(path);
                     }
@@ -171,6 +171,7 @@ impl<'a> PlugConfig<'a> {
             if !pack.script_capable {
                 continue
             }
+            let _id = ui.push_id(Arc::as_ptr(pack) as *const ());
             let target = LuaExecContext::Pack(path);
             let label = im_fmt!("{}", pack.plug.name);
             let node = ui.begin_tree_node_framed(
@@ -282,6 +283,7 @@ impl<'a> PlugConfig<'a> {
             }
         }
         for (&path, plug) in plugs.plugs.iter() {
+            let _id = ui.push_id(Arc::as_ptr(plug) as *const ());
             let target = LuaExecContext::Plugin(path);
             let label = im_fmt!("{}", &plug.name[..]);
             let node = ui.begin_tree_node_framed(
@@ -559,6 +561,7 @@ impl<'a> PlugConfig<'a> {
         }
         let plugs = self.state.plugs.get_mut();
         for path in &plugs.available_plugs {
+            let _id = ui.push_id(Arc::as_ptr(path) as *const ());
             #[cfg(todo)]
             let (name, suffix) = match path.file_name() {
                 #[cfg(feature = "scripts-lua")]
@@ -581,6 +584,7 @@ impl<'a> PlugConfig<'a> {
             let Some(packs) = packs else { return };
             let sharedpacks = packs.packs.borrow();
             for &path in &plugs.available_packs {
+                let _id = ui.push_id(path.path as usize);
                 ui.text(im_fmt!("#{}", path.path));
                 let Some(pack) = sharedpacks.lookup_ref(&path) else { continue };
                 ui.same_line();

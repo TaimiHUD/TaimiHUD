@@ -9,6 +9,7 @@ pub use self::config::{PlugConfig, PlugConfigCache, PlugConfigDesc, PlugConfigSt
 
 #[derive(Debug, Default)]
 pub struct PlugElements {
+    pub enabled: bool,
     pub plugs_rx: Watched<PlugsShared>,
     pub plugs_rx_dirty: bool,
 }
@@ -19,9 +20,14 @@ impl PlugElements {
                 self.plugs_rx.resubscribe_to(&s.plugs_shared);
             })).flatten();
             if subscribed.is_none() { return }
+            self.enabled = crate::SETTINGS.get().and_then(|s| s.blocking_read().pathing.as_ref().map(|p| p.scripting_enable)).unwrap_or(false);
         }
-        if let Some(..) = self.plugs_rx.try_read_if_changed() {
+        if let Some(plugs) = self.plugs_rx.try_read_if_changed() {
             self.plugs_rx_dirty |= true;
+            #[cfg(feature = "paths-lua")]
+            {
+                self.enabled |= !plugs.available_packs.is_empty();
+            }
         }
     }
     /// TODO: this dirty field is a hack, if PackElements uses this just give it its own watcher instead

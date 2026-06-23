@@ -137,6 +137,19 @@ impl SharedGameplayMap {
         let state = self.state.lookup_extend_with(path.path, || None);
         (info, state)
     }
+    pub fn for_ref(
+        &self,
+        path: PackMapPath,
+    ) -> Option<(&SharedMapPackLoaded, Option<&SharedMapPackState>)> {
+        if self.map_id != Some(path.path) {
+            return None
+        }
+        let info = self.info.lookup_ref(&path.root);
+        let state = self.state.lookup_ref(&path.root)
+            .and_then(|s| s.as_ref());
+        info.and_then(|i| i.as_ref())
+            .map(|i| (i, state))
+    }
     pub fn for_mut(
         &mut self,
         path: PackMapPath,
@@ -232,6 +245,12 @@ impl SharedGameplayMap {
         self.get_mut(path)
             .and_then(|map| map.info.lookup_mut(&root))
             .and_then(|info| info.as_mut())
+    }
+    pub fn get_info(&self, path: PackMapPath) -> Option<&SharedMapPackLoaded> {
+        let Locator { root, path } = path;
+        self.get_ref(path)
+            .and_then(|map| map.info.lookup_ref(&root))
+            .and_then(|info| info.as_ref())
     }
     pub fn get_info_for(&self, path: PackPath) -> Option<(PackMapPath, &SharedMapPackLoaded)> {
         let map_id = self.map_id?;

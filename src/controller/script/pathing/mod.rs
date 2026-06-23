@@ -139,7 +139,9 @@ impl PoiStatus {
                 self.pending_changes.iter().filter_map(|&key| o.get_dyn(key).map(|v| (key, v.and_then(|v| v.clone_dyn()).map(PackValueCell::from_box)))).collect::<Vec<_>>()
             )
         };
-        let Some(changes) = changes else { return };
+        let Some(changes) = changes else {
+            return
+        };
         self.pending_changes.clear();
         gp.send_if_modified(|gp| {
             #[cfg(todo)]
@@ -153,10 +155,14 @@ impl PoiStatus {
                         MarkerIndex::NS_POI => MarkerIndex::with_poi(map_info.pois[..].len() as _),
                         MarkerIndex::NS_TRAIL => MarkerIndex::with_trail(map_info.trails[..].len() as _),
                         MarkerIndex::NS_CAT => MarkerIndex::with_category(map_info.categories[..].len() as _),
-                        _ => return false,
+                        _ => {
+                            return false
+                        },
                     })
                 } else {
-                    let Some(idx) = map_info.marker_index(marker_path) else { return false };
+                    let Some(idx) = map_info.marker_index(marker_path) else {
+                        return false
+                    };
                     self.lpath = idx;
                     self.lpath
                 }
@@ -241,7 +247,9 @@ impl PoiStatus {
                         **cat = marker_path.path.index();
                     }
                 },
-                _ => return false,
+                _ => {
+                    return false
+                },
             }
             let mut modified = false;
             for (key, value) in changes {
@@ -386,25 +394,48 @@ impl PoiStatus {
                     },
                     _ => None,
                 };
-                let Some(info) = info else { continue };
+                let Some(info) = info else {
+                    continue
+                };
                 modified |= info.set_attr_dyn(value.unwrap_or_else(|| PackValueCell::new_empty(key)));
+                if !modified {
+                }
             }
             if modified {
+                log::debug!("flushing to {marker_path}");
                 self.lpath = lpath;
                 if !pois.is_empty() {
                     map_info.pois.data = Arc::from(&pois[..]);
+                    if !map_info.info.pois.get(idx).map(|v| *v).unwrap_or(false) {
+                        let info = Arc::make_mut(&mut map_info.info);
+                        if info.pois.len() <= idx {
+                            info.pois.resize(idx + 1, false);
+                        }
+                        unsafe { *info.pois.get_unchecked_mut(idx) = true; }
+                        //info.info_sig.hash = info.info_sig.hash.wrapping_add(1);
+                    }
                 }
                 if let (Some(pois), Some(map)) = (pois_state, map.as_mut()) {
                     map.pois.data = Arc::from(&pois[..]);
                 }
                 if !trails.is_empty() {
                     map_info.trails.data = Arc::from(&trails[..]);
+                    if !map_info.info.trails.get(idx).map(|v| *v).unwrap_or(false) {
+                        let info = Arc::make_mut(&mut map_info.info);
+                        if info.trails.len() <= idx {
+                            info.trails.resize(idx + 1, false);
+                        }
+                        unsafe { *info.trails.get_unchecked_mut(idx) = true; }
+                        //info.info_sig.hash = info.info_sig.hash.wrapping_add(1);
+                    }
                 }
                 if let (Some(trails), Some(map)) = (trails_state, map.as_mut()) {
                     map.trails.data = Arc::from(&trails[..]);
                 }
                 if !cats.is_empty() {
-                    Arc::make_mut(&mut map_info.info).categories = cats.into_boxed_slice();
+                    let info = Arc::make_mut(&mut map_info.info);
+                    info.categories = cats.into_boxed_slice();
+                    info.info_sig.hash = info.info_sig.hash.wrapping_add(1);
                 }
                 if let (Some(cats), Some(map)) = (cats_state, map.as_mut()) {
                     map.categories = Arc::from(&cats[..]);

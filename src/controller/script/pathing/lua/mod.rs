@@ -909,7 +909,7 @@ impl PackHandleMut for LuaPackDesc {
             let marker = PackMarkerRef::new_unchecked(pack, path);
             PackPoi::from_marker_unchecked(marker, self.path(), self.shared_arc())
         };
-        poi.marker.notify_allocated(marker_loc2index(path));
+        poi.marker.notify_allocated();
         poi.marker.notify_change(changes);
         Ok(poi)
     }
@@ -943,7 +943,7 @@ impl PackHandleMut for LuaPackDesc {
             let marker = PackMarkerRef::new_unchecked(pack, path);
             PackTrail::from_marker_unchecked(marker, self.path(), self.shared_arc())
         };
-        trail.marker.notify_allocated(marker_loc2index(path));
+        trail.marker.notify_allocated();
         trail.marker.notify_change(changes);
         Ok(trail)
     }
@@ -1034,7 +1034,7 @@ impl PackHandleMut for LuaPackDesc {
             let marker = PackMarkerRef::new_unchecked(pack, path);
             PackCategory::from_marker_unchecked(marker, self.path(), self.shared_arc())
         };
-        cat.marker.notify_allocated(marker_loc2index(path));
+        cat.marker.notify_allocated();
         cat.marker.notify_change(changes);
         Ok(cat)
     }
@@ -1415,7 +1415,7 @@ impl PackMarker {
         }
     }
 
-    pub fn notify_allocated(&self, marker_path: MarkerPath) {
+    pub fn notify_allocated(&self) {
         if let Ok(mut markers) = self.shared.active_markers.lock() {
             let marker = markers.entry(self.marker_index())
                 .or_default();
