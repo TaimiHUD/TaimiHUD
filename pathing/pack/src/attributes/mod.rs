@@ -750,14 +750,6 @@ where
     }
 }
 
-fn parse_array<const N: usize, T: FromStr>(value: &str) -> anyhow::Result<[T; N]>
-where
-    T: Default + Copy,
-    <T as FromStr>::Err: Into<anyhow::Error>,
-{
-    let mut list = [T::default(); N];
-    parse_into_array(&mut list, value).map(move |()| list)
-}
 fn parse_into_array<const N: usize, T: FromStr>(list: &mut [T; N], value: &str) -> anyhow::Result<()>
 where
     <T as FromStr>::Err: Into<anyhow::Error>,
