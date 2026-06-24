@@ -95,7 +95,7 @@ impl PathingWindowState {
                     drop(script_menus);
                     if let Some(clicked) = clicked {
                         if shared.menu_write(&clicked, |s| s.click_state()).is_some() {
-                            ScriptMessage::menu_clicked_pack(clicked, pack_idx)
+                            ScriptMessage::menu_clicked_with(clicked, pack_idx.pivot_from())
                                 .try_send();
                         }
                     }
@@ -121,7 +121,7 @@ impl PathingWindowState {
                 drop(script_menus);
                 if let Some(clicked) = clicked {
                     if plug.menus.menu_write(&clicked, |s| s.click_state()).is_some() {
-                        ScriptMessage::menu_clicked_plug(clicked, path).try_send();
+                        ScriptMessage::menu_clicked_with(clicked, path.pivot_from()).try_send();
                     }
                 }
             }

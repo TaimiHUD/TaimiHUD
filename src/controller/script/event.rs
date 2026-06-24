@@ -9,6 +9,7 @@ use {
     mlua::{FromLua, IntoLua, Lua, Result as LuaResult, Value as LuaValue},
     taimi_pack::script::{format_err, lua},
 };
+pub type SignalId = u32;
 
 #[derive(Debug, Copy, Clone)]
 pub struct ScriptHostEvent {}
@@ -19,10 +20,10 @@ impl ScriptHostEvent {
     }
 }
 impl ScriptApiEvent for ScriptHostEvent {
-    fn notifcation_mask(&self, id: u32) -> ScriptResult<()> {
+    fn notifcation_mask(&self, id: SignalId) -> ScriptResult<()> {
         Ok(log::debug!("TODO: unsubscribe from {id}"))
     }
-    fn notifcation_unmask(&self, id: u32) -> ScriptResult<()> {
+    fn notifcation_unmask(&self, id: SignalId) -> ScriptResult<()> {
         Ok(log::debug!("TODO: subscribe to {id}"))
     }
 
@@ -32,12 +33,12 @@ impl ScriptApiEvent for ScriptHostEvent {
     fn all_signals(&self) -> Self::SignalNames {
         Box::new(ScriptSignal::all_key_values().map(|(k, v)| (Cow::Borrowed(k), v))) as Box<_>
     }
-    type SignalNames = Box<dyn Iterator<Item = (Cow<'static, str>, u32)>>;
+    type SignalNames = Box<dyn Iterator<Item = (Cow<'static, str>, SignalId)>>;
 }
 
 #[derive(Debug)]
 pub struct NotifyScript {
-    pub id: u32,
+    pub id: SignalId,
     pub receiver: Option<EventTarget>,
     pub args: UntypedArgs,
 }
@@ -49,8 +50,10 @@ pub struct EventTarget {
 }
 pub enum UntypedArgs {
     Empty,
+    Int(isize),
     #[cfg(feature = "scripts-lua")]
     Lua(Box<dyn lua::IntoLuaMultiMut + Send>),
+    #[cfg(todo)]
     #[cfg(feature = "paths-lua")]
     LuaSrc(String),
 }
@@ -59,8 +62,12 @@ impl fmt::Debug for UntypedArgs {
         let mut f = f.debug_tuple("UntypedArgs");
         match self {
             Self::Empty => f.field(&()),
-            Self::LuaSrc(src) => f.field(src),
+            Self::Int(v) => f.field(&v),
+            #[cfg(feature = "scripts-lua")]
             Self::Lua(..) => f.field(&"LuaValue"),
+            #[cfg(todo)]
+            #[cfg(feature = "scripts-lua")]
+            Self::LuaSrc(src) => f.field(src),
         }
         .finish()
     }
@@ -141,7 +148,7 @@ pub enum ScriptNotification {
 }
 impl ScriptNotification {
     #[inline]
-    pub fn to_repr(self) -> u32 {
+    pub fn to_repr(self) -> SignalId {
         self as _
     }
     #[inline]
@@ -149,7 +156,7 @@ impl ScriptNotification {
         self.into()
     }
 
-    pub fn all_key_values() -> impl Iterator<Item = (&'static str, u32)> {
+    pub fn all_key_values() -> impl Iterator<Item = (&'static str, SignalId)> {
         Self::VARIANTS.iter().map(|v| (v.name(), v.to_repr()))
     }
 
@@ -216,7 +223,7 @@ impl FromLua for ScriptNotification {
 )]
 #[repr(u32)]
 pub enum ScriptSignal {
-    Started = ScriptNotification::COUNT as u32 + 1,
+    Started = ScriptNotification::COUNT as SignalId + 1,
     Pending,
     Ended,
     /// request immediate resume (or signalled oob) since there may be something to yield

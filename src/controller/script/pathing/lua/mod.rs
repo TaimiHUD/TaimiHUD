@@ -1,6 +1,7 @@
 use {
     crate::{
         controller::script::{
+            id::{PackScriptPath, ScriptIndex, ScriptPath},
             event::{ScriptNotification, ScriptSignal},
             lua::{LuaPlugBase, ScriptNotification0},
             menu::{PlugMenu, PlugMenuInstance},
@@ -97,7 +98,7 @@ use {
 
 #[derive(Clone)]
 pub struct LuaPackDesc {
-    pub(crate) path: PackPath,
+    pub(crate) path: PackScriptPath,
     pub(crate) plug: LuaPlugBase,
 }
 impl ops::Deref for LuaPackDesc {
@@ -250,7 +251,7 @@ impl LuaPackDesc {
         })
     }
 
-    pub fn path(&self) -> PackPath {
+    pub fn path(&self) -> PackScriptPath {
         self.path
     }
 }
@@ -1099,12 +1100,12 @@ impl PackHandleMut for LuaPackDesc {
 #[derive(Clone)]
 pub struct PackTexture {
     loader: SharedLoader,
-    pack_path: PackPath,
+    pack_path: PackScriptPath,
     path: String,
     size: OnceLock<[u32; 2]>,
 }
 impl PackTexture {
-    pub fn new(path: String, pack_path: PackPath, loader: SharedLoader) -> Self {
+    pub fn new(path: String, pack_path: PackScriptPath, loader: SharedLoader) -> Self {
         Self {
             path,
             pack_path,
@@ -1240,7 +1241,7 @@ impl PackCategory {
     }
     pub unsafe fn from_marker_unchecked(
         marker: PackMarkerRef,
-        pack_path: PackPath,
+        pack_path: PackScriptPath,
         shared: Arc<PackPlugShared>,
     ) -> Self {
         Self {
@@ -1347,14 +1348,14 @@ impl CategoryHandleMut for PackCategory {
 pub struct PackMarker {
     marker: PackMarkerMut,
     shared: Arc<PackPlugShared>,
-    pack_path: PackPath,
+    pack_path: PackScriptPath,
     lpath: Locator<PackMapPath, LoadedMarkerPath>,
 }
 impl PackMarker {
     #[inline]
     pub unsafe fn from_marker_unchecked(
         marker: PackMarkerRef,
-        pack_path: PackPath,
+        pack_path: PackScriptPath,
         shared: Arc<PackPlugShared>,
     ) -> Self {
         Self {
@@ -1389,9 +1390,9 @@ impl PackMarker {
     pub fn marker_index(&self) -> MarkerPath {
         marker_loc2index(self.marker.path())
     }
-    fn empty_path_of(pack_path: PackPath, ty: MarkerType) -> Locator<PackMapPath, LoadedMarkerPath> {
+    fn empty_path_of(pack_path: PackScriptPath, ty: MarkerType) -> Locator<PackMapPath, LoadedMarkerPath> {
         let ns = marker_ty2ns(ty);
-        Locator::new(PackMapPath::new(pack_path, MapIndex::MAX), Locator::new_path(MarkerIndex::new_invalid(ns)))
+        Locator::with_parts(PackMapPath::with_parts(pack_path.pivot_from(), MapIndex::MAX), Locator::new_path(MarkerIndex::new_invalid(ns)))
     }
     #[inline]
     pub fn as_poi(&self) -> Option<&PackPoi> {
@@ -1534,7 +1535,7 @@ impl PackPoi {
     }
     pub unsafe fn from_marker_unchecked(
         marker: PackMarkerRef,
-        pack_path: PackPath,
+        pack_path: PackScriptPath,
         shared: Arc<PackPlugShared>,
     ) -> Self {
         Self {
@@ -1730,7 +1731,7 @@ impl PackTrail {
     }
     pub unsafe fn from_marker_unchecked(
         marker: PackMarkerRef,
-        pack_path: PackPath,
+        pack_path: PackScriptPath,
         shared: Arc<PackPlugShared>,
     ) -> Self {
         Self {

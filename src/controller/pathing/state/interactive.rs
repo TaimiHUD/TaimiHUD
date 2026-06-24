@@ -98,6 +98,20 @@ pub enum InteractionEvent {
         loaded_path: PoiMapPath,
     },
 }
+impl InteractionEvent {
+    #[cfg(todo = "unnecessary")]
+    pub fn poi_path(&self) -> Option<PoiPath> {
+        match self {
+            Self::Nearby { path, .. } => Some(path),
+        }
+    }
+    #[cfg(todo = "unnecessary")]
+    pub fn loaded_poi_path(&self) -> Option<PoiMapPath> {
+        match self {
+            Self::Nearby { loaded_path, .. } => Some(loaded_path),
+        }
+    }
+}
 
 #[derive(Debug, Copy, Clone, PartialEq, PartialOrd)]
 pub enum InteractionEventAction {

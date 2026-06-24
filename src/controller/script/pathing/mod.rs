@@ -2,7 +2,7 @@
 use {
     crate::controller::script::{
         event::ScriptNotification,
-        lua::{LuaExecContext, LuaMessage},
+        lua::LuaMessage,
     },
     taimi_meta::map::MapID,
     taimi_pack::{category::id::CategoryId, script::lua::RuntimeLua},
@@ -11,9 +11,9 @@ use {
     crate::controller::{
         pathing::{
             shared::SharedPackLoad,
-            registry::{LoadedMarkerPath, PackMapPath, PackPath, SharedLoaderBox},
+            registry::{LoadedMarkerPath, PackPath, SharedLoaderBox},
         },
-        script::{PlugSharedData, ScriptMessage},
+        script::{id::{PackScriptPath, ScriptIndex}, PlugSharedData, ScriptMessage},
         Controller,
     },
     anyhow::Context,
@@ -49,7 +49,7 @@ pub const PACK_ENTRYPOINT: &'static str = RuntimeLua::PACK_ENTRYPOINT;
 pub type WeakLoader = Weak<tokio::sync::Mutex<Box<dyn PackLoaderContext + Send + 'static>>>;
 pub struct PackPlugShared {
     pub plug: PlugSharedData,
-    pub path: PackPath,
+    pub path: PackScriptPath,
     #[cfg(deleteme)]
     pub pack: Weak<Pack>,
     pub load: SharedPackLoad,
@@ -77,9 +77,10 @@ impl PackPlugShared {
             load.info.info.as_ref().and_then(|i| i.primary_root()).and_then(|r| r.display_name.as_ref().map(|n| &n[..]))
             .or_else(|| load.info.path_name().to_str())
             .unwrap_or("pack");
+        let path: PackScriptPath = load.info.index.pivot_from();
         Self {
-            path: load.info.index,
-            plug: PlugSharedData::with_name(name),
+            plug: PlugSharedData::with_name(path.pivot_from(), name),
+            path,
             load,
             overrides: Default::default(),
             pending_start: Default::default(),
@@ -146,7 +147,7 @@ impl PoiStatus {
         gp.send_if_modified(|gp| {
             #[cfg(todo)]
             if gp.map_id != Some(map_id) { return }
-            let (Some(map_info), map) = gp.for_pack_mut(shared.path) else {
+            let (Some(map_info), map) = gp.for_pack_mut(shared.path.pivot_from()) else {
                 return false
             };
             let lpath = if self.lpath.path == MarkerIndex::UNK {
@@ -481,14 +482,11 @@ pub fn marker_ty2ns(ty: MarkerType) -> u32 {
     }
 }
 
-#[deprecated]
-pub(crate) use crate::controller::pathing::registry::PackPath as PackLoc;
-
 /// TODO: remove reliance on lua here
 #[cfg(feature = "paths-lua")]
 impl ScriptMessage {
     pub fn menu_clicked_pack(id: CategoryId, target: PackPath) -> Self {
-        Self::menu_clicked_with(id, LuaExecContext::Pack(target))
+        Self::menu_clicked_with(id, target.pivot_from())
     }
     pub fn marker_event(
         id: ScriptNotification,
@@ -499,7 +497,7 @@ impl ScriptMessage {
             as Box<dyn taimi_pack::script::lua::IntoLuaMut + Send>];
         LuaMessage::NotifyScriptWith {
             id,
-            context: LuaExecContext::Pack(target),
+            context: ScriptIndex::for_pack(target),
             args,
         }
         .into()
@@ -517,7 +515,7 @@ impl ScriptMessage {
         ];
         LuaMessage::NotifyScriptWith {
             id,
-            context: LuaExecContext::Pack(target),
+            context: ScriptIndex::for_pack(target),
             args,
         }
         .into()
@@ -529,7 +527,7 @@ impl ScriptMessage {
     {
         let active_markers = Box::new(active_markers.into_iter()) as Box<_>;
         LuaMessage::NotifyMapEnter {
-            target,
+            target: target.pivot_from(),
             map_id,
             active_markers,
             append: false,

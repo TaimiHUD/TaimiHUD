@@ -1,7 +1,7 @@
 #[cfg(feature = "paths-lua")]
 use {
     crate::{
-        controller::script::pathing::{marker_index2loc, LuaPackDesc},
+        controller::script::{pathing::{marker_index2loc, LuaPackDesc}, PackScriptPath},
         controller::pathing::registry::PackPath,
     },
     core::num::NonZero,
@@ -20,6 +20,7 @@ use {
         event::{ScriptNotification, ScriptSignal},
         menu::{PlugMenu, PlugMenuInstance},
         persistence::ScriptHostPersistence,
+        id::{ScriptPath, ScriptIndex, PlugIndex, PlugPath},
         PackPlugShared,
         PlugMenusShared,
         PlugSharedData,
@@ -128,7 +129,7 @@ impl LuaController {
                         id: ScriptNotification::PathingTick, ..
                     },
                 ) => self.preprocess_message(msg),
-                Ok(LuaMessage::NotifyScript0 { id, context: LuaExecContext::Global }) => {
+                Ok(LuaMessage::NotifyScript0 { id, context: ScriptIndex::GLOBAL }) => {
                     notif = Some(id);
                     None
                 },
@@ -206,7 +207,7 @@ impl LuaController {
             #[cfg(feature = "paths-lua")]
             LuaMessage::NotifyScript0 {
                 id: id @ ScriptNotification::PathingTick,
-                context: context @ LuaExecContext::Global,
+                context: context @ ScriptIndex::GLOBAL,
             } => {
                 let tick = crate::exports::runtime::mumble_link_ptr()
                     .ok()
@@ -276,18 +277,22 @@ impl LuaController {
             },
             LuaMessage::Exec { source, context, interactive } => {
                 let lua = self.runtime.as_ref().context("lualess")?;
-                let env = match context {
-                    LuaExecContext::Global => None,
-                    LuaExecContext::Plugin(target) => {
-                        log::warn!("TODO: exec plug");
-                        None
+                let env = match context.namespace() {
+                    ScriptIndex::NS_PLUG => {
+                        let target = context.get_plug_index();
+                        let plug =
+                            Self::locate_plug_mut(&mut self.plugs, target).context("unknown plug")?;
+                        Some(plug.globals.clone())
                     },
                     #[cfg(feature = "paths-lua")]
-                    LuaExecContext::Pack(target) => {
+                    ScriptIndex::NS_PACK => {
+                        let target = context.get_pack_index();
                         let pack =
                             Self::locate_pack_mut(&mut self.packs, target).context("unknown pack")?;
                         Some(pack.globals.clone())
                     },
+                    /*ScriptIndex::NS_MISC*/ _ if context == ScriptIndex::GLOBAL => None,
+                    _ => anyhow::bail!("unknown {}", context.to_path()),
                 };
                 let chunk = lua
                     .lua()
@@ -308,7 +313,7 @@ impl LuaController {
             },
             LuaMessage::DebugWatchRefresh { context, interactive } => {
                 let Some(lua) = self.runtime.as_ref() else { return Ok(true) };
-                match Self::context_globals(context, lua, &self.packs, &self.plugs)? {
+                match Self::context_globals(context.to_path(), lua, &self.packs, &self.plugs)? {
                     Some(g) => {
                         // TODO: this is cheating...
                         let watch = g
@@ -326,12 +331,13 @@ impl LuaController {
                             if interactive {
                                 log::info!("{:#}", lua.debug_display(watches));
                             }
-                            let plug = match context {
-                                LuaExecContext::Pack(target) =>
-                                    Self::locate_pack(&self.packs, target).ok().map(|p| &p.plug),
-                                LuaExecContext::Plugin(target) =>
-                                    Self::locate_plug(&self.plugs, target).ok().map(|p| &p.base),
-                                LuaExecContext::Global => None,
+                            let plug = match context.namespace() {
+                                ScriptIndex::NS_PLUG =>
+                                    Self::locate_plug(&self.plugs, context.get_plug_index()).ok().map(|p| &p.base),
+                                #[cfg(feature = "paths-lua")]
+                                ScriptIndex::NS_PACK =>
+                                    Self::locate_pack(&self.packs, context.get_pack_index()).ok().map(|p| &p.plug),
+                                _ => None,
                             };
                             if let Some(plug) = plug {
                                 let mut state = plug.state().write();
@@ -349,7 +355,7 @@ impl LuaController {
                     None => log::debug!("TODO: refresh all globals"),
                 }
             },
-            LuaMessage::NotifyScript0 { id, context: LuaExecContext::Global } => {
+            LuaMessage::NotifyScript0 { id, context: ScriptIndex::GLOBAL } => {
                 let Some(lua) = self.runtime.as_ref() else { return Ok(true) };
                 let context = || format!("notifying script {id:?}");
                 for pack in &mut self.packs {
@@ -360,7 +366,7 @@ impl LuaController {
             LuaMessage::NotifyScriptWith {
                 id,
                 args,
-                context: LuaExecContext::Global,
+                context: ScriptIndex::GLOBAL,
             } => {
                 let Some(lua) = self.runtime.as_ref() else { return Ok(true) };
                 let context = || format!("notifying script {id:?}");
@@ -385,56 +391,57 @@ impl LuaController {
             LuaMessage::NotifyScriptWith {
                 id,
                 args,
-                context: LuaExecContext::Plugin(target),
+                context,
             } => {
                 let Some(lua) = self.runtime.as_ref() else { return Ok(true) };
-                let context = || format!("notifying pack {id:?}");
-                let args = IntoIterator::into_iter(args)
+                let args = || IntoIterator::into_iter(args)
                     .map(|mut v| v.into_lua_mut(lua.lua()))
-                    .collect::<mlua::Result<mlua::MultiValue>>()?;
-                let res = Self::locate_plug_mut(&mut self.plugs, target)
-                    .and_then(|plug| plug.notify_with(lua, id, args))
-                    .with_context(context);
-                res?;
+                    .collect::<mlua::Result<mlua::MultiValue>>()
+                    .map_err(Into::into);
+                let res = match context.namespace() {
+                    ScriptIndex::NS_PLUG => {
+                        let target = context.get_plug_index();
+                        Self::locate_plug_mut(&mut self.plugs, target)
+                            .and_then(|plug| args().and_then(|args|
+                                plug.notify_with(lua, id, args)
+                            ))
+                    },
+                    #[cfg(feature = "paths-lua")]
+                    ScriptIndex::NS_PACK => {
+                        let target = context.get_pack_index();
+                        Self::locate_pack_mut(&mut self.packs, target)
+                            .and_then(|pack| args().and_then(|args|
+                                pack.notify_with(lua, id, args)
+                            ))
+                    },
+                    _ => Err(format_err!("unrecognized target")),
+                };
+                let () = res.with_context(|| format!("notifying {context} {id:?}"))?;
             },
             LuaMessage::NotifyScript0 {
                 id,
-                context: LuaExecContext::Plugin(target),
+                context,
             } => {
                 let Some(lua) = self.runtime.as_ref() else { return Ok(true) };
-                let context = || format!("notifying pack {id:?}");
-                let res = Self::locate_plug_mut(&mut self.plugs, target)
-                    .and_then(|plug| plug.notify0(lua, id))
-                    .with_context(context);
-                res?;
-            },
-            #[cfg(feature = "paths-lua")]
-            LuaMessage::NotifyScriptWith {
-                id,
-                args,
-                context: LuaExecContext::Pack(target),
-            } => {
-                let Some(lua) = self.runtime.as_ref() else { return Ok(true) };
-                let context = || format!("notifying pack {id:?}");
-                let args = IntoIterator::into_iter(args)
-                    .map(|mut v| v.into_lua_mut(lua.lua()))
-                    .collect::<mlua::Result<mlua::MultiValue>>()?;
-                let res = Self::locate_pack_mut(&mut self.packs, target)
-                    .and_then(|pack| pack.notify_with(lua, id, args))
-                    .with_context(context);
-                res?;
-            },
-            #[cfg(feature = "paths-lua")]
-            LuaMessage::NotifyScript0 {
-                id,
-                context: LuaExecContext::Pack(target),
-            } => {
-                let Some(lua) = self.runtime.as_ref() else { return Ok(true) };
-                let context = || format!("notifying pack {id:?}");
-                let res = Self::locate_pack_mut(&mut self.packs, target)
-                    .and_then(|pack| pack.notify0(lua, id))
-                    .with_context(context);
-                res?;
+                let res = match context.namespace() {
+                    ScriptIndex::NS_PLUG => {
+                        let target = context.get_plug_index();
+                        Self::locate_plug_mut(&mut self.plugs, target)
+                            .and_then(|plug|
+                                plug.notify0(lua, id)
+                            )
+                    },
+                    #[cfg(feature = "paths-lua")]
+                    ScriptIndex::NS_PACK => {
+                        let target = context.get_pack_index();
+                        Self::locate_pack_mut(&mut self.packs, target)
+                            .and_then(|pack|
+                                pack.notify0(lua, id)
+                            )
+                    },
+                    _ => Err(format_err!("unrecognized target")),
+                };
+                let () = res.with_context(|| format!("notifying {context} {id:?}"))?;
             },
             #[cfg(feature = "paths-lua")]
             LuaMessage::InternalMarkersStarted => {
@@ -510,7 +517,7 @@ impl LuaController {
                                     ScriptNotification::PathingFocus,
                                     false,
                                     tag,
-                                    desc.path,
+                                    desc.path.pivot_from(),
                                 );
                                 match msg {
                                     ScriptMessage::Lua(m) => {
@@ -533,7 +540,7 @@ impl LuaController {
                                 ScriptNotification::PathingTrigger,
                                 false,
                                 tag,
-                                desc.path,
+                                    desc.path.pivot_from(),
                             );
                             match msg {
                                 ScriptMessage::Lua(m) => {
@@ -647,7 +654,7 @@ impl LuaController {
                                     ScriptNotification::PathingFocus,
                                     true,
                                     tag,
-                                    desc.path,
+                                    desc.path.pivot_from(),
                                 );
                                 match msg {
                                     ScriptMessage::Lua(m) => {
@@ -709,47 +716,60 @@ impl LuaController {
                     .with_context(|| format!("spawning plug.lua for {}", pathname.display()));
                 res?;
             },
-            LuaMessage::Stop { context: LuaExecContext::Global } => {
-                for i in 0..self.plugs.len() {
-                    let res = self
-                        .process_message(LuaMessage::Stop { context: LuaExecContext::Plugin(i) })
-                        .context(lazyfmt::fmt_args!(move "stopping plug#{i}"));
-                    rt::log::warn_ok(res);
-                }
+            LuaMessage::Stop { context: ScriptIndex::GLOBAL } => {
+                let plugs = self.plugs.iter().map(|p| p.script_path());
                 #[cfg(feature = "paths-lua")]
-                let packs = self.packs.iter().map(|p| p.path()).collect::<Vec<_>>();
-                #[cfg(feature = "paths-lua")]
-                for path in packs {
+                let plugs = plugs.chain(self.packs.iter().map(|p| p.script_path()));
+                let plugs = plugs.collect::<Vec<_>>();
+                for path in plugs {
                     let res = self
-                        .process_message(LuaMessage::Stop { context: LuaExecContext::Pack(path) })
+                        .process_message(LuaMessage::Stop { context: path.path })
                         .context(lazyfmt::fmt_args!(move "stopping {path}"));
                     rt::log::warn_ok(res);
                 }
             },
             LuaMessage::Stop {
-                context: LuaExecContext::Plugin(target),
+                context,
             } => {
-                let base = self.plugs.as_ptr();
-                let desc = Self::locate_plug_mut(&mut self.plugs, target)?;
-                let idx = unsafe { (&*desc as *const LuaPlugDesc).offset_from_unsigned(base) };
-                let lua = self.runtime.as_ref().context("lualess")?;
-                let res = desc.exit(lua).with_context(|| format!("stopping {desc}"));
-                self.plugs.swap_remove(idx);
-                self.plugs_shared.send_modify(|shared| {
-                    shared.plugs.remove(&target);
-                });
-                let () = res?;
-            },
-            #[cfg(feature = "paths-lua")]
-            LuaMessage::Stop { context: LuaExecContext::Pack(target) } => {
-                let base = self.packs.as_ptr();
-                let desc = Self::locate_pack_mut(&mut self.packs, target)?;
-                let idx = unsafe { (&*desc as *const LuaPackDesc).offset_from_unsigned(base) };
-                let lua = self.runtime.as_ref().context("lualess")?;
-                let res = desc.exit(lua).with_context(|| format!("stopping {desc}"));
-                self.packs.swap_remove(idx);
-                self.plugs_shared.send_modify(|shared| {
-                    shared.packs.remove(&target);
+                let res = match context.namespace() {
+                    ScriptIndex::NS_PLUG => {
+                        let base = self.plugs.as_ptr();
+                        let target = context.get_plug_index();
+                        let desc = Self::locate_plug_mut(&mut self.plugs, target)?;
+                        let idx = unsafe { (&*desc as *const LuaPlugDesc).offset_from_unsigned(base) };
+                        let res = self.runtime.as_ref().context("lualess")
+                            .and_then(|lua| desc.exit(lua))
+                            .with_context(|| format!("stopping {desc}"));
+                        self.plugs.swap_remove(idx);
+                        res
+                    },
+                    #[cfg(feature = "paths-lua")]
+                    ScriptIndex::NS_PACK => {
+                        let base = self.packs.as_ptr();
+                        let target = context.get_pack_index();
+                        let desc = Self::locate_pack_mut(&mut self.packs, target)?;
+                        let idx = unsafe { (&*desc as *const LuaPackDesc).offset_from_unsigned(base) };
+                        let res = self.runtime.as_ref().context("lualess")
+                            .and_then(|lua| desc.exit(lua))
+                            .with_context(|| format!("stopping {desc}"));
+                        self.packs.swap_remove(idx);
+                        res
+                    },
+                    _ => anyhow::bail!("how to stop {context}?"),
+                };
+                self.plugs_shared.send_if_modified(|shared| {
+                    match context.namespace() {
+                        ScriptIndex::NS_PLUG => {
+                            let target = context.get_plug_index();
+                            shared.plugs.remove(&target).is_some()
+                        },
+                        #[cfg(feature = "paths-lua")]
+                        ScriptIndex::NS_PACK => {
+                            let target = context.get_pack_index();
+                            shared.packs.remove(&target).is_some()
+                        },
+                        _ => false,
+                    }
                 });
                 let () = res?;
             },
@@ -838,16 +858,16 @@ impl LuaController {
     }
     #[cfg(feature = "paths")]
     #[inline]
-    fn locate_pack_mut(packs: &mut [LuaPackDesc], loc: PackPath) -> anyhow::Result<&mut LuaPackDesc> {
+    fn locate_pack_mut(packs: &mut [LuaPackDesc], loc: PackScriptPath) -> anyhow::Result<&mut LuaPackDesc> {
         packs
             .iter_mut()
             .find(|p| p.path() == loc)
             .with_context(|| format!("lost pack {loc}"))
     }
     #[inline]
-    fn locate_plug_mut(plugs: &mut [LuaPlugDesc], loc: usize) -> anyhow::Result<&mut LuaPlugDesc> {
-        let idx = match plugs.get(loc) {
-            Some(p) if p.index == loc => Some(loc),
+    fn locate_plug_mut(plugs: &mut [LuaPlugDesc], loc: PlugPath) -> anyhow::Result<&mut LuaPlugDesc> {
+        let idx = match plugs.get(loc.path as usize) {
+            Some(p) if p.index == loc => Some(loc.path as usize),
             _ => plugs.iter().position(|p| p.index == loc),
         };
         idx.map(|idx| unsafe { plugs.get_unchecked_mut(idx) })
@@ -855,15 +875,15 @@ impl LuaController {
     }
     #[cfg(feature = "paths")]
     #[inline]
-    fn locate_pack(packs: &[LuaPackDesc], loc: PackPath) -> anyhow::Result<&LuaPackDesc> {
+    fn locate_pack(packs: &[LuaPackDesc], loc: PackScriptPath) -> anyhow::Result<&LuaPackDesc> {
         packs
             .iter()
             .find(|p| p.path() == loc)
             .with_context(|| format!("lost pack {loc}"))
     }
     #[inline]
-    fn locate_plug(plugs: &[LuaPlugDesc], loc: usize) -> anyhow::Result<&LuaPlugDesc> {
-        match plugs.get(loc) {
+    fn locate_plug(plugs: &[LuaPlugDesc], loc: PlugPath) -> anyhow::Result<&LuaPlugDesc> {
+        match plugs.get(loc.path as usize) {
             Some(p) if p.index == loc => Some(p),
             _ => None,
         }
@@ -871,40 +891,48 @@ impl LuaController {
         .with_context(|| format!("lost plug#{loc}"))
     }
     fn context_plug<'a>(
-        context: LuaExecContext,
-        lua: &RuntimeLua,
+        context: ScriptPath,
+        _lua: &RuntimeLua,
         packs: &'a [LuaPackDesc],
         plugs: &'a [LuaPlugDesc],
     ) -> anyhow::Result<Option<&'a LuaPlugBase>> {
-        match context {
-            LuaExecContext::Global => Ok(None),
+        match context.path.namespace() {
             #[cfg(feature = "paths")]
-            LuaExecContext::Pack(path) => Self::locate_pack(packs, path).map(|desc| Some(&desc.plug)),
-            LuaExecContext::Plugin(path) => Self::locate_plug(plugs, path).map(|desc| Some(&desc.base)),
+            ScriptIndex::NS_PACK => {
+                let path = context.path.get_pack_index();
+                Self::locate_pack(packs, path).map(|desc| Some(&desc.plug))
+            },
+            ScriptIndex::NS_PLUG => {
+                let path = context.path.get_plug_index();
+                Self::locate_plug(plugs, path).map(|desc| Some(&desc.base))
+            },
+            _ if context.path == ScriptIndex::GLOBAL => Ok(None),
+            _ => Err(format_err!("{context} unknown")),
         }
     }
     fn context_plug_mut<'a>(
-        context: LuaExecContext,
-        lua: &RuntimeLua,
+        context: ScriptPath,
+        _lua: &RuntimeLua,
         packs: &'a mut [LuaPackDesc],
         plugs: &'a mut [LuaPlugDesc],
     ) -> anyhow::Result<Option<&'a mut LuaPlugBase>> {
-        match context {
-            LuaExecContext::Global => Ok(None),
+        match context.path.namespace() {
             #[cfg(feature = "paths")]
-            LuaExecContext::Pack(path) => {
-                let pack = Self::locate_pack_mut(packs, path);
-                pack.map(|desc| Some(&mut desc.plug))
+            ScriptIndex::NS_PACK => {
+                let path = context.path.get_pack_index();
+                Self::locate_pack_mut(packs, path).map(|desc| Some(&mut desc.plug))
             },
-            LuaExecContext::Plugin(path) => {
-                let plug = Self::locate_plug_mut(plugs, path);
-                plug.map(|desc| Some(&mut desc.base))
+            ScriptIndex::NS_PLUG => {
+                let path = context.path.get_plug_index();
+                Self::locate_plug_mut(plugs, path).map(|desc| Some(&mut desc.base))
             },
+            _ if context.path == ScriptIndex::GLOBAL => Ok(None),
+            _ => Err(format_err!("{context} unknown")),
         }
     }
     #[inline]
     fn context_globals<'a>(
-        context: LuaExecContext,
+        context: ScriptPath,
         lua: &RuntimeLua,
         packs: &'a [LuaPackDesc],
         plugs: &'a [LuaPlugDesc],
@@ -954,7 +982,7 @@ impl LuaController {
                 pack_globals,
                 shared,
             ),
-            path: pack_path,
+            path: pack_path.pivot_from(),
         };
 
         let runner = {
@@ -1029,12 +1057,13 @@ impl LuaController {
             Some(lua::UnsafeRuntime) => chunk,
         }
         .into_function()?;
+        let index = PlugPath::new_path(self.plug_count as PlugIndex);
         let mut plug_info = LuaPlugDesc {
-            index: self.plug_count,
+            index,
             dir: dir.into(),
             base: LuaPlugBase::with_globals(
                 pack_globals,
-                PlugSharedData::with_name(&name.to_string_lossy()[..]),
+                PlugSharedData::with_name(index.pivot_from(), &name.to_string_lossy()[..]),
             ),
         };
         self.plug_count += 1;
@@ -1113,7 +1142,7 @@ impl LuaController {
     #[cfg(feature = "paths-lua")]
     fn start_map_markers<I>(
         &mut self,
-        target: PackPath,
+        target: PackScriptPath,
         map_id: Option<NonZero<MapID>>,
         markers: I,
     ) -> anyhow::Result<()>
@@ -1239,26 +1268,26 @@ pub enum LuaMessage {
     SpinUp,
     Exit,
     Stop {
-        context: LuaExecContext,
+        context: ScriptIndex,
     },
     NotifyScript0 {
         id: ScriptNotification,
-        context: LuaExecContext,
+        context: ScriptIndex,
     },
     NotifyScriptWith {
         id: ScriptNotification,
-        context: LuaExecContext,
+        context: ScriptIndex,
         /// TODO: Iterator<Item = &dyn mut IntoLua> would be nice wouldn't it?
         args: Vec<Box<dyn IntoLuaMut + Send>>,
     },
     Exec {
         source: Cow<'static, [u8]>,
-        context: LuaExecContext,
+        context: ScriptIndex,
         /// initiated by debug console or repl etc
         interactive: bool,
     },
     DebugWatchRefresh {
-        context: LuaExecContext,
+        context: ScriptIndex,
         /// otherwise passive
         interactive: bool,
     },
@@ -1270,13 +1299,13 @@ pub enum LuaMessage {
     SpawnPack(PackPath, Box<dyn LoaderAssetReader>),
     #[cfg(feature = "paths-lua")]
     NotifyMapEnter {
-        target: PackPath,
+        target: PackScriptPath,
         map_id: MapID,
         active_markers: Box<dyn Iterator<Item = MarkerPath> + Send>,
         append: bool,
     },
     #[cfg(feature = "paths-lua")]
-    DebugFlushMarkerChanges(PackPath),
+    DebugFlushMarkerChanges(PackScriptPath),
     #[cfg(todo)]
     SpawnPlug(String, Box<dyn std::io::BufRead>),
     /// signals that [PackPlugShared.pending_start] has some entries to process
@@ -1313,7 +1342,7 @@ impl LuaMessage {
             #[cfg(feature = "paths-lua")]
             _ => Some(Self::NotifyScript0 {
                 id: ScriptNotification::PathingTick,
-                context: LuaExecContext::Global,
+                context: ScriptIndex::GLOBAL,
             }),
             #[cfg(not(feature = "paths-lua"))]
             _ => None,
@@ -1321,14 +1350,11 @@ impl LuaMessage {
     }
 }
 impl ScriptMessage {
-    pub fn menu_clicked_plug(id: CategoryId, index: usize) -> Self {
-        Self::menu_clicked_with(id, LuaExecContext::Plugin(index))
-    }
-    pub fn menu_clicked_with(id: CategoryId, context: LuaExecContext) -> Self {
+    pub fn menu_clicked_with(id: CategoryId, context: ScriptPath) -> Self {
         let args = vec![Box::new(Some(id)) as Box<dyn taimi_pack::script::lua::IntoLuaMut + Send>];
         LuaMessage::NotifyScriptWith {
             id: ScriptNotification::MenuClick,
-            context,
+            context: context.path,
             args,
         }
         .into()
@@ -1347,14 +1373,6 @@ impl fmt::Debug for LuaMessage {
     }
 }
 
-#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, strum::IntoStaticStr)]
-pub enum LuaExecContext {
-    #[default]
-    Global,
-    Plugin(usize),
-    #[cfg(feature = "paths-lua")]
-    Pack(PackPath),
-}
 #[derive(Clone)]
 pub struct LuaPlugBase {
     pub globals: mlua::Table,
@@ -1475,6 +1493,10 @@ impl LuaPlugBase {
     pub fn shared(&self) -> &PlugSharedData {
         AsRef::<PlugSharedData>::as_ref(&*self.shared)
     }
+    #[inline]
+    pub fn script_path(&self) -> ScriptPath {
+        self.shared().path
+    }
 }
 impl script::pathing::MenuInstance for LuaPlugBase {
     fn gen_id(
@@ -1554,8 +1576,7 @@ impl fmt::Debug for LuaPlugBase {
 pub struct LuaPlugDesc {
     pub base: LuaPlugBase,
     pub dir: Arc<Path>,
-    /// think AUTOINCREMENT
-    pub index: usize,
+    pub index: PlugPath,
 }
 impl LuaPlugDesc {
     pub fn spun(

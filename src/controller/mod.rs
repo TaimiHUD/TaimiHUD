@@ -1101,7 +1101,10 @@ impl ControllerSender {
             &api.raids,
         );
         #[cfg(feature = "scripts")]
-        let (scripting, scripting_rx) = ScriptSender::new();
+        let (scripting, scripting_rx) = ScriptSender::new(
+            #[cfg(feature = "paths-interact")]
+            &pathing.shared,
+        );
 
         let receiver = ControllerReceiver {
             gameplay: Some(gameplay.subscribe()),

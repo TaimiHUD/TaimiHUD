@@ -707,11 +707,13 @@ impl RenderState {
 
             #[cfg(feature = "scripts")]
             if self.machine.plug_ui_state.process_dirty_for_packs() {
+                use crate::controller::script::PackScriptPath;
                 #[cfg(todo)] {
                     self.machine.pack_ui_state.update_from(&*self.machine.plug_ui_state.plugs_rx);
                 }
                 let plugs = self.machine.plug_ui_state.plugs_rx.get_mut();
                 for (path, pack) in self.machine.pack_ui_state.pack_state.iter_mut() {
+                    let path: PackScriptPath = path.pivot_from();
                     pack.state.plug = plugs.packs.get(&path).cloned();
                 }
             }
