@@ -218,6 +218,12 @@ bitflags::bitflags! {
 impl FrameState {
     pub(crate) const STATE_ORDERING: Ordering = Ordering::Relaxed;
     pub const DEFAULT: Self = Self::empty();
+    pub const RENDER_THREAD_MASK: Self = Self::from_bits_retain({
+        let mask = Self::TAIMI.bits() | Self::GAME.bits();
+        #[cfg(feature = "extension-nexus")]
+        let mask = mask | Self::NEXUS.bits();
+        mask
+    });
 
     pub(crate) const fn state() -> &'static AtomicU32 {
         static STATE: AtomicU32 = AtomicU32::new(FrameState::DEFAULT.bits());
@@ -230,7 +236,7 @@ impl FrameState {
     /// this isn't guaranteed and will be a problem with multi-threaded or bg rendering
     pub const GAME_FRAME_SUBSEQUENT: bool = true;
     pub fn is_game() -> bool {
-        matches!(Self::read(), Self::DEFAULT | Self::GAME)
+        matches!(Self::render_thread_state(), Self::DEFAULT | Self::GAME)
     }
     #[cfg(todo = "unused")]
     pub fn is_taimi() -> bool {
@@ -238,6 +244,9 @@ impl FrameState {
     }
     pub fn read() -> Self {
         Self::from_bits_retain(Self::state().load(Self::STATE_ORDERING))
+    }
+    pub fn render_thread_state() -> Self {
+        Self::read() & Self::RENDER_THREAD_MASK
     }
     #[cfg(todo = "unused")]
     pub fn publish_toggle(self) {
