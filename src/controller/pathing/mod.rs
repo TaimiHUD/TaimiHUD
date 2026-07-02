@@ -96,7 +96,7 @@ pub mod state;
 #[cfg(todo = "unused")]
 pub type ExternalFilterState = (Festivals, Arc<RaidState>, Arc<AchievementState>);
 
-#[derive(Debug, Display, Default)]
+#[derive(Display, Default, strum::IntoStaticStr)]
 pub(crate) enum PathingEvent {
     VisibleToggle {
         context: Option<MapContext>,
@@ -199,6 +199,16 @@ pub(crate) enum PathingEvent {
     RequestResourceReport {
         pack_path: Option<PackPath>,
     },
+}
+impl fmt::Debug for PathingEvent {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let variant = match self {
+            #[cfg(todo = "unnecessary")]
+            s => <&str>::from(s),
+            s => s,
+        };
+        write!(f, "PathingEvent::{variant}")
+    }
 }
 pub type PathingTaskBox = Pin<Box<dyn Future<Output = Option<PathingEvent>> + Send + 'static>>;
 
