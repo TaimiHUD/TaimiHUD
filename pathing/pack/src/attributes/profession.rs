@@ -150,6 +150,8 @@ impl<'a> FromIterator<&'a Profession> for Professions {
 
 impl<T> GetAttr<Profession> for T where
     T: ?Sized + GetAttr<keys::Professions>,
+    // TODO: dumb hack to avoid blanket impl havoc
+    T: core::borrow::Borrow<crate::attributes::FilterAttributes>,
 {
     fn has_attr(&self) -> bool {
         GetAttr::<keys::Professions>::get_attr(self).map(|f|
@@ -164,6 +166,7 @@ impl<T> GetAttr<Profession> for T where
 }
 impl<T> SetAttr<Profession> for T where
     T: ?Sized + SetAttr<keys::Professions> + GetAttr<keys::Professions>,
+    T: core::borrow::Borrow<crate::attributes::FilterAttributes>,
 {
     fn set_attr(&mut self, value: Profession) {
         let mut f = GetAttr::<keys::Professions>::get_attr_or_default(self).into_owned();

@@ -141,6 +141,8 @@ impl<'a> FromIterator<&'a Festival> for Festivals {
 
 impl<T> GetAttr<Festival> for T where
     T: ?Sized + GetAttr<keys::Festivals>,
+    // TODO: dumb hack to avoid blanket impl havoc
+    T: core::borrow::Borrow<crate::attributes::FilterAttributes>,
 {
     fn has_attr(&self) -> bool {
         GetAttr::<keys::Festivals>::get_attr(self).map(|f|
@@ -155,6 +157,7 @@ impl<T> GetAttr<Festival> for T where
 }
 impl<T> SetAttr<Festival> for T where
     T: ?Sized + SetAttr<keys::Festivals> + GetAttr<keys::Festivals>,
+    T: core::borrow::Borrow<crate::attributes::FilterAttributes>,
 {
     fn set_attr(&mut self, value: Festival) {
         let mut f = GetAttr::<keys::Festivals>::get_attr_or_default(self).into_owned();

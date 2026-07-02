@@ -684,6 +684,27 @@ where
     pub fn into_dyn(self) -> PackValueDyn {
         unsafe { PackValueDyn::new_unchecked(self.into_inner()) }
     }
+    #[inline(always)]
+    pub unsafe fn downcast_ref_unchecked<A>(&self) -> &PackValueOf<A>
+    where
+        A: ?Sized + AttrKeyValue,
+    {
+        PackValueOf::from_ref_unchecked(self.inner())
+    }
+    #[inline(always)]
+    pub unsafe fn downcast_mut_unchecked<A>(&mut self) -> &mut PackValueOf<A>
+    where
+        A: ?Sized + AttrKeyValue,
+    {
+        PackValueOf::from_mut_unchecked(self.inner_mut())
+    }
+    #[inline(always)]
+    pub unsafe fn downcast_unchecked<A>(self) -> PackValueOf<A>
+    where
+        A: ?Sized + AttrKeyValue,
+    {
+        PackValueOf::new_unchecked(self.into_inner())
+    }
 }
 impl PackValueDyn {
     #[inline(always)]
@@ -1086,6 +1107,23 @@ impl SetAttrDyn for PackValueSet {
         true
     }
 }
+impl<A: AttrKey + AttrKeyValue> GetAttr<A> for dyn GetAttrDyn {
+    fn has_attr(&self) -> bool {
+        self.has_attr_dyn(A::pack_key_of())
+    }
+    fn get_attr_ref(&self) -> Option<&A> {
+        self.get_attr_dyn_ref(A::pack_key_of())
+            .map(|v| unsafe { <dyn AttrKeyValue>::downcast_ref_unchecked(v) })
+    }
+}
+impl<A: AttrKey + AttrKeyValue> SetAttr<A> for dyn SetAttrDyn {
+    fn set_attr(&mut self, v: A) {
+        self.set_attr_dyn(PackValueOf::new_boxed(v).into_inner());
+    }
+    fn unset_attr(&mut self) {
+        self.set_attr_dyn(PackValueCell::new_empty(A::pack_key_of()));
+    }
+}
 impl<A: AttrKey + AttrKeyValue> GetAttr<A> for PackValueSet {
     fn has_attr(&self) -> bool {
         self.contains(&A::pack_key_of())
@@ -1170,7 +1208,27 @@ impl dyn GetAttrDyn {
     }
 }
 pub trait GetAttrDynExt {
+    fn holds_attr_dyn_of<A: AttrKeyValue>() -> bool where Self: Sized;
     fn get_attr_dyn_ref_of<A: AttrKeyValue>(&self) -> Option<&A>;
+    fn get_attr_of_dyn<A: AttrKeyValue>(&self) -> Option<Cow<'_, A>> where
+        A: Clone,
+    {
+        match self.get_attr_dyn_of::<A>() {
+            None => None,
+            Some(Cow::Borrowed(v)) => Some(Cow::Borrowed(&*v)),
+            Some(Cow::Owned(v)) => match v.to_value() {
+                #[cfg(debug_assertions)]
+                None => {
+                    log::warn!("attempted to clone {}", A::pack_key_of());
+                    None
+                },
+                v => v.map(Cow::Owned),
+            },
+        }
+    }
+    fn get_attr_dyn_of<A: AttrKeyValue>(&self) -> Option<Cow<'_, PackValueRef<A>>> where
+        // TODO: A: ToOwned
+        A: Clone;
     fn clone_attr_dyn_of<A: AttrKeyValue>(&self) -> Option<PackValueOf<A>>;
     fn has_attr_dyn_of<A: AttrKeyValue>(&self) -> bool;
     #[inline]
@@ -1230,20 +1288,51 @@ pub trait GetAttrDynExt {
     {
         self.attr_or_default::<A>().into()
     }
+
+    #[inline]
+    fn set_attr_dyn_of<A: AttrKeyValue>(&mut self, v: A) -> bool where
+        Self: SetAttrDyn,
+    {
+        self.set_attr_dyn(unsafe { PackValueCell::new_boxed_unchecked(v) })
+    }
+    #[inline]
+    fn unset_attr_dyn_of<A: AttrKeyValue>(&mut self) where
+        Self: SetAttrDyn,
+    {
+        self.set_attr_dyn(PackValueCell::new_empty(A::pack_key_of()));
+    }
 }
 impl<T> GetAttrDynExt for T
 where
     T: ?Sized + GetAttrDyn,
 {
     #[inline]
+    fn holds_attr_dyn_of<A: AttrKeyValue>() -> bool where Self: Sized {
+        Self::holds_attr_dyn(A::pack_key_of())
+    }
+    #[inline]
     fn get_attr_dyn_ref_of<A: AttrKeyValue>(&self) -> Option<&A> {
         self.get_attr_dyn_ref(A::pack_key_of())
             .map(|v| unsafe { <dyn AttrKeyValue>::downcast_ref_unchecked(v) })
     }
     #[inline]
+    fn get_attr_dyn_of<A>(&self) -> Option<Cow<'_, PackValueRef<A>>> where
+        A: AttrKeyValue + Clone,
+    {
+        self.get_attr_dyn(A::pack_key_of())
+            .map(|v| match v {
+                Cow::Borrowed(v) => Cow::Borrowed(unsafe {
+                    PackValueRef::from_ref(<dyn AttrKeyValue>::downcast_ref_unchecked(v))
+                }),
+                Cow::Owned(v) => Cow::Owned(unsafe {
+                    v.downcast_unchecked()
+                }),
+            })
+    }
+    #[inline]
     fn clone_attr_dyn_of<A: AttrKeyValue>(&self) -> Option<PackValueOf<A>> {
         self.clone_attr_dyn(A::pack_key_of())
-            .map(|v| unsafe { PackValueOf::new_unchecked(v.into()) })
+            .map(|v| unsafe { v.downcast_unchecked() })
     }
     #[inline]
     fn has_attr_dyn_of<A: AttrKeyValue>(&self) -> bool {

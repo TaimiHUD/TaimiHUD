@@ -166,6 +166,8 @@ impl<'a> FromIterator<&'a Mount> for Mounts {
 
 impl<T> GetAttr<Mount> for T where
     T: ?Sized + GetAttr<keys::Mounts>,
+    // TODO: dumb hack to avoid blanket impl havoc
+    T: core::borrow::Borrow<crate::attributes::FilterAttributes>,
 {
     fn has_attr(&self) -> bool {
         GetAttr::<keys::Mounts>::get_attr(self).map(|f|
@@ -180,6 +182,7 @@ impl<T> GetAttr<Mount> for T where
 }
 impl<T> SetAttr<Mount> for T where
     T: ?Sized + SetAttr<keys::Mounts> + GetAttr<keys::Mounts>,
+    T: core::borrow::Borrow<crate::attributes::FilterAttributes>,
 {
     fn set_attr(&mut self, value: Mount) {
         let mut f = GetAttr::<keys::Mounts>::get_attr_or_default(self).into_owned();

@@ -410,6 +410,8 @@ impl Default for MapVisibility {
 }
 impl FadeNear {
     pub const DEFAULT: Self = Self(-1.0);
+    #[inline(always)]
+    pub const fn inches(&self) -> f32 { self.0 }
 }
 impl Default for FadeNear {
     fn default() -> Self {
@@ -418,6 +420,8 @@ impl Default for FadeNear {
 }
 impl FadeFar {
     pub const DEFAULT: Self = Self(-1.0);
+    #[inline(always)]
+    pub fn inches(&self) -> f32 { self.0 }
 }
 impl Default for FadeFar {
     fn default() -> Self {
@@ -1340,7 +1344,7 @@ pack_key! {
     #[pack(attr = "name")]
     pub struct NameId(pub AttrString);
     #[pack(attr = "mapid")]
-    #[derive(Copy)]
+    #[derive(Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct GameMap(pub u32);
     #[pack(attr = "info")]
     pub struct Info(pub AttrString);
@@ -1475,6 +1479,12 @@ impl From<i32> for GameMap {
     #[inline]
     fn from(id: i32) -> Self {
         Self(id as _)
+    }
+}
+impl From<NonZero<u32>> for GameMap {
+    #[inline]
+    fn from(id: NonZero<u32>) -> Self {
+        Self(id.get() as _)
     }
 }
 impl From<GameMap> for i32 {
@@ -1830,6 +1840,24 @@ macro_rules! pack_key {
                 fmt::Display::fmt(&self[..], f)
             }
         }
+        impl AsRef<str> for $ident {
+            #[inline]
+            fn as_ref(&self) -> &str {
+                &self.0[..]
+            }
+        }
+        impl AsRef<Box<str>> for $ident {
+            #[inline]
+            fn as_ref(&self) -> &Box<str> {
+                &*self.0
+            }
+        }
+        impl Borrow<str> for $ident {
+            #[inline]
+            fn borrow(&self) -> &str {
+                &self.0[..]
+            }
+        }
         impl FromStr for $ident {
             type Err = Infallible;
 
@@ -1903,13 +1931,13 @@ macro_rules! pack_key {
                 $ident::from_ref(&self.name)
             }
         }
-        impl core::borrow::Borrow<$ident> for AttrString {
+        impl Borrow<$ident> for AttrString {
             #[inline]
             fn borrow(&self) -> &$ident {
                 $ident::from_ref(core::borrow::Borrow::borrow(self))
             }
         }
-        impl core::borrow::Borrow<AttrString> for $ident {
+        impl Borrow<AttrString> for $ident {
             #[inline]
             fn borrow(&self) -> &AttrString {
                 core::borrow::Borrow::borrow(&self.0)
@@ -1940,6 +1968,18 @@ macro_rules! pack_key {
             fn into_iter(self) -> Self::IntoIter {
                 self.0.into_iter()
             }
+        }
+        impl From<$elem> for $ident {
+            #[inline]
+            fn from(e: $elem) -> Self { FromIterator::from_iter([e]) }
+        }
+        impl From<Box<[$elem]>> for $ident {
+            #[inline]
+            fn from(e: Box<[$elem]>) -> Self { Self(List(e)) }
+        }
+        impl From<Vec<$elem>> for $ident {
+            #[inline]
+            fn from(e: Vec<$elem>) -> Self { Self(List(e.into_boxed_slice())) }
         }
     };
     (@fromstr
@@ -2321,6 +2361,8 @@ super::cell::pack_attr! {
 // (see also: Festival, Mount, Race, Profession)
 impl<T> GetAttr<Raid> for T where
     T: ?Sized + GetAttr<Raids>,
+    // TODO: dumb hack to avoid blanket impl havoc
+    T: Borrow<crate::attributes::FilterAttributes>,
 {
     fn has_attr(&self) -> bool {
         GetAttr::<Raids>::get_attr(self).map(|f|
@@ -2336,6 +2378,7 @@ impl<T> GetAttr<Raid> for T where
 }
 impl<T> SetAttr<Raid> for T where
     T: ?Sized + SetAttr<Raids> + GetAttr<Raids>,
+    T: Borrow<crate::attributes::FilterAttributes>,
 {
     fn set_attr(&mut self, value: Raid) {
         let r = match GetAttr::<Raids>::get_attr(self) {
@@ -2350,6 +2393,8 @@ impl<T> SetAttr<Raid> for T where
 }
 impl<T> GetAttr<Specialization> for T where
     T: ?Sized + GetAttr<Specializations>,
+    // TODO: dumb hack to avoid blanket impl havoc
+    T: Borrow<crate::attributes::FilterAttributes>,
 {
     fn has_attr(&self) -> bool {
         GetAttr::<Specializations>::get_attr(self).map(|f|
@@ -2365,6 +2410,7 @@ impl<T> GetAttr<Specialization> for T where
 }
 impl<T> SetAttr<Specialization> for T where
     T: ?Sized + SetAttr<Specializations> + GetAttr<Specializations>,
+    T: Borrow<crate::attributes::FilterAttributes>,
 {
     fn set_attr(&mut self, value: Specialization) {
         let s = match GetAttr::<Specializations>::get_attr(self) {
@@ -2379,6 +2425,8 @@ impl<T> SetAttr<Specialization> for T where
 }
 impl<T> GetAttr<MapType> for T where
     T: ?Sized + GetAttr<MapTypes>,
+    // TODO: dumb hack to avoid blanket impl havoc
+    T: Borrow<crate::attributes::FilterAttributes>,
 {
     fn has_attr(&self) -> bool {
         GetAttr::<MapTypes>::get_attr(self).map(|f|
@@ -2394,6 +2442,7 @@ impl<T> GetAttr<MapType> for T where
 }
 impl<T> SetAttr<MapType> for T where
     T: ?Sized + SetAttr<MapTypes> + GetAttr<MapTypes>,
+    T: Borrow<crate::attributes::FilterAttributes>,
 {
     fn set_attr(&mut self, value: MapType) {
         let s = match GetAttr::<MapTypes>::get_attr(self) {
