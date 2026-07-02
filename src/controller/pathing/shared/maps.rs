@@ -324,6 +324,17 @@ impl SharedMapPackLoaded {
     pub fn update_with_info(&mut self, info: &Arc<MapPackInfo>) -> bool {
         ArcPtrCmp::from_mut(&mut self.info).clone_from_arc(info)
     }
+    pub fn write_with_loaded_pois(&mut self, map_pack: &LoadedMapPack) {
+        ArcPtrCmp::from_mut(&mut self.poi_guids).clone_from_arc(&map_pack.poi_guids);
+        self.pois = map_pack.pois.iter().map(|poi| poi.info().clone()).collect();
+    }
+    pub fn write_with_loaded_trails(&mut self, map_pack: &LoadedMapPack) {
+        self.trails = map_pack.trails.iter().map(|trail| trail.info().clone()).collect();
+    }
+    pub fn write_with_loaded(&mut self, map_pack: &LoadedMapPack) {
+        self.write_with_loaded_pois(map_pack);
+        self.write_with_loaded_trails(map_pack);
+    }
     pub fn update_with(&mut self, map_pack: &LoadedMapPack) -> bool {
         let mut dirty = false;
         dirty |= ArcPtrCmp::from_mut(&mut self.poi_guids).clone_from_arc(&map_pack.poi_guids);
@@ -342,7 +353,7 @@ impl SharedMapPackLoaded {
             self.trails.data.iter(),
         ) {
             // XXX: could try to do partial update?
-            self.trails = map_pack.trails.iter().map(|trail| trail.info().clone()).collect();
+            self.write_with_loaded_trails(map_pack);
             dirty = true;
         }
         dirty
@@ -480,6 +491,7 @@ impl SharedMapPackState {
         if Arc::ptr_eq(&self.categories, &map_pack.categories) {
             return false
         }
+        self.categories = map_pack.categories.clone();
         true
     }
     pub fn write_with_loaded(&mut self, map_pack: &LoadedMapPack) {

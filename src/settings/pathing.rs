@@ -5,7 +5,11 @@ use {
     serde::{de::DeserializeSeed, Deserialize, Serialize},
     std::{collections::BTreeMap, fmt, num::NonZero, str::FromStr, sync::Arc},
     strum::{IntoStaticStr, VariantArray},
-    taimi_hoard::flags::{BitFlagContainer, BitFlagDe, BitFlagSer},
+    taimi_hoard::{
+        flags::{BitFlagContainer, BitFlagDe, BitFlagSer},
+        a_f32,
+        is_a_f32,
+    },
 };
 #[cfg(feature = "paths")]
 use {
@@ -47,6 +51,11 @@ pub struct PathingSettings {
         skip_serializing_if = "TriggerKind::settings_default_is_enable"
     )]
     pub trigger_enable: bool,
+    #[serde(
+        default = "a_f32::<{PathingSettings::DEFAULT_INTERACT_RESPONSIVENESS.to_bits()}>",
+        skip_serializing_if = "is_a_f32::<{PathingSettings::DEFAULT_INTERACT_RESPONSIVENESS.to_bits()}>",
+    )]
+    pub interact_base_responsiveness: f32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub load_simultaneous: Option<usize>,
 
@@ -61,13 +70,15 @@ pub struct PathingSettings {
     pub scripting_unsecured: bool,
     #[cfg(feature = "paths-lua")]
     #[serde(
-        default = "taimi_hoard::a_f32::<{1.0f32.to_bits()}>",
+        default = "a_f32::<{1.0f32.to_bits()}>",
+        skip_serializing_if = "is_a_f32::<{1.0f32.to_bits()}>",
         rename = "deleteme_script_tick_rate"
     )]
     pub scripting_tick_rate: f32,
 }
 
 impl PathingSettings {
+    pub const DEFAULT_INTERACT_RESPONSIVENESS: f32 = 0.088f32;
     #[cfg(feature = "paths")]
     pub const DEFAULT_LOAD_SIMULTANEOUS: usize = 4;
 
@@ -140,6 +151,7 @@ impl Default for PathingSettings {
             trigger_enable: TriggerKind::settings_default_enable(),
             trigger_allow_auto: TriggerKind::settings_default_auto(),
             trigger_allow_interact: TriggerKind::settings_default_interact(),
+            interact_base_responsiveness: Self::DEFAULT_INTERACT_RESPONSIVENESS,
             load_simultaneous: None,
             #[cfg(feature = "paths-lua")]
             scripting_enable: false,

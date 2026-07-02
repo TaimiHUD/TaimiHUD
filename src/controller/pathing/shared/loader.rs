@@ -24,17 +24,19 @@ use {
     },
     rustc_hash::FxHashMap,
     std::{
-        collections::{btree_map, BTreeMap},
+        collections::{btree_map, BTreeMap, BTreeSet},
         fmt,
         mem,
+        ops,
         path::Path,
-        sync::{atomic::{AtomicUsize, Ordering}, Arc, RwLock},
+        sync::{atomic::{AtomicUsize, AtomicU32, AtomicU16, Ordering}, Arc, RwLock},
     },
     taimi_hoard::{
+        cmp::CmpIgnore,
         iters::IterExt as _,
         loc::{LocationMut, Locator},
     },
-    taimi_meta::packs::MapIndex,
+    taimi_meta::packs::{MarkerIndex, MapIndex, PoiIndex, PoiPath, TrailIndex, TrailPath, CategoryPath, CategoryIndex, MarkerPath},
     taimi_pack::{attributes::AttrString, Pack},
     taimi_sync::{
         arcs::ArcPtrCmp,
@@ -143,6 +145,8 @@ pub struct SharedPackInfo {
     pub info: Option<Arc<PackInfo>>,
     pub datasource: Option<DataSourcePath>,
     pub sig: PackInfoSignature,
+    /// TODO: include in hashes?
+    pub dynamics: ArcPtrCmp<SharedPackDynamics>,
     allocated_keys: ArcPtrCmp<RwLock<FxHashMap<AttrString, Arc<str>>>>,
 }
 impl SharedPackInfo {
@@ -154,6 +158,7 @@ impl SharedPackInfo {
             info: None,
             sig: PackInfoSignature::EMPTY,
             allocated_keys: Default::default(),
+            dynamics: Default::default(),
         }
     }
     pub fn empty(index: Option<PackPath>) -> Self {
@@ -164,6 +169,7 @@ impl SharedPackInfo {
             datasource: None,
             sig: PackInfoSignature::EMPTY,
             allocated_keys: Default::default(),
+            dynamics: Default::default(),
         }
     }
 
@@ -305,6 +311,169 @@ impl fmt::Display for SharedPackInfo {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct SharedPackDynamics {
+    pub paths: SharedPackAllocation,
+    #[cfg(todo)]
+    static_end_poi: PoiPath,
+}
+impl SharedPackDynamics {
+    pub fn reset_for_pack(&self, pack: &Pack) {
+        self.paths.reset_with_static_range(SharedPackAllocation::static_ranges_for(pack));
+    }
+    #[cfg(todo)]
+    pub fn is_dynamic_path(&self, path: MarkerPath) -> Option<bool> {}
+}
+#[derive(Debug)]
+pub struct SharedPackAllocation {
+    #[cfg(todo)]
+    pub masked: RwLock<MarkerSet>,
+    pub masked: RwLock<BTreeSet<MarkerPath>>,
+    next_index_poi: AtomicU32,
+    next_index_trail: AtomicU16,
+    next_index_category: AtomicU32,
+}
+/// dynamic allocations typically follow
+pub type StaticMarkerRanges = (ops::RangeTo<PoiPath>, ops::RangeTo<TrailPath>, ops::RangeTo<CategoryPath>);
+impl SharedPackAllocation {
+    const ORDERING_CHECK: Ordering = Ordering::Relaxed;
+    const ORDERING_RESERVE: Ordering = Ordering::SeqCst;
+    #[inline]
+    pub fn end_path_poi(&self) -> PoiPath {
+        PoiPath::new_path(self.next_index_poi.load(Self::ORDERING_CHECK))
+    }
+    #[inline]
+    pub fn end_path_trail(&self) -> TrailPath {
+        TrailPath::new_path(self.next_index_trail.load(Self::ORDERING_CHECK))
+    }
+    #[inline]
+    pub fn end_path_category(&self) -> CategoryPath {
+        CategoryPath::new_path(self.next_index_category.load(Self::ORDERING_CHECK))
+    }
+
+    pub const INDEX_MAX_POI: PoiIndex = MarkerIndex::INDEX_MAX_POI as PoiIndex;
+    pub const INDEX_MAX_TRAIL: TrailIndex = match MarkerIndex::INDEX_MAX_TRAIL {
+        // expected to be 0xffff, so...
+        m if m >= TrailIndex::MAX as u32 => m - 0x10,
+        m => m,
+    } as TrailIndex;
+    pub const INDEX_MAX_CATEGORY: CategoryIndex = MarkerIndex::INDEX_MAX_CAT as CategoryIndex;
+    pub fn reserve_poi(&self) -> PoiPath {
+        let path = self.next_index_poi.fetch_add(1, Self::ORDERING_RESERVE);
+        if path >= Self::INDEX_MAX_POI {
+            log::warn!("exhausted dynamic pois");
+            // racy but there's headroom and allocating over static paths will cause mayhem so try at least...
+            self.next_index_poi.store(PoiIndex::MAX, Self::ORDERING_RESERVE);
+            return PoiPath::new_path(PoiIndex::MAX)
+        }
+        PoiPath::new_path(path)
+    }
+    pub fn reserve_trail(&self) -> TrailPath {
+        let path = self.next_index_trail.fetch_add(1, Self::ORDERING_RESERVE);
+        if path >= Self::INDEX_MAX_TRAIL {
+            log::warn!("exhausted dynamic trails");
+            self.next_index_trail.store(TrailIndex::MAX, Self::ORDERING_RESERVE);
+            return TrailPath::new_path(TrailIndex::MAX)
+        }
+        TrailPath::new_path(path)
+    }
+    pub fn reserve_category(&self) -> CategoryPath {
+        let path = self.next_index_category.fetch_add(1, Self::ORDERING_RESERVE);
+        if path >= Self::INDEX_MAX_CATEGORY {
+            log::warn!("exhausted dynamic cats");
+            self.next_index_category.store(Self::INDEX_MAX_CATEGORY, Self::ORDERING_RESERVE);
+            return CategoryPath::new_path(CategoryIndex::MAX)
+        }
+        CategoryPath::new_path(path)
+    }
+
+    pub fn is_masked(&self, path: MarkerPath) -> bool {
+        let Ok(m) = self.masked.write() else { return false };
+        m.contains(&path)
+    }
+    pub fn mask_marker(&self, path: MarkerPath) {
+        let Ok(mut m) = self.masked.write() else { return };
+        m.insert(path);
+    }
+    pub fn unmask_marker(&self, path: MarkerPath) {
+        let Ok(mut m) = self.masked.write() else { return };
+        m.remove(&path);
+    }
+
+    pub fn is_allocated_path(&self, path: MarkerPath) -> bool {
+        let end = self.allocated_range_for_namespace(path.path.namespace());
+        let idx = match path.path.namespace() {
+            MarkerIndex::NS_TRAIL => path.path.trail_index_unchecked() as u32,
+            _ => path.path.index(),
+        };
+        end.contains(&idx)
+    }
+    pub fn allocated_range_for_namespace(&self, ns: u32) -> ops::RangeTo<u32> {
+        let end = match ns {
+            MarkerIndex::NS_POI => self.end_path_poi().path as u32,
+            MarkerIndex::NS_TRAIL => self.end_path_trail().path as u32,
+            MarkerIndex::NS_CAT => self.end_path_category().path as u32,
+            _ => 0,
+        };
+        ..end
+    }
+
+    pub fn reset_with_static_range(&self, ranges: StaticMarkerRanges) {
+        self.clear_masks(Some(ranges));
+        let (poi, trail, cat) = ranges;
+        self.next_index_poi.store(poi.end.path, Self::ORDERING_RESERVE);
+        self.next_index_trail.store(trail.end.path, Self::ORDERING_RESERVE);
+        self.next_index_category.store(cat.end.path, Self::ORDERING_RESERVE);
+    }
+    /// exception for preserving static masked markers
+    pub fn clear_masks(&self, exception: Option<StaticMarkerRanges>) {
+        let mut m = self.masked.write().unwrap_or_else(|e| e.into_inner());
+        match exception {
+            Some((poi, trail, cat)) => {
+                m.retain(|mask| match mask.path.namespace() {
+                    MarkerIndex::NS_POI => mask.path.index_poi_unchecked() < poi.end.path,
+                    MarkerIndex::NS_TRAIL => mask.path.trail_index_unchecked() < trail.end.path,
+                    MarkerIndex::NS_CAT => mask.path.index_category_unchecked() < cat.end.path,
+                    _ => {
+                        #[cfg(taimi_debug)]
+                        log::debug!("unexpected mask {mask}");
+                        true
+                    },
+                });
+            },
+            None => {
+                m.clear();
+            },
+        }
+    }
+    pub fn static_ranges_for(pack: &Pack) -> StaticMarkerRanges {
+        (
+            ..PoiPath::new_path(pack.pois.len() as PoiIndex),
+            ..TrailPath::new_path(pack.trails.len() as TrailIndex),
+            ..CategoryPath::new_path(pack.categories.all_categories.len() as CategoryIndex),
+        )
+    }
+    pub fn static_range_for_namespace(pack: &Pack, ns: u32) -> ops::RangeTo<u32> {
+        let end = match ns {
+            MarkerIndex::NS_POI => pack.pois.len() as u32,
+            MarkerIndex::NS_TRAIL => pack.trails.len() as u32,
+            MarkerIndex::NS_CAT => pack.categories.all_categories.len() as u32,
+            _ => 0,
+        };
+        ..end
+    }
+}
+impl Default for SharedPackAllocation {
+    fn default() -> Self {
+        Self {
+            masked: Default::default(),
+            next_index_poi: AtomicU32::new(Self::INDEX_MAX_POI),
+            next_index_trail: AtomicU16::new(Self::INDEX_MAX_TRAIL),
+            next_index_category: AtomicU32::new(Self::INDEX_MAX_CATEGORY),
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct SharedPackLoaded {
     pub unloaded: Option<UnloadedReason>,
@@ -419,6 +588,7 @@ impl SharedPackLoad {
         let PackActivateLoaded { info, config, pack, loader } = loaded;
         let changed = self.set_info(info).is_some();
         let info_sig = self.info.sig.clone();
+        self.info.dynamics.reset_for_pack(&pack);
         self.loaded.send_if_modified(|shared| {
             let dirty = shared.unloaded.is_some() || changed;
             shared.unloaded = None;

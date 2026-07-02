@@ -221,6 +221,14 @@ impl RenderState {
         let window_open = self.pathing_window.window_visibility().is_visible();
         let submenu_id = "context-popup-pathing";
         let mut submenu = Some(|ui: &mut U| {
+            let messages_open = self.message_window.window_visibility().is_visible();
+            if ui.selectable(fl!("message-window-toggle"), messages_open) {
+                control_window(crate::WINDOW_MESSAGES, None);
+            }
+            if let Some(_menu) = ui.begin_menu(fl!("pathing-menu-packs")) {
+                self.pathing_menu_open = true;
+                self.pathing_window.draw_context_menu(ui, &mut self.machine);
+            }
             if pathing_enabled {
                 if with_i18n!("reload-packs", |msg| ui.pressable(msg)) {
                     PathingEvent::ReloadAll(true).try_send();
@@ -238,15 +246,6 @@ impl RenderState {
             }
             if let Some(_menu) = ui.begin_menu(fl!("advanced")) {
                 self.machine.pack_ui_state.draw_menu_advanced(ui);
-            }
-            if let Some(_menu) = ui.begin_menu(c"some") {
-                self.pathing_menu_open = true;
-                if pathing_enabled {
-                    ui.menu_item_enabled(c"body", false, false);
-                    self.pathing_window.draw_context_menu(ui, &mut self.machine);
-                } else {
-                    ui.menu_item_enabled(c"where", false, false);
-                }
             }
         });
         if !inline {
@@ -274,6 +273,13 @@ impl RenderState {
                 with_i18n!("context-click-notice", |msg| ui.tooltip_text(&msg));
                 // TODO: just steal nexus "((000102))"? could be useful to have a way to load those if available...
             }
+        }
+        #[cfg(feature = "scripts")]
+        let plugs = self.primary_window.plug_state.applicable
+            .then(|| ui.begin_menu(c"plugs"));
+        #[cfg(feature = "scripts")]
+        if let Some(_menu) = plugs {
+            self.pathing_window.draw_context_menu_plugs(ui, &mut self.machine);
         }
     }
     #[cfg(feature = "markers")]

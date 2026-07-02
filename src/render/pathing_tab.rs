@@ -930,8 +930,8 @@ impl PathingConfig {
         U: ?Sized + ImDrawWindow<'ui>,
     {
         let settings =
-            Self::get_pathing(|s| (s.trigger_enable, s.trigger_allow_auto, s.trigger_allow_interact));
-        let Some((mut trigger_enable, trigger_allow_auto, trigger_allow_interact)) = settings else {
+            Self::get_pathing(|s| (s.trigger_enable, s.trigger_allow_auto, s.trigger_allow_interact, s.interact_base_responsiveness));
+        let Some((mut trigger_enable, trigger_allow_auto, trigger_allow_interact, responsiveness)) = settings else {
             return
         };
         let mut settings_dirty = false;
@@ -955,6 +955,11 @@ impl PathingConfig {
 
         let mut interact_toggled = None;
         let set_interact = if let Some(_tree) = interaction_tree {
+            if let Some(v) = Self::slider_setting_inner(ui, fl!("pathing-config-interactions-responsiveness"), responsiveness, (0.01f32, 4.0f32), Some(c"%.03fs")) {
+                Self::set_pathing(|s| s.interact_base_responsiveness = v.unwrap_or(PathingSettings::DEFAULT_INTERACT_RESPONSIVENESS));
+                settings_dirty = true;
+            }
+
             let _id = ui.push_id("trigger_allow_interact");
 
             ui.unindent();

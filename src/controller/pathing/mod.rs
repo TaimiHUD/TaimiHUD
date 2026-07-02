@@ -30,7 +30,7 @@ use {
         stream,
         StreamExt,
     },
-    std::{collections::VecDeque, future::Future, mem, pin::Pin, sync::Arc, time::Duration},
+    std::{collections::VecDeque, fmt, future::Future, mem, pin::Pin, sync::Arc, time::Duration},
     strum_macros::Display,
     taimi_hoard::{loc::{LocationRef, LocationMut}, time::Timestamp},
     taimi_meta::{
@@ -60,6 +60,8 @@ use {
     },
     taimi_d3d::shader::ShaderKind,
 };
+#[cfg(feature = "paths-dyn")]
+use taimi_pack::attributes::cell::PackValueCell;
 #[cfg(feature = "paths-filter")]
 use std::cell::LazyCell;
 
@@ -79,6 +81,8 @@ pub use self::{
 use crate::controller::script;
 
 mod config;
+#[cfg(feature = "paths-dyn")]
+mod r#dyn;
 mod festivals;
 #[cfg(feature = "paths-filter")]
 mod filter;
@@ -148,6 +152,7 @@ pub(crate) enum PathingEvent {
         message: Option<AttrString>,
     },
     #[cfg(feature = "paths-interact")]
+    #[cfg(todo = "unused")]
     TriggerMarkerInfo {
         path: MarkerPath,
         loaded_path: LoadedMarkerPath<PackMapPath>,
@@ -181,6 +186,23 @@ pub(crate) enum PathingEvent {
     Exit(Interruption),
     #[default]
     Nop,
+    // dynamic marker attrs
+    #[cfg(feature = "paths-dyn")]
+    CommitMarkerLoad {
+        marker_path: MarkerPath<PackPath>,
+        map_id: Option<MapIndex>,
+    },
+    #[cfg(feature = "paths-dyn")]
+    CommitMarkerAttrs {
+        marker: MarkerId,
+        /// TODO: change to AttrsSet or whatever from cell
+        write_attrs: Box<dyn Iterator<Item = PackValueCell> + Send>,
+    },
+    /// remove and disable
+    #[cfg(feature = "paths-dyn")]
+    MaskMarker { marker: MarkerId },
+    #[cfg(todo)]
+    UnmaskMarker { marker: MarkerId },
     // Debug and diagnostics commands
     RequestRebuildSpace {
         entities: Option<bool>,
@@ -382,6 +404,7 @@ impl PathingController {
                 let changed = *enables ^ enables_prev;
                 if changed.contains(PathingEnables::ENGINE) && enables.contains(PathingEnables::ENGINE) {
                     log::debug!("engine online, let's go!");
+                    Self::setup_stats();
                 }
             },
             _ = &mut self.now_loading_timeout => {
@@ -390,6 +413,8 @@ impl PathingController {
                 // TODO: move to a signal and let subsystems subscribe as needed...
                 self.space_pack_rebuild_if_needed().await;
                 self.interact_rebuild_if_needed().await;
+                #[cfg(feature = "paths-lua")]
+                script::ScriptMessage::RefreshPacks.try_send();
             },
             load_throttle = self.rx.load_throttle.when_changed() => {
                 let new_amt = (*load_throttle).max(1).min(Semaphore::MAX_PERMITS / 2);
@@ -604,7 +629,7 @@ impl PathingController {
                 if let Some((enable, unsecure)) = settings
                     .pathing
                     .as_ref()
-                    .map(|p| (p.scripting_enable, p.scripting_unsecured))
+                    .map(|p| (p.scripting_enable & p.scripting_auto, p.scripting_unsecured))
                 {
                     enable_flags.set(PathingEnables::SCRIPTING_LUA, enable);
                     enable_flags.set(PathingEnables::SCRIPTING_UNSECURED, unsecure);
@@ -786,6 +811,7 @@ impl PathingController {
             TriggerMarkerCopy { path, loaded_path, value, message } =>
                 self.process_marker_copy(path, loaded_path, value, message).await,
             #[cfg(feature = "paths-interact")]
+            #[cfg(todo = "unused")]
             TriggerMarkerInfo { path, loaded_path, message } =>
                 self.process_marker_info(path, loaded_path, message).await,
             #[cfg(feature = "paths-interact")]
@@ -829,10 +855,24 @@ impl PathingController {
             SpawnTask(task) => {
                 self.tasks.spawn(task);
             },
-            #[cfg(todo = "unused")]
-            #[cfg(feature = "paths-filter")]
+            #[cfg(feature = "paths-schedule")]
             Scheduled(when, events) => {
                 self.scheduled_events.schedule_append(when.instant, events);
+            },
+            #[cfg(feature = "paths-dyn")]
+            CommitMarkerLoad { marker_path, map_id } => {
+                let map_id = map_id.or(self.gameplay_map());
+                if let Some(map_id) = map_id {
+                    self.allocate_loaded_marker(marker_path, map_id).await;
+                }
+            },
+            #[cfg(feature = "paths-dyn")]
+            CommitMarkerAttrs { marker, write_attrs } => {
+                self.commit_attr_changes(marker, &mut { write_attrs }).await;
+            },
+            #[cfg(feature = "paths-dyn")]
+            MaskMarker { marker } => {
+                self.commit_marker_masked(marker).await;
             },
             #[cfg(debug_assertions)]
             Exit(..) | FanOut(..) => unreachable!(),
@@ -1108,6 +1148,15 @@ impl PathingController {
     #[inline]
     pub fn try_send(e: PathingEvent) -> bool {
         Controller::with_sender(|s| s.pathing_try_send(e)).unwrap_or(false)
+    }
+
+    fn setup_stats() {
+        #[cfg(all(feature = "paths-interact", feature = "statistics", taimi_debug))]
+        {
+            rt::statistics::StatsRef::new(&interact::STATS_POLL_INTERVAL, rt::statistics::StatsUnit::Time).register(
+                rt::statistics::StatsDesc::new("stats-pathing-interact", "stats-pathing-interact-poll"),
+            );
+        }
     }
 }
 

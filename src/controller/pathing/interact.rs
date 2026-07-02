@@ -3,7 +3,7 @@ use {
         controller::{
             pathing::{
                 info::MapPackInfo,
-                registry::{LoadedMarkerPath, LoadedPoiPath, PackMapPath, PoiMapPath},
+                registry::{LoadedMarkerPath, LoadedPoiPath, PackPath, PackMapPath, PoiMapPath},
                 shared::{
                     interact::{
                         empty_trigger_bvh,
@@ -33,14 +33,15 @@ use {
             Controller,
         },
         exports::runtime as rt,
-        render::{RenderEvent, RenderState},
+        render::{message_window::{MessageItemDesc, MessageActionDesc}, RenderEvent, RenderState},
         settings::{
             pathing::{PathingSettings, TriggerKind},
             SettingsLock,
         },
         Interruption,
+        fl, with_i18n,
     },
-    bvh::{aabb, bounding_hierarchy::BHShape, bvh::Bvh},
+    bvh::{aabb, bounding_hierarchy::BHShape, bvh::Bvh, point_query::PointDistance},
     futures::{
         future::{self, Either},
         stream::StreamExt,
@@ -56,7 +57,7 @@ use {
         time::Duration,
         mem,
     },
-    taimi_hoard::{cmp::CmpIgnore, flags::BitSet, loc::LocationRef, time::Timestamp},
+    taimi_hoard::{lazyfmt, str_opt, cmp::CmpIgnore, flags::BitSet, loc::LocationRef, time::Timestamp},
     taimi_meta::{
         coords::LocalSpace,
         packs::{
@@ -67,11 +68,13 @@ use {
         spatial::{BvhShape, MintConv, TriggerBoundsInfo},
         ui::gameplay::GameplayState,
     },
-    taimi_pack::{category::id, attributes::{cell::GetAttrDynExt, keys, AttrString, InteractionAttributes, MarkerAttributes}},
+    taimi_pack::{category::id, attributes::{cell::GetAttrDynExt, keys::{self, GetAttr}, AttrString, InteractionAttributes, MarkerAttributes}},
     taimi_sync::arcs::ArcPtrCmp,
     tokio::sync::{broadcast, RwLock},
     tokio_stream::wrappers::errors::BroadcastStreamRecvError as BroadcastError,
     taimi_hoard::vec::vec32_eq,
+    ordered_float::OrderedFloat,
+    num_traits::AsPrimitive,
 };
 
 #[derive(Debug, Clone)]
@@ -103,12 +106,23 @@ impl SpaceInteraction {
     pub fn is_auto(&self) -> bool {
         self.bounds.is_auto()
     }
-    pub fn is_passive(&self, attrs: &InteractionAttributes) -> bool {
-        self.is_auto() || attrs.has_attr_of::<keys::Info>() || attrs.has_attr_of::<keys::CopyValue>()
+    fn is_passive<A>(&self, attrs: &A) -> bool where
+        A: GetAttr<keys::Info>
+        + GetAttr<keys::CopyValue>
+        + GetAttr<keys::ScriptFocus>
+        // TODO: bleh
+        + GetAttrDynExt,
+    {
+        let is_passive = self.is_auto() || attrs.has_attr_of::<keys::Info>() || attrs.has_attr_of::<keys::CopyValue>();
+        #[cfg(feature = "paths-lua")]
+        let is_passive = is_passive || attrs.has_attr_of::<keys::ScriptFocus>();
+        is_passive
     }
     /// may display an unintrusive popup or notification, even if not allowed to auto-trigger
+    ///
+    /// [TriggerKind::SCRIPT] is relevant for `script-focus` events only
     pub const PASSIVE_NEARBY: TriggerKind =
-        TriggerKind::from_bits_retain(TriggerKind::INFO.bits() | TriggerKind::COPY.bits());
+        TriggerKind::from_bits_retain(TriggerKind::INFO.bits() | TriggerKind::COPY.bits() | TriggerKind::SCRIPT.bits());
 
     pub fn dist_dist(&self, point: &Point3<LocalSpace>) -> f32 {
         self.bounds.position.distance_squared(*point)
@@ -117,7 +131,13 @@ impl SpaceInteraction {
         self.bounds.position2().distance_squared(*point)
     }
     pub fn dist_dist_inrange(&self, point: &Point3<LocalSpace>) -> Option<f32> {
+        if self.radius_radius == 0.0 { return None }
         let dist_dist = self.dist_dist(point);
+        (dist_dist <= self.radius_radius).then_some(dist_dist)
+    }
+    pub fn dist_dist2_inrange(&self, point: &Point2<LocalSpace>) -> Option<f32> {
+        if self.radius_radius == 0.0 { return None }
+        let dist_dist = self.dist_dist2(point);
         (dist_dist <= self.radius_radius).then_some(dist_dist)
     }
     pub fn point_query(pos: Point3<LocalSpace>) -> impl aabb::IntersectsAabb<f32, { TRIGGER_DIMENSION }> {
@@ -212,9 +232,12 @@ impl SpaceInteraction {
         (interest, attrs.attr_or_default::<keys::AutoTrigger>().into())
     }
     pub fn is_interactive(poi: &LoadedPoi) -> bool {
-        !poi.get_interaction_attrs()
-            .map(|i| Self::interaction_is_empty(i))
-            .unwrap_or(true)
+        let interactive = poi.get_interaction_attrs()
+            .map(|i| !Self::interaction_is_empty(i))
+            .unwrap_or(false);
+        #[cfg(feature = "paths-lua")]
+        let interactive = interactive || poi.info().marker_info.has_attr_of::<keys::ScriptTrigger>() || poi.info().marker_info.has_attr_of::<keys::ScriptFocus>();
+        interactive
     }
     pub fn interaction_is(i: &InteractionAttributes, mask: TriggerKind) -> bool {
         Self::interest_for(i).0.intersects(mask)
@@ -265,6 +288,20 @@ where
         self.bounds.aabb()
     }
 }
+impl<const D: usize> PointDistance<f32, D> for SpaceInteraction
+where
+    TriggerBoundsInfo: PointDistance<f32, D>,
+{
+    #[inline]
+    fn distance_squared(&self, query: nalgebra::Point<f32, D>) -> f32 {
+        #[cfg(todo = "unnecessary")]
+        if self.bounds.radius() > InteractReactor::CIRCLE_TOO_BIG {
+            const BIG_DIST: f32 = taimi_meta::spatial::IRRELEVANT_MAX.powi(2);
+            return BIG_DIST
+        }
+        self.bounds.distance_squared(query)
+    }
+}
 /// Since the aabb is a box and not a sphere, an additional check is required
 impl Contains<Point3<LocalSpace>> for SpaceInteraction {
     fn contains(&self, point: &Point3<LocalSpace>) -> bool {
@@ -274,7 +311,7 @@ impl Contains<Point3<LocalSpace>> for SpaceInteraction {
 /// Since the aabb is a box and not a sphere, an additional check is required
 impl Contains<Point2<LocalSpace>> for SpaceInteraction {
     fn contains(&self, point: &Point2<LocalSpace>) -> bool {
-        self.dist_dist2(point) <= self.radius_radius
+        matches!(self.dist_dist2_inrange(point), Some(..))
     }
 }
 
@@ -321,10 +358,24 @@ impl MapInteractState {
                             false => Some((map_path.rel(lpath.path), poi, interest, auto)),
                         }
                     })
-            ).inspect(|(_, _, interest, auto)| {
-                interest_nearby.insert(*interest);
+            ).inspect(|(_, poi, interest, auto)| {
+                let interest = *interest;
+                #[cfg(feature = "paths-lua")]
+                let interest = match interest.intersects(TriggerKind::SCRIPT) {
+                    // other script attrs are irrelevant for "passive" classification
+                    true if !poi.info.marker_info().has_attr_of::<keys::ScriptFocus>() =>
+                        interest & !TriggerKind::SCRIPT,
+                    _ => interest,
+                };
+                let nearbyi = match poi.info.marker_info().get_attr_dyn_of::<keys::TriggerRange>() {
+                    // discard map-wide bounds, they don't help anyone...
+                    Some(range) if f32::from(**range) > InteractReactor::CIRCLE_TOO_BIG =>
+                        TriggerKind::empty(),
+                    _ => interest,
+                };
+                interest_nearby.insert(nearbyi);
                 if *auto {
-                    interest_auto.insert(*interest & TriggerKind::AUTO_TRIGGER_MASK);
+                    interest_auto.insert(interest & TriggerKind::AUTO_TRIGGER_MASK);
                 }
             });
         let mut entities_dirty = false;
@@ -463,6 +514,17 @@ impl MapInteractState {
             trigger_bvh.shrink_to_fit();
         }
     }
+
+    /// TODO: filtered wrapper around nearest_traverse_iterator?
+    #[cfg(todo)]
+    pub fn nearest_passive_to(&self, pos: Point3<LocalSpace>) -> Option<(Point3<LocalSpace>, dist2)> {
+    }
+    /// 2d distance is returned (will not not account for y axis)
+    pub fn nearest_to(&self, pos: Point3<LocalSpace>) -> Option<(Point3<LocalSpace>, f32)> {
+        let trigger_bvh = self.trigger_bvh.as_ref().try_read().ok()?;
+        trigger_bvh.nearest_to(LocalSpace::to2(pos).into_nalg(), &self.entities[..])
+            .map(|(e, dist2)| (e.value.bounds.position, dist2))
+    }
 }
 impl Default for MapInteractState {
     fn default() -> Self {
@@ -475,7 +537,7 @@ pub struct InteractReactor {
     pub config: InteractSettings,
     pub enables: PathingEnables,
     /// TODO: passive interval as a multiple of this seems dumb
-    pub update_interval: Duration,
+    pub update_interval: f32,
     fallback_progress: usize,
     event_dirty_bvh_rebuild: bool,
     event_dirty_settings: bool,
@@ -487,7 +549,7 @@ impl InteractReactor {
             map_interactions: Default::default(),
             config: Default::default(),
             enables: Default::default(),
-            update_interval: Self::UPDATE_INTERVAL_RESPONSIVE,
+            update_interval: PathingSettings::DEFAULT_INTERACT_RESPONSIVENESS,
             fallback_progress: 0,
             event_dirty_bvh_rebuild: false,
             event_dirty_settings: false,
@@ -521,6 +583,11 @@ impl InteractReactor {
             entities.clear();
             dirty
         });
+        RenderEvent::MessageDismissMatching {
+            filter: Box::new(move |id: &MarkerId| id.marker_path::<PackPath>().map(|p|
+                p.path.namespace() == MarkerIndex::NS_POI
+            ).unwrap_or(false)) as Box<_>,
+        }.try_send();
     }
     pub(super) fn handle_map_suspend(&mut self, rx: &mut PathingReceiver, gameplay: &GameplayState) {
         let (reentering_urgent, next_map_id, prev_map_id) = match *gameplay {
@@ -556,6 +623,7 @@ impl InteractReactor {
         let mut took_action = None::<TriggerKind>;
         let mut side_effects = TriggerKind::empty();
         let blocked = "trigger settings blocked";
+        #[cfg(todo = "unnecessary")]
         if let Some(message) = attrs.info.as_ref() {
             let allowed = allowed & TriggerKind::INFO;
             took_action.get_or_insert_default().insert(allowed);
@@ -728,7 +796,7 @@ impl InteractReactor {
             } else {
                 log::info!("{blocked} dismiss behaviour");
             }
-        } else if action.is_natural() && took_action.map(|a| !a.is_empty()).unwrap_or(false) {
+        } else if matches!(action, InteractionEventAction::Interact) && took_action.map(|a| !a.is_empty() && a.contains(TriggerKind::COPY) && !a.contains(TriggerKind::SCRIPT)).unwrap_or(false) {
             let contexts = vec![HideContext::for_map(loaded_path.root.path, None)];
             events.push(PathingEvent::DismissMarker {
                 path: marker_path,
@@ -806,7 +874,7 @@ impl InteractReactor {
             },
         }
     }
-    pub(super) fn prepare_action<'a>(
+    fn prepare_action<'a>(
         &mut self,
         event: &InteractionEvent,
         map_info: &'_ LoadedMapInfo,
@@ -826,10 +894,11 @@ impl InteractReactor {
                 let guid = map.poi_guid_by_index(map_info, lpath);
                 let attrs = lpoi.interaction_attrs();
                 let act_auto = match self.config.trigger_allow_auto {
-                    _ if !attrs.attr_or_default_into::<keys::AutoTrigger, bool>() => false,
                     allow if allow.is_empty() => false,
+                    _ if !attrs.attr_or_default_into::<keys::AutoTrigger, bool>() => false,
                     allow => SpaceInteraction::interest_for(attrs).0.intersects(allow),
                 };
+
                 let action = if act_auto { Some(InteractionEventAction::AutoTrigger) } else { None };
                 action.map(|action| (path, loaded_path, lpoi, guid, action))
             },
@@ -843,6 +912,7 @@ impl InteractReactor {
                 let lpoi = map.lpois().lookup_ref(&lpath)?;
                 Some((path, loaded_path, lpoi, guid, action.clone()))
             },
+            // routes to process_gone() instead
             InteractionEvent::Gone { .. } => None,
         }
     }
@@ -854,6 +924,15 @@ impl InteractReactor {
         maps: &LoadedMaps,
         event: InteractionEvent,
     ) -> PathingEvent {
+        if let &InteractionEvent::Nearby { path, loaded_path } = &event {
+            if let Some(item) = self.process_nearby_info((path, loaded_path), map_info, maps) {
+                let key = MarkerId::for_marker(loaded_path.root.root.rel(MarkerIndex::with_poi(path.path)));
+                RenderEvent::MessageInfo {
+                    key,
+                    item,
+                }.try_send();
+            }
+        }
         match event {
             InteractionEvent::Gone { path, loaded_path } =>
                 self.process_gone(filter_state, map_info, maps, (path, loaded_path)),
@@ -863,6 +942,15 @@ impl InteractReactor {
                     return PathingEvent::Nop
                 };
                 let allowed = self.allow_action(filter_state, (lpath, lpoi), (path, guid), &action);
+                #[cfg(feature = "paths-lua")]
+                if !allowed.is_empty() && matches!(action, InteractionEventAction::AutoTrigger) && matches!(event, InteractionEvent::Nearby { .. }) {
+                    // TODO: && allowed.contains(TriggerType::SCRIPT)?
+                    // it'll get back to us here momentarily don't worry...
+                    let sent = event_tx.send(InteractionEvent::Interact { action, path, loaded_path: lpath });
+                    if sent.is_ok() {
+                        return PathingEvent::Nop
+                    }
+                }
                 self.process_interaction(event_tx, filter_state, (path, lpath, lpoi), action, allowed)
             },
         }
@@ -874,12 +962,25 @@ impl InteractReactor {
         maps: &'a LoadedMaps,
         (path, lpath): (PoiPath, PoiMapPath),
     ) -> PathingEvent {
+        let marker_path = lpath.root.root.rel(MarkerIndex::with_poi(path.path));
+        let marker_id = MarkerId::for_marker(marker_path);
+        let dismiss_info = || RenderEvent::MessageDismiss {
+            // TODO: make this an interact/pathing event rather than render?
+            // also better tracking of active info markers on self?
+            key: marker_id,
+        }.try_send();
         let Some((map, map_info)) = maps.lookup_with_info(map_info, &lpath.root) else {
+            // just in case we lost track of it...
+            dismiss_info();
             return PathingEvent::Nop
         };
-        let marker_path = lpath.root.root.rel(MarkerIndex::with_poi(path.path));
         let guid = map.poi_guid_by_index(map_info, lpath.unscope()).cloned();
-        let mut msg = if self.handle_interaction_end(filter_state, &MarkerId::for_marker(marker_path)) {
+        let had_info = map.lpois().lookup_ref(&lpath.unscope())
+            .map(|lpoi| lpoi.interaction_attrs().has_attr_of::<keys::Info>() | lpoi.interaction_attrs().has_attr_of::<keys::CopyValue>());
+        if let Some(true) | None = had_info {
+            dismiss_info();
+        }
+        let mut msg = if self.handle_interaction_end(filter_state, &marker_id) {
             PathingEvent::ResetMarkerPath(marker_path)
         } else {
             PathingEvent::Nop
@@ -893,8 +994,95 @@ impl InteractReactor {
             }
         }
 
-        // remove on-screen info maybe?
         msg
+    }
+    fn process_nearby_info<'a>(
+        &mut self,
+        (path, loaded_path): (PoiPath, PoiMapPath),
+        map_info: &'_ LoadedMapInfo,
+        maps: &'a LoadedMaps,
+    ) -> Option<MessageItemDesc> {
+        let (map, map_info) = maps.lookup_with_info(map_info, &loaded_path.root)?;
+        let lpath: LoadedPoiPath = loaded_path.unscope();
+        let lpoi = map.lpois().lookup_ref(&lpath)?;
+        let guid = map.poi_guid_by_index(map_info, lpath);
+        let attrs = lpoi.interaction_attrs();
+        let (interest, marker_is_auto) = SpaceInteraction::interest_for(attrs);
+        let act_auto = marker_is_auto & interest.intersects(self.config.trigger_allow_auto);
+
+        let mut info_item = MessageItemDesc::default();
+        let new_action = |action| MessageActionDesc::blank(Box::new(move || {
+            let e = InteractionEvent::Interact { action, path, loaded_path };
+            Controller::with_sender(|s| s.pathing.as_ref().map(move |p| {
+                let _res = p.shared.interact.events.send(e);
+                #[cfg(taimi_debug)]
+                if let Err(..) = _res {
+                    log::debug!("interact queue full?");
+                }
+            }));
+        }) as Box<_>);
+        let copy = (!(self.config.trigger_allow_auto | self.config.trigger_allow_interact).is_empty() & interest.contains(TriggerKind::COPY))
+            .then(|| attrs.get_attr_of::<keys::CopyValue>())
+            .flatten();
+        let copy = copy.as_ref().and_then(|s| str_opt(&**s));
+        if let Some(copy) = copy {
+            let mut act = new_action(InteractionEventAction::Manual(TriggerKind::COPY));
+            act.set_id(*fl!("poi-activate-copy").id_name());
+            act.set_tooltip_desc(lazyfmt::fmt_fn(|f| {
+                write!(f, "{:?}", &copy[..])?;
+                if let Some(msg) = attrs.get_attr_of::<keys::CopyMessage>() {
+                    write!(f, "\n\n{}", &msg[..])?;
+                }
+                Ok(())
+            }).to_string());
+            info_item.actions.push(act);
+        }
+        let passive_info = ((self.config.trigger_allow_auto & TriggerKind::INFO).intersects(interest) | copy.is_some())
+            .then(|| attrs.get_attr_of::<keys::Info>());
+        if let Some(Some(info)) = passive_info {
+            info_item.set_message(&info[..]);
+        }
+        if info_item.is_empty() {
+            return None
+        }
+        let linfo = lpoi.info();
+        if let Some(tip) = linfo.marker_info.get_attr_of::<keys::TipName>() {
+            info_item.set_title(&tip[..]);
+        }
+        if let Some(tip) = linfo.marker_info.get_attr_of::<keys::TipDescription>() {
+            info_item.set_tooltip_desc(&tip[..]);
+        }
+        if let Some(guid) = guid {
+            info_item.set_attribution(guid.to_string());
+        }
+        if !act_auto {
+            if marker_is_auto {
+                let mut act = new_action(InteractionEventAction::Manual(self.config.trigger_allow_interact));
+                act.mark_context_menu(true);
+                act.set_id(*fl!("poi-activate").id_name());
+                info_item.actions.push(act);
+            } else {
+                let mut act = new_action(InteractionEventAction::Interact);
+                act.mark_context_menu(true);
+                act.set_id(*fl!("Miscellaneous_Interact").id_name());
+                info_item.actions.push(act);
+            }
+        }
+        #[cfg(todo)]
+        let mut act = new_action(InteractionEventAction::Manual(TriggerKind::all()));
+        let mut act = new_action(InteractionEventAction::Trigger);
+        act.mark_context_menu(true);
+        act.set_id(*fl!("poi-activate-override").id_name());
+        with_i18n!("poi-activate-override-notice", |notice| act.set_tooltip_desc(&notice[..]));
+        info_item.actions.push(act);
+
+        let mut act = new_action(InteractionEventAction::Manual(TriggerKind::DISMISS));
+        act.mark_context_menu(true);
+        act.mark_dismiss(true);
+        act.set_id(*fl!("trigger-behaviour").id_name());
+        info_item.actions.push(act);
+
+        Some(info_item)
     }
     fn handle_interaction_end(&mut self, filter_state: &FilterState, marker_id: &MarkerId) -> bool {
         let Some(hidden) = filter_state.hidden.hidden.get(marker_id) else {
@@ -907,9 +1095,21 @@ impl InteractReactor {
 
         true
     }
-    pub const UPDATE_INTERVAL_SLOW: Duration = Duration::from_secs(10);
-    pub const UPDATE_INTERVAL_PASSIVE: Duration = Duration::from_secs(1);
-    pub const UPDATE_INTERVAL_RESPONSIVE: Duration = Duration::from_millis(350);
+    /// these are dumb to consider because of packs that use map-wide bounds...
+    pub const CIRCLE_TOO_BIG: f32 = 20.0;
+    pub const UPDATE_INTERVAL_SLOW_MS: u16 = 10_000u16;
+    pub const UPDATE_INTERVAL_PASSIVE_MS: u16 = 1_000u16;
+    /// please tell me no one wants frame-perfect interactions...
+    /// 60fps *is* more than enough for anyone right guys..?
+    pub const UPDATE_INTERVAL_MIN_MS: u16 = 16;
+    /// help estimate how close player is to a passive marker, m/s
+    const MAX_PLAYER_SPEED: f32 = match 20.0 {
+        #[cfg(todo)]
+        s => s,
+        // prefer to err on introducing slight delay, some underestimating is fine...
+        s => s * 0.75,
+    };
+    const MAX_PLAYER_M_PER_S: f32 = Self::MAX_PLAYER_SPEED.recip();
     /// TODO: measure impact and use spawn_blocking if it gets unreasonable?
     /// also make interval configurable and/or adaptive
     async fn process_movement<'a>(
@@ -1047,16 +1247,24 @@ impl InteractReactor {
     ) -> PathingEvent {
         let mut res = PathingEvent::Nop;
         let Some(pos) = rx.player_pos.update_now(false) else { return res };
-        let nearby = rx.nearby_tx.borrow().clone();
+        let mut nearby = rx.nearby_tx.borrow().clone();
         let mut nearby_pois = BinaryHeap::with_capacity(nearby.len() * 4);
 
         let trigger_bvh = self.map_interactions.trigger_bvh.read().await;
         let query = SpaceInteraction::point_query(pos);
         let inrange = trigger_bvh
-            .traverse_iterator(&query, &self.map_interactions.entities[..])
-            .filter_map(|e| e.value.dist_dist_inrange(&pos).map(|dist| (e, dist)));
-        for (entity, dist_dist) in inrange {
+            .traverse_iterator(&query, &self.map_interactions.entities[..]);
+        for entity in inrange {
             let id = entity.value.poi_path();
+            let Some(dist_dist) = entity.value.dist_dist_inrange(&pos) else {
+                if let Some(path) = nearby.remove_poi(id) {
+                    rx.nearby_tx.send_modify(|shared| {
+                        shared.remove_poi(id);
+                    });
+                    let _ = rx.event_tx.send(InteractionEvent::Gone { path: path, loaded_path: id });
+                }
+                continue
+            };
             let Some((lpoi, map, map_info)) = Self::lookup_lpoi_at(map_info, maps, id) else {
                 continue
             };
@@ -1066,9 +1274,31 @@ impl InteractReactor {
             let nearby_discrete = (dist_dist * 1_000_000.0).min(0x40000000u32 as f32) as u32;
             let prev_nearby = nearby.contains_loaded_poi(id);
             let auto_trigger = entity.value.bounds.is_auto();
-            let attrs = lpoi.interaction_attrs();
-            let auto_triggered = entity.value.is_passive(attrs) && prev_nearby;
-            let (interest, _interest_auto) = SpaceInteraction::interest_for(attrs);
+            if !prev_nearby {
+                let path = unsafe { map_info.poi_path_unchecked(id.unscope()) };
+                rx.nearby_tx.send_modify(|shared| {
+                    shared.insert_poi(id, path);
+                });
+                let sent = rx.event_tx.send(InteractionEvent::Nearby { path, loaded_path: id });
+                if auto_trigger && sent.is_ok() {
+                    continue
+                }
+                #[cfg(todo = "unnecessary")]
+                {
+                    // maybe there could be duplicates..?
+                    nearby.insert_poi(id, path);
+                }
+            } else if matches!(action, InteractionEventAction::Interact) && auto_trigger {
+                if !lpoi.info.marker_info.has_attr_of::<keys::ScriptTrigger>() {
+                    // repeated interactions are allowed, so this cannot be consumed even if auto-triggered
+                    // TODO: same with copy? especially if it was hidden for a period after having autotriggered...
+                    continue
+                }
+            }
+            let is_passive = entity.value.is_passive(lpoi.info().marker_info());
+            let auto_triggered = is_passive && prev_nearby;
+            let (mut interest, _interest_auto) = SpaceInteraction::interest_for(lpoi.interaction_attrs());
+            #[cfg(taimi_debug)]
             if _interest_auto != auto_trigger {
                 // TODO: deleteme and/or cfg(debug_assertions)
                 log::debug!("BUG: auto-trigger mismatch for {id}");
@@ -1077,8 +1307,13 @@ impl InteractReactor {
                 true if auto_trigger => interest & self.config.trigger_allow_auto,
                 _ => TriggerKind::empty(),
             };
+            if lpoi.info.marker_info.has_attr_of::<keys::ScriptTrigger>() {
+                interest.insert(TriggerKind::SCRIPT);
+            }
             let interest_avail = interest & !interest_consumed;
-            let interest_boring = TriggerKind::SCRIPT | TriggerKind::BOUNCE;
+            let interest_boring = TriggerKind::BOUNCE | TriggerKind::INFO;
+            #[cfg(not(feature = "paths-lua"))]
+            let interest_boring = interest_boring | TriggerKind::SCRIPT;
             let boring = interest_avail & interest_boring == interest_boring;
             let interesting = !(interest_avail & self.config.trigger_allow_interact).is_empty();
             let sort_id = (
@@ -1103,12 +1338,18 @@ impl InteractReactor {
                 continue
             };
             let guid = map.poi_guid_by_index(map_info, lpath.unscope());
-            #[cfg(todo = "unnecessary")]
-            let _ = rx.event_tx
-                .send(InteractionEvent::Interact { action, path, loaded_path });
             let allowed = self.allow_action(filter_state, (lpath, lpoi), (path, guid), &action);
+            if allowed.is_empty() {
+                continue
+            }
+            let sent = rx.event_tx
+                .send(InteractionEvent::Interact { action, path, loaded_path: lpath });
+            if sent.is_ok() {
+                continue
+            }
             if !allowed.is_empty() {
                 let interact = self.process_interaction(&rx.event_tx, filter_state, (path, lpath, lpoi), action, allowed);
+                #[cfg(taimi_debug)]
                 if !matches!((&res, &interact), (PathingEvent::Nop, _) | (_, PathingEvent::Nop)) {
                     log::debug!("TODO: activating multiple POIs, should've stopped at the closest?");
                 }
@@ -1169,17 +1410,73 @@ impl InteractReactor {
             rx_retry = rx_retry.saturating_sub(rx_tick);
         }
         if let Some((auto, passive)) = self.interest_movement() {
-            rx.player_pos.set_threshold_timeout(match (auto, passive) {
-                (false, false) => Self::UPDATE_INTERVAL_SLOW,
+            const SLOW_BOUND_UPPER32: u32 = InteractReactor::UPDATE_INTERVAL_SLOW_MS as u32;
+            let mut something_is_close = false;
+            let (next_mul, next_range) = match (auto, passive) {
+                (false, false) => {
+                    // map requires explicit interact key events, so we can be very lax with updates...
+                    const SLOW_BOUND_LOWER32: u32 = (InteractReactor::UPDATE_INTERVAL_PASSIVE_MS << 1) as u32;
+                    (92, SLOW_BOUND_LOWER32..SLOW_BOUND_UPPER32)
+                },
                 _ if self.map_interactions.needs_trigger_bvh_rebuild() => {
                     // when bvh postponed for higher-prio tasks, don't poll as often
-                    Self::UPDATE_INTERVAL_PASSIVE * 2
+                    (20, Self::UPDATE_INTERVAL_PASSIVE_MS as u32..(Self::UPDATE_INTERVAL_PASSIVE_MS << 3) as u32)
                 },
-                (false, true) => Self::UPDATE_INTERVAL_PASSIVE.max(self.update_interval * 2),
-                (true, _) => self.update_interval,
-            });
+                _ if self.map_interactions.nearby.any() => {
+                    // allow slightly tighter timings if a marker is currently inrange
+                    something_is_close = true;
+                    (2, Self::UPDATE_INTERVAL_MIN_MS as u32..((Self::UPDATE_INTERVAL_PASSIVE_MS << 1) as u32))
+                },
+                // maybe change strictness depending on what kind of markers are onmap and/or nearby? idk
+                #[cfg(todo)]
+                (false, true) => todo,
+                _ =>
+                    (5, (Self::UPDATE_INTERVAL_MIN_MS << 2) as u32..(Self::UPDATE_INTERVAL_PASSIVE_MS << 1) as u32),
+            };
+            const UPDATE_INTERVAL_SHIFT_AMT: u32 = InteractReactor::UPDATE_INTERVAL_PASSIVE_MS as u32 * 2;
+            const UPDATE_INTERVAL_SHIFT_AMT_NEG: isize = -(UPDATE_INTERVAL_SHIFT_AMT.next_power_of_two() as isize);
             if let Poll::Ready(pos) = rx.player_pos.poll_next_update(cx) {
+                let base32 = self.config.base_responsiveness_ms as u32;
+                let absolute_min_ms = base32.max(Self::UPDATE_INTERVAL_MIN_MS as u32);
+                let many = base32 * next_mul;
+                let mut next_interval_ms = many.clamp(next_range.start, next_range.end) as u64;
+                let current_interval = rx.player_pos.threshold_timeout();
+                let current_interval_ms = current_interval.as_millis() as u64;
+                let target_int = next_interval_ms as isize - current_interval_ms as isize;
+
+                let mut resync_distance = !something_is_close || target_int > 0;
+                if !resync_distance && current_interval_ms < 400 {
+                    let occasional = (rx.player_pos.last_tick() & 0x3f) == 1;
+                    if occasional {
+                        resync_distance = true;
+                    }
+                }
+                let check_pacing = resync_distance.then(|| self.map_interactions.nearest_to(pos)).flatten();
+                if let Some((_point, dist2)) = check_pacing {
+                    // checking vicinity to determine how slow we can be...
+                    let upper_limit = (next_interval_ms + UPDATE_INTERVAL_SHIFT_AMT as u64).min(SLOW_BOUND_UPPER32 as u64);
+                    let seconds = dist2 * Self::MAX_PLAYER_M_PER_S;
+                    let ms = (seconds * 1000.0f32) as u64;
+                    let prev = next_interval_ms;
+                    next_interval_ms = ms.clamp(absolute_min_ms as u64, upper_limit);
+                }
+                rx.player_pos.set_threshold_timeout(Duration::from_millis(next_interval_ms));
+                #[cfg(taimi_debug)]
+                {
+                    STATS_POLL_INTERVAL.reset(rt::statistics::StatsUnit::time_ms(next_interval_ms));
+                }
                 return Poll::Ready(InteractMessage::PlayerMoved(pos))
+            } else {
+                #[cfg(todo = "unnecessary")]
+                if passive && target_int <= UPDATE_INTERVAL_SHIFT_AMT_NEG {
+                    // polling too slow for our tastes, hurry up!
+                    next_interval_ms += UPDATE_INTERVAL_SHIFT_AMT as u64;
+                    rx.player_pos.set_threshold_timeout(Duration::from_millis(next_interval_ms));
+                    #[cfg(taimi_debug)]
+                    {
+                        STATS_POLL_INTERVAL.reset(rt::statistics::StatsUnit::time_ms(next_interval_ms));
+                    }
+                }
             }
         }
         Poll::Pending
@@ -1238,6 +1535,43 @@ impl InteractReactor {
                     }
                 } else {
                     self.map_interactions.clear_active();
+                }
+                PathingEvent::Nop
+            },
+            InteractMessage::RefreshNearby => {
+                if let Some(pos) = rx.interact.player_pos.position_last_seen() {
+                    let res = self.process_movement(&mut rx.interact, map_info, maps, pos).await;
+                    //rx.interact.player_pos.readjust_now();
+                    res
+                } else {
+                    PathingEvent::Nop
+                }
+            },
+            InteractMessage::RefreshInfo(lpath, marker_path) => {
+                let poi_path = match lpath.path.namespace() {
+                    MarkerIndex::NS_POI => {
+                        let poi_path: PoiPath = PoiPath::new_path(marker_path.path.index_poi_unchecked());
+                        Some((
+                            lpath.map_path(|p| p.index_poi_unchecked()),
+                            poi_path,
+                        ))
+                    },
+                    _ => None,
+                };
+                let item_update = poi_path.and_then(|(lpath, path)| {
+                    let is_nearby = rx.interact.nearby_tx.borrow().contains_loaded_poi(lpath);
+                    if !is_nearby {
+                        // likely dismissed, ignore
+                        None
+                    } else {
+                        self.process_nearby_info((path, lpath), map_info, maps)
+                    }
+                });
+                if let Some(item) = item_update {
+                    RenderEvent::MessageInfo {
+                        key: MarkerId::for_marker(lpath.root.root.rel(marker_path.path)),
+                        item,
+                    }.try_send();
                 }
                 PathingEvent::Nop
             },
@@ -1331,6 +1665,8 @@ pub enum InteractMessage {
     UpdateEntities,
     RefreshSettings,
     RequestRebuild,
+    RefreshNearby,
+    RefreshInfo(LoadedMarkerPath<PackMapPath>, MarkerPath),
     Event(InteractionEvent),
     PlayerMoved(PlayerPosition),
     FanOut(Vec<Self>),
@@ -1358,6 +1694,16 @@ impl InteractMessage {
         PathingEvent::InteractControl(self).try_send()
     }
 }
+impl From<InteractMessage> for PathingEvent {
+    #[inline]
+    fn from(e: InteractMessage) -> Self {
+        match e {
+            #[cfg(todo = "unnecessary")]
+            InteractMessage::Nop => PathingEvent::Nop,
+            e => PathingEvent::InteractControl(e),
+        }
+    }
+}
 
 impl PathingController {
     /// TODO
@@ -1373,9 +1719,8 @@ impl PathingController {
         value: AttrString,
         message: Option<AttrString>,
     ) {
-        use {crate::with_i18n, taimi_hoard::lazyfmt};
-
         let value = &value[..];
+        if value.is_empty() { return }
         RenderState::try_send(RenderEvent::SendToClipboard(value.into()));
         let message = message.as_ref().map(|m| &m[..]);
         let alert = lazyfmt::fmt_or(
@@ -1389,6 +1734,7 @@ impl PathingController {
         };
         self.spawn_alert(alert, delay);
     }
+    #[cfg(deleteme)]
     pub(super) async fn process_marker_info(
         &mut self,
         path: MarkerPath,
@@ -1430,6 +1776,7 @@ impl PathingController {
         use tokio::time::sleep;
         static PATHING_ALERT_HACK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+        #[cfg(taimi_debug)]
         log::debug!("TODO: replace alert system lol");
         self.tasks.spawn(async move {
             let lock = PATHING_ALERT_HACK.lock().await;
@@ -1473,17 +1820,22 @@ impl PathingController {
 pub struct InteractSettings {
     pub trigger_allow_interact: TriggerKind,
     pub trigger_allow_auto: TriggerKind,
+    pub base_responsiveness: OrderedFloat<f32>,
+    pub base_responsiveness_ms: u16,
 }
 impl InteractSettings {
     pub fn from_settings(settings: &PathingSettings) -> Self {
         let PathingSettings {
             trigger_allow_auto,
             trigger_allow_interact,
+            interact_base_responsiveness,
             ..
         } = *settings;
         Self {
             trigger_allow_auto,
             trigger_allow_interact,
+            base_responsiveness: interact_base_responsiveness.into(),
+            base_responsiveness_ms: (interact_base_responsiveness * 1000.0f32).as_(),
         }
     }
 }
@@ -1492,6 +1844,11 @@ impl Default for InteractSettings {
         Self {
             trigger_allow_auto: TriggerKind::SETTINGS_DEFAULT_AUTO,
             trigger_allow_interact: TriggerKind::SETTINGS_DEFAULT_INTERACT,
+            base_responsiveness: PathingSettings::DEFAULT_INTERACT_RESPONSIVENESS.into(),
+            base_responsiveness_ms: (PathingSettings::DEFAULT_INTERACT_RESPONSIVENESS * 1000.0f32) as u16,
         }
     }
 }
+
+#[cfg(taimi_debug)]
+pub(crate) static STATS_POLL_INTERVAL: rt::statistics::StatsCounter = rt::statistics::StatsCounter::new(0);

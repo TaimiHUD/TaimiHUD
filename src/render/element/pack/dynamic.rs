@@ -212,6 +212,7 @@ impl PackEdit {
                 pack.set_info(pack_info);
                 self.info_sig = pack.info.sig;
             }
+            info.dynamics.reset_for_pack(&self.pack.pack);
             true
         });
     }

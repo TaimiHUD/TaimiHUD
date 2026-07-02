@@ -31,7 +31,9 @@ pub struct Render2DState {
     #[cfg(todo)]
     #[serde(default, skip_serializing_if = "TimersWindowState::is_empty")]
     pub timers_window: watch::Sender<TimersWindowState>,
-    #[serde(default, skip_serializing_if = "Render2DState::is_empty_pathing")]
+    #[serde(default = "Watcher::new_default")]
+    pub message_window: Watcher<MessageWindowState>,
+    #[serde(default = "Watcher::new_default")]
     pub pathing_window: Watcher<PathingWindowState>,
 }
 
@@ -63,6 +65,7 @@ pub struct PathingWindowState {
     pub interact_pois: InteractPoiState,
 }
 impl PathingWindowState {
+    pub const MIN_SIZE: UiVec2 = UiVec2::new(192.0, 96.0);
     pub const DEFAULT_SIZE: UiVec2 = UiVec2::new(300.0, 200.0);
     pub fn window_size(&self) -> &UiVec2 {
         self.window.size.get().unwrap_or(&Self::DEFAULT_SIZE)
@@ -73,18 +76,6 @@ impl PathingWindowState {
             size => Some(size),
         }
         .unwrap_or_default()
-    }
-    pub fn is_empty(&self) -> bool {
-        let Self {
-            tab,
-            window,
-            search,
-            filter,
-            interact_pois,
-        } = self;
-        (search.is_empty() & filter.is_empty() & tab.is_empty())
-            && interact_pois.is_empty()
-            && window.is_empty()
     }
 }
 #[derive(Deserialize, Serialize, Debug, Copy, Clone, Default, Eq, PartialOrd, Ord, Hash)]
@@ -240,27 +231,31 @@ impl Default for InteractPoiState {
     }
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone, Default)]
+pub struct MessageWindowState {
+    #[serde(default, skip_serializing_if = "WindowState::is_empty")]
+    pub window: WindowState,
+}
+impl MessageWindowState {
+    pub const MIN_SIZE: UiVec2 = UiVec2::new(64.0, 96.0);
+    pub const DEFAULT_SIZE: UiVec2 = UiVec2::new(288.0, 384.0);
+    pub fn window_size(&self) -> &UiVec2 {
+        self.window.size.get().unwrap_or(&Self::DEFAULT_SIZE)
+    }
+    pub fn set_window_size(&mut self, size: UiVec2) {
+        self.window.size = match size {
+            size if size == Self::DEFAULT_SIZE => None,
+            size => Some(size),
+        }
+        .unwrap_or_default()
+    }
+}
+
 impl Render2DState {
     pub const DEFAULT_OPEN: bool = false;
 
-    pub fn is_empty(&self) -> bool {
-        let Self { pathing_window } = self;
-        #[cfg(todo)]
-        let primary_window_empty = Self::is_empty_primary(primary_window);
-        #[cfg(todo)]
-        let timers_window_empty = Self::is_empty_timers(timers_window);
-        #[cfg(todo)]
-        let markers_window_empty = Self::is_empty_markers(markers_window);
-        let (primary_window_empty, timers_window_empty, markers_window_empty) = (true, true, true);
-        let pathing_window_empty = Self::is_empty_pathing(pathing_window);
-        primary_window_empty && timers_window_empty && markers_window_empty && pathing_window_empty
-    }
-
     fn is_default_open(v: &bool) -> bool {
         !*v
-    }
-    fn is_empty_pathing(pathing: &Watcher<PathingWindowState>) -> bool {
-        pathing.try_read().map(|w| w.is_empty()).unwrap_or(false)
     }
 
     pub fn is_dirty(&self) -> bool {

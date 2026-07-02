@@ -102,11 +102,12 @@ impl PathingWindowState {
     ) where
         U: ?Sized + ImDrawWindow<'ui>,
     {
+        if !self.ui_state.is_watching() { return }
         let state = &*self.ui_state;
+        if state.window.open.is_closed() { return }
         let mut size = state.window_size().clone();
         let state = &state.window;
         let open = state.open;
-        let mut opened = state.open.is_active();
         let mut pos = state.position_abs.get().copied();
         let pivot = match &mut pos {
             Some(..) => state.anchor,
@@ -145,7 +146,7 @@ impl PathingWindowState {
             ui.dummy([4.0; 2]);
             self.draw_content(ui, machine, engine)
         }
-        let open = match opened {
+        let open = match open {
             true if !visible => WindowOpen::Collapsed,
             open => WindowOpen::new(open),
         };

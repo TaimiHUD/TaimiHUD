@@ -3,6 +3,8 @@ use {
     crate::controller::{pathing::shared::HiddenGuids, runtime::WallInstant},
     taimi_hoard::time::Timestamp,
 };
+#[cfg(feature = "paths-lua")]
+use crate::controller::script::ScriptMessage;
 use {
     crate::{
         controller::pathing::{
@@ -359,6 +361,30 @@ impl PathingController {
             self.filter_state.hidden.reset_map_leave();
             self.interact.handle_map_leave(&mut self.rx);
         }
+
+        #[cfg(feature = "paths-lua")]
+        let leaving_pack_plugs = crate::controller::Controller::with_sender(|s|
+            s.scripting.as_ref().map(|script|
+                script.plugs_shared.borrow().packs.iter()
+                    .filter(|(_, plug)| plug.plug.is_active())
+                    .map(|(path, _)| {
+                        let p: PackPath = path.pivot_from();
+                        p
+                    })
+                    .collect::<PackSet>()
+                )
+        );
+        #[cfg(feature = "paths-lua")]
+        if let Some(Some(leaving)) = leaving_pack_plugs {
+            // TODO?
+            let from_map = None;
+            let msgs = leaving.into_iter().map(|path|
+                ScriptMessage::map_left_pack(path, from_map)
+            );
+            for msg in msgs {
+                msg.try_send();
+            }
+        }
     }
     pub(super) fn handle_map_enter(&mut self, map_id: MapIndex) {
         self.map_info.age_tick(Some(map_id));
@@ -507,6 +533,61 @@ impl PathingController {
             .loader
             .shared
             .update_map(map_path, &map_info.info, &*map, notify);
+
+        #[cfg(feature = "paths-lua")]
+        let pack_scripting = crate::controller::Controller::with_sender(|s| {
+            // TODO: ew make this functions...
+            let Some(script) = s.scripting.as_ref() else { return None };
+            let script_path = map_path.root.pivot_from();
+            let sshared = script.plugs_shared.borrow();
+            match sshared.packs.contains_key(&script_path) {
+                true => Some(true),
+                false => {
+                    sshared.available_packs.contains(&map_path.root).then_some(false)
+                },
+            }
+        }).flatten();
+        #[cfg(feature = "paths-lua")]
+        let pack_scripting = match pack_scripting {
+            s @ Some(false) => {
+                let autostart = self.rx.enables().contains(super::PathingEnables::SCRIPTING_LUA);
+                match autostart {
+                    true => s,
+                    false => None,
+                }
+            },
+            s => s,
+        };
+        #[cfg(feature = "paths-lua")]
+        match pack_scripting {
+            Some(false) => {
+                let entrypoint = match self.rx.shared.packs.pack_loader_if_loaded(map_path.root) {
+                    Some(Ok(loader)) => loader.try_lock_owned().ok()
+                        .and_then(|mut l| {
+                            let entrypoint = crate::controller::script::pathing::PACK_ENTRYPOINT;
+                            let res = l.load_asset_dyn(entrypoint)
+                                .with_context(|| format!("loading {}/{entrypoint}", taimi_hoard::lazyfmt::or_unavail(pack_data.as_ref().map(|(_, _, i, ..)| i))));
+                            rt::log::warn_ok(res)
+                        }),
+                    _ => None,
+                };
+                if let Some(entrypoint) = entrypoint {
+                    crate::controller::script::LuaMessage::SpawnPack(map_path.root, entrypoint).try_send();
+                }
+            },
+            Some(true) => {
+                let markers = self.map_info.lookup_ref(&map_path)
+                    .into_iter()
+                    .flat_map(|map_info| {
+                        let pois = map_info.pois().map(|poi| poi.pivot_from());
+                        let trails = map_info.trails().map(|trail| trail.pivot_from());
+                        pois.chain(trails)
+                    }).collect::<Vec<_>>();
+                ScriptMessage::map_prepared_pack(map_path.root, map_path.path.get(), markers.into_iter()).try_send();
+            },
+            None => (),
+        }
+
         Ok(dirty | map_dirty)
     }
     fn init_map_for_pack(
@@ -863,6 +944,8 @@ impl PathingController {
                     map_info.used.generation,
                 );
                 if let Some(map) = map {
+                    #[cfg(taimi_debug)]
+                    use taimi_pack::attributes::cell::GetAttrDyn;
                     let _ = writeln!(
                         report,
                         "\t\t{} pois(guid={}), {} trails(guid={}), {} cats",
@@ -872,6 +955,20 @@ impl PathingController {
                         map.trail_guids.len(),
                         map.categories.len(),
                     );
+                    #[cfg(taimi_debug)]
+                    for cat in map.categories.iter() {
+                        let _ = writeln!(report, "cat vis={:?}", cat.visibility);
+                        for attr in cat.attrs.iter() {
+                            let _ = writeln!(report, "\tattr {}={:?}", attr.id(), attr);
+                        }
+                    }
+                    #[cfg(taimi_debug)]
+                    for poi in map.pois.iter() {
+                        let _ = writeln!(report, "poi vis={:?} cat={:?} pos={:?} ({:?})", poi.visibility, poi.info.category_path, poi.marker_position, poi.position());
+                        for attr in poi.info.marker_info.iter_attrs_dyn() {
+                            let _ = writeln!(report, "\tattr {}", attr.pack_key_id());
+                        }
+                    }
                 }
             }
             let resources = pack.info.shared_subresources();

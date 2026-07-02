@@ -126,9 +126,15 @@ impl StatsUnit {
         let num = value as u32;
         ((denom as u64) << 32) | num as u64
     }
+    #[inline]
     pub fn time(span: Duration) -> u64 {
         span.as_micros() as u64
     }
+    #[inline]
+    pub fn time_ms(ms: u64) -> u64 {
+        ms.saturating_mul(Self::TIME_MS)
+    }
+    #[inline]
     pub fn bytes(amt: u64) -> u64 {
         amt
     }

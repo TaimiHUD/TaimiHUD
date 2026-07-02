@@ -5,7 +5,9 @@ pub use {
         loader::{
             LoadReport,
             SharedLoaderPacksInfo,
+            SharedPackAllocation,
             SharedPackConfig,
+            SharedPackDynamics,
             SharedPackInfo,
             SharedPackLoad,
             SharedPackLoaded,
@@ -13,6 +15,7 @@ pub use {
             SharedResourceRequests,
             SharedResourceRequestsTx,
             SharedGracePeriod,
+            StaticMarkerRanges,
         },
         maps::{
             LoadedMarkerRef,

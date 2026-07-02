@@ -47,7 +47,9 @@ use super::edit_marker_window::EditMarkerWindowState;
 #[cfg(feature = "markers")]
 use crate::marker::format::MarkerSet;
 #[cfg(feature = "space")]
-use crate::{render::PathingWindowState, space::Engine};
+use crate::space::Engine;
+#[cfg(feature = "paths")]
+use crate::render::{message_window::{MessageKey, MessageAttrValue, MessageItemDesc, MessageWindowState}, PathingWindowState};
 
 pub enum RenderEvent {
     TimerData(Vec<Arc<TimerFile>>),
@@ -60,6 +62,15 @@ pub enum RenderEvent {
     AlertStart(TextAlert),
     AlertEnd(Arc<TimerFile>),
     AlertNotify(String, Option<core::time::Duration>),
+    #[cfg(feature = "paths")]
+    MessageInfo { key: MessageKey, item: MessageItemDesc },
+    #[cfg(feature = "paths")]
+    #[cfg(todo = "unused")]
+    MessageUpdateAttr { key: MessageKey, item: MessageAttrValue },
+    #[cfg(feature = "paths")]
+    MessageDismiss { key: MessageKey },
+    #[cfg(feature = "paths")]
+    MessageDismissMatching { filter: Box<dyn for<'a> FnMut(&'a MessageKey) -> bool + Send> },
     ClipboardSend(String, Option<String>),
     ContextMenuOpen {
         menus: TaimiControls,
@@ -128,10 +139,12 @@ pub struct RenderState {
     pub edit_marker_window: EditMarkerWindowState,
     #[cfg(feature = "markers")]
     pub marker_window: MarkerWindowState,
-    #[cfg(feature = "space")]
+    #[cfg(feature = "paths")]
     pub pathing_window: PathingWindowState,
     #[cfg(feature = "paths")]
     pub pathing_menu_open: bool,
+    #[cfg(feature = "paths")]
+    pub message_window: MessageWindowState,
     pub(super) timer_window: TimerWindowState,
     receiver: Receiver<RenderEvent>,
     alert: Option<TextAlert>,
@@ -163,10 +176,12 @@ impl RenderState {
             edit_marker_window: EditMarkerWindowState::new(),
             #[cfg(feature = "markers")]
             marker_window: MarkerWindowState::new(),
-            #[cfg(feature = "space")]
+            #[cfg(feature = "paths")]
             pathing_window: PathingWindowState::new(),
             #[cfg(feature = "paths")]
             pathing_menu_open: false,
+            #[cfg(feature = "paths")]
+            message_window: MessageWindowState::new(),
             state_errors: Default::default(),
         }
     }
@@ -257,6 +272,23 @@ impl RenderState {
                     AlertReset(timer) => {
                         self.timer_window.remove_phase(&timer);
                     },
+                    #[cfg(feature = "paths")]
+                    MessageInfo { key, item } => {
+                        self.message_window.register_item_with_ui(ui, key, item);
+                    },
+                    #[cfg(feature = "paths")]
+                    #[cfg(todo = "unused")]
+                    MessageUpdateAttr { key, item } => {
+                        self.message_window.update_item_attr(&key, item);
+                    },
+                    #[cfg(feature = "paths")]
+                    MessageDismiss { key } => {
+                        self.message_window.remove_item(&key);
+                    },
+                    #[cfg(feature = "paths")]
+                    MessageDismissMatching { filter } => {
+                        self.message_window.clear_items_matching(filter);
+                    },
                     #[cfg(any(feature = "markers", feature = "space"))]
                     UiMapOpen(open) =>
                         if self.machine.set_map_open(open) {
@@ -334,9 +366,14 @@ impl RenderState {
         self.marker_window.draw(ui);
         #[cfg(feature = "markers-edit")]
         self.edit_marker_window.draw(ui);
-        #[cfg(feature = "space")]
+        #[cfg(feature = "paths")]
         self.pathing_window
             .draw(ui, &mut self.machine, self.engine.as_mut());
+        #[cfg(feature = "paths")]
+        if self.message_window.pre_draw() {
+            self.message_window
+                .draw_window(ui);
+        }
         self.draw_context_menu(ui);
         let mut items_to_delete = Vec::new();
         for (entry_name, errory) in &self.state_errors {
@@ -357,6 +394,13 @@ impl RenderState {
         }
 
         true
+    }
+    fn post_draw<'ui, U>(&mut self, _ui: &mut U, _context: DrawContextInput<'ui>)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        #[cfg(feature = "paths")]
+        self.message_window.post_render();
     }
     pub fn marker_icon<'ui, U>(ui: &mut U, height: Option<f32>, marker: &MarkerType)
     where
@@ -719,6 +763,7 @@ impl RenderState {
             }
 
             self.pathing_window.pre_render();
+            self.message_window.pre_render();
             let visibility = self.pathing_window.window_visibility();
             let pack_visibility = self
                 .pathing_window
@@ -861,6 +906,7 @@ impl RenderState {
             state.shutdown();
             lock.take();
         } else {
+            state.post_draw(ui, context);
             let render_slot = (match () {
                 #[cfg(feature = "space")]
                 () => &mut state.engine,

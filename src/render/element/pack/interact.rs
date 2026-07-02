@@ -1763,7 +1763,60 @@ impl<'s, 'a, 'u, 'ui, U> DrawPoiInfo<'s, 'a, 'u, U> where
         table_token
     }
 
+    /// TODO: implement properly in taimi_ui
+    ///
     /// TODO? 3d trigger bounds could point ray downward for distance-sorted iter but we have other factors...
+    fn update_sort(&mut self) {
+        match self.ui.imgui_version_num() {
+            Some(im180::VERSION_NUM) => (),
+            // TODO
+            _ => return,
+        };
+        let sorting = unsafe { core::ptr::NonNull::new(im180::sys::igTableGetSortSpecs()).map(|s| &mut *s.as_ptr()) };
+        let should_sort = sorting.as_ref().map(|s| s.SpecsDirty);
+        if !should_sort.unwrap_or(false) && !self.state.is_dirty() {
+            return
+        }
+        let mut sort_desc = InteractSortFlags::empty();
+        let mut sorts = InteractSortFlags::empty();
+        if let Some(specs) = &sorting {
+            let cols = [
+                (Self::HEADER_TITLE, InteractSortFlags::DISTANCE),
+                (Self::HEADER_NEARBY, InteractSortFlags::NEARBY),
+                (Self::HEADER_HIDDEN, InteractSortFlags::VISIBLE),
+                (Self::HEADER_INTERACT, InteractSortFlags::INTERACTIVE),
+            ];
+            for spec_idx in 0..specs.SpecsCount as usize {
+                let spec = unsafe { &*specs.Specs.add(spec_idx) };
+                let Some(&(_id, flag)) = cols.get(spec.ColumnIndex as usize) else {
+                    log::debug!("BUG: spec idx");
+                    continue
+                };
+                #[cfg(todo = "unnecessary")]
+                if flag.is_empty() {
+                    continue
+                }
+                sorts.insert(flag);
+                #[cfg(todo)]
+                let order = spec.sort_order();
+                match spec.SortDirection() as u32 {
+                    im180::sys::ImGuiSortDirection_Descending => sort_desc.insert(flag),
+                    im180::sys::ImGuiSortDirection_Ascending => (),
+                    #[cfg(todo)]
+                    _ => sorts.remove(flag),
+                    _ => (),
+                }
+            }
+        } else {
+            sorts = InteractSortFlags::DEFAULT_UI
+        };
+        if self.state.prepare_sort(sorts) | should_sort.unwrap_or(false) {
+            self.state.apply_sort(sorts, sort_desc)
+        }
+        if let (Some(sorting), Some(true)) = (sorting, should_sort) {
+            sorting.SpecsDirty = false;
+        }
+    }
     #[cfg(todo)]
     fn update_sort(&mut self) {
         let sorting = self.ui.table_sort_specs_mut();
@@ -1808,9 +1861,6 @@ impl<'s, 'a, 'u, 'ui, U> DrawPoiInfo<'s, 'a, 'u, U> where
                 sorting.set_sorted();
             }
         }
-    }
-    /// TODO: update for taimi_ui
-    fn update_sort(&mut self) {
     }
 }
 impl super::PackElements {

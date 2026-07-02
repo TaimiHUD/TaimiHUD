@@ -104,6 +104,7 @@ context-menu-primary = { menu }
 timer-window-toggle = Timer Window Toggle
 marker-window-toggle = Marker Window Toggle
 pathing-window-toggle = Pathing Window Toggle
+message-window-toggle = { message-window } Window Toggle
 pathing-render-toggle = Toggle pathing render
 pathing-render-minimap-toggle = Toggle minimap pathing
 pathing-render-map-toggle = Toggle map pathing
@@ -170,6 +171,7 @@ primary-window = TaimiHUD
 timers-window = Encounter Timers
 markers-window = Squad Markers
 pathing-window = Pathing Packs
+message-window = Information
 # deprecated(?) aliases
 timer-window = { timers-window }
 marker-window = { markers-window }
@@ -257,6 +259,8 @@ stats-engine-vertex-trail = { vertices }
 stats-space-engine-textures = Textures
 stats-engine-texture-count = Loaded
 stats-engine-texture-size = Video Memory Usage
+stats-pathing-interact = Marker Interactions
+stats-pathing-interact-poll = Proximity Poll Interval
 
 ## Arc
 
@@ -360,6 +364,9 @@ deactivate-pack = Deactivate
 pack-error = Failed
 unknown-pack-format = { unknown }
 pack-format-notice = Supported .taco zip file or extracted folder
+
+pathing-menu-packs = { controls }
+#pathing-menu-packs = Category Toggles
 
 filter-options = Filter Options
 search = Search
@@ -477,6 +484,8 @@ pathing-config-goggles-project-map = Map
 pathing-config-goggles-depth = Focus
 pathing-config-filters = Dynamic Content
 pathing-config-interactions = Interactions
+pathing-config-interactions-responsiveness = Responsiveness
+#pathing-config-interactions-responsiveness-explain = Minimum poll interval
 pathing-config-autotrigger = Auto-trigger
 pathing-config-autotrigger-notice = Additionally allow the following to automatically trigger when in range
 pathing-config-api-bypass = API bypass
@@ -504,6 +513,10 @@ render-notice-error = Error! See log in Nexus or Taimi addon folder for more det
 packs-empty = No files loaded
 packs-empty-notice = Once installed from the { data-sources-tab } tab or downloaded manually, the "{ reload-packs }" button should pick them up!
 
+message-window-notice = Pathing packs may use this space to display notification messages.
+ This window will become transparent and unobtrusive when minimized, and will ignore your mouse unless the configured modifier keys are held down (typically ALT+SHIFT).
+message-dismiss = { trigger-behaviour }
+
 ## Interaction
 
 trigger-copy = Copy
@@ -520,6 +533,9 @@ poi-activate-info = Read
 poi-activate-copy = { trigger-copy }
 poi-activate-behaviour = { trigger-behaviour }
 poi-activate = Activate
+# manual override ignores settings
+poi-activate-override = Trigger
+poi-activate-override-notice = Manual override ignores preferences
 
 ## Festivals
 

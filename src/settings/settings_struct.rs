@@ -212,7 +212,15 @@ impl Settings {
     }
 
     pub fn set_window_state(&mut self, window: &str, state: Option<bool>) {
-        let state = state.unwrap_or_else(|| !self.get_window_state(window).unwrap_or_default());
+        let state = match (window, state) {
+            #[cfg(todo)]
+            (crate::WINDOW_MESSAGES, None) => {
+                self.ui_state.pathing_window.try_read().map(|w|
+                    w.window.open
+                ).unwrap_or_default()
+            },
+            (w, state) => state.unwrap_or_else(|| !self.get_window_state(w).unwrap_or_default()),
+        };
         if self.update_window_state(window, state).is_err() {
             log::error!("unsupported window: {window}");
         }
@@ -225,6 +233,7 @@ impl Settings {
             crate::WINDOW_TIMERS => self.timers_window_open,
             crate::WINDOW_MARKERS => self.markers_window_open,
             crate::WINDOW_PATHING => self.ui_state.pathing_window.read().window.open.is_active(),
+            crate::WINDOW_MESSAGES => self.ui_state.message_window.read().window.open.is_active(),
             _ => return None,
         })
     }
@@ -235,8 +244,21 @@ impl Settings {
             crate::WINDOW_TIMERS => &mut self.timers_window_open,
             crate::WINDOW_MARKERS => &mut self.markers_window_open,
             crate::WINDOW_PATHING => {
-                let pathing_window = &self.ui_state.pathing_window;
-                pathing_window.write_with(|pathing| pathing.window.open = open.into());
+                match &self.ui_state.pathing_window {
+                    #[cfg(todo = "unnecessary")]
+                    w if w.is_watching() =>
+                        w.write_with(|w| w.window.open = open.into()),
+                    _ => self.ui_state.pathing_window.write_with(|w| w.window.open = open.into()),
+                }
+                return Ok(())
+            },
+            crate::WINDOW_MESSAGES => {
+                match &self.ui_state.message_window {
+                    #[cfg(todo = "unnecessary")]
+                    w if w.is_watching() =>
+                        w.write_with(|w| w.window.open = open.into()),
+                    _ => self.ui_state.message_window.write_with(|w| w.window.open = open.into()),
+                }
                 return Ok(())
             },
             _ => return Err(()),
