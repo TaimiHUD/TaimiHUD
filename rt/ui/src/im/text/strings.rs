@@ -74,6 +74,7 @@ pub trait ImStrExt {
         let mut s = self.im_into_imstr();
         f(&s.im_take_cstring())
     }
+    /// TODO: just switch to two "bstr" variant methods on the trait so this can be skipped on cstr...
     #[inline(always)]
     fn im_with_bstr<R, F>(self, f: F) -> R
     where
@@ -92,12 +93,23 @@ pub trait ImStrExt {
         Self: Sized,
         F: FnOnce(Result<&CSlice, &[u8]>) -> R,
     {
-        self.im_with_bstr(move |s| {
-            f(match s.last() {
-                Some(0) => Ok(unsafe { CSlice::from_bytes_with_nul_unchecked(s) }),
-                _ => Err(s),
-            })
-        })
+        let s = self.im_into_imstr();
+        let bstr;
+        let cbstr = if let Some(c) = s.im_as_c_str() {
+            Ok(CSlice::with_cstr(c))
+        } else {
+            let bstr = if let Some(b) = s.im_as_bstr() {
+                b
+            } else {
+                bstr = s.im_clone_to_vec();
+                &bstr[..]
+            };
+            match bstr.last() {
+                Some(0) => Ok(unsafe { CSlice::from_bytes_with_nul_unchecked(bstr) }),
+                _ => Err(bstr),
+            }
+        };
+        f(cbstr)
     }
 }
 impl dyn ImStr {
@@ -748,7 +760,7 @@ impl ImStr for CStr {
     }
     #[inline(always)]
     fn im_as_bstr(&self) -> Option<&[u8]> {
-        Some(self.to_bytes_with_nul())
+        Some(self.to_bytes())
     }
     #[inline(always)]
     fn im_append_to(&self, dest: &mut Vec<u8>) {
@@ -776,7 +788,7 @@ impl ImStr for CStr {
     }
     #[inline(always)]
     fn im_clone_to_vec(&self) -> Vec<u8> {
-        self.to_bytes_with_nul().into()
+        self.to_bytes().into()
     }
 }
 impl ImStrExt for CStr {
