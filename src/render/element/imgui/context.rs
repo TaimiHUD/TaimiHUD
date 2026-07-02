@@ -8,7 +8,7 @@ use {
                 ImContextExt,
             },
         },
-        settings::UiConfig,
+        settings::{state::AddonHostName, UiConfig},
     },
     core::{
         fmt,
@@ -205,6 +205,7 @@ pub struct UiFrameStorage {
     /// TODO: noop :<
     pub waker: core::task::Waker,
     pub frame: frame::RenderFrameUi,
+    pub container: UiFrameContainer,
 }
 impl UiFrameStorage {
     /// TODO: combine this type with RenderFrameUi (decide if arc stays or goes)
@@ -223,17 +224,36 @@ impl UiFrameStorage {
     }
 }
 #[derive(Debug, Clone)]
+pub struct UiFrameViewport {
+    pub host: AddonHostName,
+}
+#[derive(Debug, Clone)]
+pub struct UiFrameContainer {
+    pub viewport: UiFrameViewport,
+    pub kind: u16,
+}
+impl UiFrameContainer {
+    pub const TYPE_UNKNOWN: u16 = 0;
+    pub const TYPE_VIEWPORT_PRESENT: u16 = 1;
+    pub const TYPE_FRAME_OPTIONS: u16 = 2;
+    /// arcdps
+    pub const TYPE_ARC_WINDOW_TOGGLES: u16 = 3;
+    /// subset of recovery [options](Self::TYPE_FRAME_OPTIONS) when not fully loaded
+    pub const TYPE_TAIMI_OPTIONS_SAFE: u16 = 4;
+}
+#[derive(Debug, Clone)]
 pub struct UiContextStorage {
     pub state: UiState,
     pub config: Arc<UiConfig>,
 }
 impl UiContextStorage {
-    pub fn to_frame_storage(&self) -> UiFrameStorage {
+    pub fn to_frame_storage(&self, container: UiFrameContainer) -> UiFrameStorage {
         UiFrameStorage {
             frame: frame::RenderFrameUi {
                 ui_config: (*self.config).clone(),
                 ui_state: self.state.clone(),
             },
+            container,
             ..Default::default()
         }
     }
@@ -253,6 +273,20 @@ impl Default for UiFrameStorage {
         Self {
             waker: futures::task::noop_waker(),
             frame: Default::default(),
+            container: Default::default(),
+        }
+    }
+}
+impl Default for UiFrameViewport {
+    fn default() -> Self {
+        Self { host: AddonHostName::All }
+    }
+}
+impl Default for UiFrameContainer {
+    fn default() -> Self {
+        Self {
+            viewport: Default::default(),
+            kind: Self::TYPE_UNKNOWN,
         }
     }
 }

@@ -975,7 +975,7 @@ impl RenderState {
                 #[cfg(not(feature = "space"))]
                 () => (),
             },);
-            state.machine.post_ui();
+            state.machine.post_ui(ui, context);
             state.machine.post_render_late(render_slot);
         }
     }

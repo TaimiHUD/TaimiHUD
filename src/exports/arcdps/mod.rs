@@ -504,7 +504,7 @@ where
     RenderState::render_ui(ui, context);
 }
 
-fn imgui_draw_options_tab<'ui, U>(ui: &mut U, context: DrawContextInput<'ui>)
+fn imgui_draw_options_tab<'ui, U>(ui: &mut U, context: DrawContextInput<'ui>) -> bool
 where
     U: ?Sized + ImDrawWindow<'ui>,
 {
@@ -515,9 +515,13 @@ where
             running = false;
         }
     }
-    if !running {
-        RenderState::render_options_fallback(ui, context, AddonHostName::ArcDPS)
-    }
+    !running
+}
+fn imgui_draw_options_fallback<'ui, U>(ui: &mut U, context: DrawContextInput<'ui>)
+where
+    U: ?Sized + ImDrawWindow<'ui>,
+{
+    RenderState::render_options_fallback(ui, context, AddonHostName::ArcDPS)
 }
 
 fn imgui_draw_options_windows<'ui, U>(

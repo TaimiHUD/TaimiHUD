@@ -4,7 +4,7 @@ pub use taimi_ui::im::im180;
 pub use taimi_ui::im::im192;
 pub use {
     self::{
-        context::{UiContextCell, UiContextStorage, UiFrameStorage},
+        context::{UiContextCell, UiContextStorage, UiFrameContainer, UiFrameStorage, UiFrameViewport},
         draw::{ImDrawWindowExt, UiFrameState, UiState},
         selection::{
             SelectionEnumDesc,
