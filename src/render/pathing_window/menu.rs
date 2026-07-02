@@ -13,10 +13,6 @@ use {
     taimi_pack::category::{id::AsFullId, CategoryId},
 };
 
-#[derive(Default)]
-struct CategoryMenuContext {
-    filtered: bool,
-}
 impl PathingWindowState {
     pub fn draw_context_menu<'ui, U>(&mut self, ui: &mut U, machine: &mut RenderMachine)
     where
@@ -73,8 +69,6 @@ impl PathingWindowState {
                 _ => (),
             }
             was_multi_root = Some(multi_root);
-            let mut ctx: CategoryMenuContext = Default::default();
-            ctx.filtered = unfiltered;
             drop(roots);
             pack.draw_menu(ui);
             #[cfg(feature = "paths-lua")]
