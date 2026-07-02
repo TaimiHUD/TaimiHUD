@@ -214,6 +214,24 @@ function Context.env_for_plug(pack_info, genv, out, pack_info_key)
 		}),]]
 	local pack_info_key = {}
 	out = util.table_copy_shallow(Context.env, out)
+
+	local function table_index(self, k)
+		local v = util.table[k]
+		if v ~= nil then
+			-- nothing
+		elseif k == "ToLson" or k == "FromLson" then
+			v = require"@taimi/todo/lson"[k]
+		end
+		rawset(self, k, v)
+		return v
+	end
+	out.table = util.setmetatable({}, {
+		__index = table_index,
+		__metatable = {},
+	})
+	-- util.table_ro(out.table)
+	-- TODO? util.table_copy_shallow(util.table, out.table)
+
 	out.Taimi = Taimi
 	out.Debug = Context.debug_for_pack(Taimi)
 	out.Event = Context.event_for_pack(Taimi)
