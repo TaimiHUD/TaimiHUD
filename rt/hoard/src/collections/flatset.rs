@@ -3,6 +3,8 @@ use {
     std::{collections::VecDeque, sync::Arc},
 };
 
+pub type FlatMap<K, V> = FlatSet<crate::cmp::SetPair<K, V>>;
+
 #[derive(Debug, Clone, PartialOrd, Ord, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct FlatSet<T> {
@@ -162,8 +164,7 @@ impl<T> FlatSet<T> {
         value.unwrap_unchecked()
     }
 
-    /// TODO: fn find()?
-    pub fn index_of<Q>(&mut self, value: &Q) -> Option<usize>
+    pub fn index_of<Q>(&self, value: &Q) -> Option<usize>
     where
         T: PartialOrd<Q> + PartialEq<Q>,
     {
@@ -203,11 +204,29 @@ impl<T> FlatSet<T> {
     }
     /// TODO: Borrow<Q>?
     #[inline]
-    pub fn contains<Q>(&mut self, value: &Q) -> bool
+    pub fn contains<Q>(&self, value: &Q) -> bool
     where
         T: PartialOrd<Q> + PartialEq<Q>,
     {
         self.index_of(value).is_some()
+    }
+    #[inline]
+    pub fn find<Q>(&self, value: &Q) -> Option<&T>
+    where
+        T: PartialOrd<Q> + PartialEq<Q>,
+    {
+        self.index_of(value).map(|i| unsafe {
+            self.at_unchecked(i)
+        })
+    }
+    #[inline]
+    pub fn find_mut<Q>(&mut self, value: &Q) -> Option<&mut T>
+    where
+        T: PartialOrd<Q> + PartialEq<Q>,
+    {
+        self.index_of(value).map(|i| unsafe {
+            self.at_mut_unchecked(i)
+        })
     }
 
     #[inline(always)]

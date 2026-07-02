@@ -1,5 +1,5 @@
 pub use self::{
-    flatset::FlatSet,
+    flatset::{FlatSet, FlatMap},
     traits::{TaimiExtend, TaimiSet},
 };
 
