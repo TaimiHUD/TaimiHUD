@@ -8,6 +8,7 @@ use {
         ball,
         bounding_hierarchy::{BHShape, BHValue},
         bvh::Bvh,
+        point_query::PointDistance,
     },
     glamour::{Box2, Box3, FloatScalar, Point3, Unit, Vector2, Vector3},
     num_traits::Signed,
@@ -318,6 +319,24 @@ where
         self.value.aabb()
     }
 }
+impl<T, U: BHValue, const D: usize> aabb::IntersectsAabb<U, D> for BvhShape<T>
+where
+    T: aabb::IntersectsAabb<U, D>,
+{
+    #[inline]
+    fn intersects_aabb(&self, aabb: &aabb::Aabb<U, D>) -> bool {
+        self.value.intersects_aabb(aabb)
+    }
+}
+impl<T, U: BHValue, const D: usize> PointDistance<U, D> for BvhShape<T>
+where
+    T: PointDistance<U, D>,
+{
+    #[inline]
+    fn distance_squared(&self, query: nalgebra::Point<U, D>) -> U {
+        self.value.distance_squared(query)
+    }
+}
 impl<T, U: BHValue, const D: usize> BHShape<U, D> for BvhShape<T>
 where
     Self: aabb::Bounded<U, D>,
@@ -431,5 +450,36 @@ where
         let corner = Vector3::<U>::splat(self.radius());
         let bounds = Box3::new(self.position - corner, self.position + corner);
         box3aabb(bounds)
+    }
+}
+impl PointDistance<<LocalSpace as Unit>::Scalar, 2> for TriggerBoundsInfo<LocalSpace> where
+    <LocalSpace as Unit>::Scalar: BHValue + nalgebra::SimdValue,
+    LocalPoint2: MintConv<MintNalg = nalgebra::Point2<<LocalSpace as Unit>::Scalar>>,
+{
+    #[inline]
+    fn distance_squared(&self, query: nalgebra::Point<<LocalSpace as Unit>::Scalar, 2>) -> <LocalSpace as Unit>::Scalar {
+        self.position2().distance_squared(MintConv::from_nalg(query))
+    }
+}
+impl<U: Unit<Scalar = f32>> PointDistance<U::Scalar, 3> for TriggerBoundsInfo<U>
+where
+    Point3<U>: MintConv<MintNalg = nalgebra::Point3<U::Scalar>>,
+{
+    #[inline]
+    fn distance_squared(&self, query: nalgebra::Point<U::Scalar, 3>) -> <LocalSpace as Unit>::Scalar {
+        let query: Point3<U> = MintConv::from_nalg(query);
+        self.position.to_vec3a().distance_squared(query.to_vec3a())
+    }
+}
+#[cfg(todo)]
+impl<U: Unit> PointDistance<U::Scalar, 3> for TriggerBoundsInfo<U>
+where
+    U::Scalar: Signed + BHValue + glamour::FloatScalar,
+    Point3<U>: MintConv<MintNalg = nalgebra::Point3<U::Scalar>>,
+{
+    #[inline]
+    fn distance_squared(&self, query: nalgebra::Point<U::Scalar, 3>) -> <LocalSpace as Unit>::Scalar {
+        let query: Point3<U> = MintConv::from_nalg(query);
+        self.position.distance_squared(query)
     }
 }
