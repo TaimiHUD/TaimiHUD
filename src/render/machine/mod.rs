@@ -482,6 +482,11 @@ impl RenderMachine {
     pub const TEXTURE_LOGO_KEY: &'static str = "taimihud_glow256";
     pub const TEXTURE_LOGO_BIN: &'static [u8] =
         include_bytes!("../../../data/textures/logotype-glow-256.png");
+    #[cfg(feature = "space")]
+    pub const TEXTURE_GLYPH_HOLO_KEY: &'static str = "taimihud_glyph_holo";
+    #[cfg(feature = "space")]
+    pub const TEXTURE_GLYPH_HOLO_BIN: &'static [u8] =
+        include_bytes!("../../../data/textures/glyph-holo.png");
 
     pub fn turn_render_pre(&mut self, now: Instant, render_timestamp: Option<Instant>) {
         self.metrics_pre();

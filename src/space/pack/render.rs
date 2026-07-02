@@ -420,6 +420,30 @@ impl DrawSpaceEntity for DrawSpaceArc<'_> {
         if self.bind_poi().is_none() {
             return false
         }
+        //#[cfg(taimi_debug)]
+        if poi.icon_unset {
+            let binds = self.resources.poi_common.as_ref().and_then(|c| {
+                c.fallback_object
+                    .as_ref()
+                    .and_then(|o| c.fallback_textureo.as_ref().map(|t| (o, t)))
+            });
+            if let Some(((vb, vc), tex)) = binds {
+                // bleh
+                taimi_d3d::state::PrimitiveTopology::TriangleList.set(self.context);
+                vb.set(self.context, 0);
+                tex.set(self.context, 0);
+                unsafe {
+                    self.context.DrawInstanced(*vc, 1, 0, space_idx as u32);
+                    self.resources
+                        .poi_common
+                        .as_ref()
+                        .unwrap_unchecked()
+                        .set_primitive(self.context);
+                }
+            }
+            self.last_quad = None;
+            return true
+        }
         let vb_quad = match poi.occlude {
             true => self.resources.poi_vb_trans.as_ref(),
             _ => {
