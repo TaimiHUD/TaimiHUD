@@ -1,5 +1,5 @@
 use {
-    crate::{exports::runtime as rt, Interruption},
+    crate::{exports::runtime as rt, settings::pathing::TriggerKind, Interruption},
     self::id::{ScriptEventPath, LoadedScriptNs},
     anyhow::Context,
     core::{any::Any, fmt},
@@ -135,6 +135,11 @@ impl ScriptController {
             ScriptMessage::Exit(reason) => return Ok(Some(reason)),
             ScriptMessage::InternalReq(req) => self.process_internal_req(req).await,
             #[cfg(feature = "scripts-lua")]
+            ScriptMessage::RefreshPacks => {
+                Self::do_refresh_packs().await;
+                Ok(())
+            },
+            #[cfg(feature = "scripts-lua")]
             ScriptMessage::Lua(msg) => {
                 if self.lua_tx.is_none() && msg.wants_runtime() {
                     let _ = rt::log::warn_ok(self.start_lua().await);
@@ -142,6 +147,7 @@ impl ScriptController {
                 if let Some(Some(tx)) = &self.lua_tx {
                     let _ = rt::log::warn_ok(tx.send(msg).await);
                 } else {
+                    #[cfg(deleteme)]
                     log::warn!("couldn't relay {msg:?}")
                 }
                 Ok(())
@@ -151,27 +157,45 @@ impl ScriptController {
     }
     #[cfg(feature = "paths-interact")]
     async fn handle_interact_event(&mut self, e: InteractionEvent) -> anyhow::Result<()> {
-        let (signal, marker, action) = match e {
-            InteractionEvent::Nearby { path, .. } => {
-                let path: id::EventArgPath = path.pivot_from();
-                (event::ScriptNotification::PathingFocus, path, event::UntypedArgs::Empty)
-            },
-            InteractionEvent::Gone { path, .. } =>
-                (event::ScriptNotification::PathingUnfocus, path.pivot_from(), event::UntypedArgs::Empty),
+        let (signal, marker, target, action) = match e {
             InteractionEvent::Interact { action: InteractionEventAction::Report(..), .. } => {
                 // TODO: what was this used for again?
                 return Ok(())
             },
-            InteractionEvent::Interact { path, action, .. } => {
-                let is_auto = matches!(action, InteractionEventAction::AutoTrigger);
-                let arg = event::UntypedArgs::Int(is_auto as isize);
-                (event::ScriptNotification::PathingTrigger, path.pivot_from(), arg)
+            InteractionEvent::Interact { path, loaded_path, action, .. } => {
+                let path: id::EventArgPath = path.pivot_from();
+                let is_auto = match action {
+                    InteractionEventAction::AutoTrigger => Some(true),
+                    InteractionEventAction::Manual(mask) => mask.contains(TriggerKind::SCRIPT).then_some(false),
+                    // TODO: maybe controller should just send Manual or Report or something dedicated to signal this properly?
+                    #[cfg(todo)]
+                    InteractionEventAction::Manual(..) | InteractionEventAction::Interact => None,
+                    _ => Some(false),
+                };
+                if let Some(is_auto) = is_auto {
+                    let arg = event::UntypedArgs::Bool(is_auto);
+                    (event::ScriptNotification::PathingTrigger, path, loaded_path.root.root, arg)
+                } else {
+                    return Ok(())
+                }
             },
+            #[cfg(todo)]
+            InteractionEvent::Nearby { path, loaded_path, .. } =>
+                (event::ScriptNotification::PathingFocus, path.pivot_from(), loaded_path.root.root, event::UntypedArgs::Empty),
+            #[cfg(todo)]
+            InteractionEvent::Gone { path, .. } =>
+                (event::ScriptNotification::PathingUnfocus, path.pivot_from(), event::UntypedArgs::Empty),
+            InteractionEvent::Nearby { path, loaded_path, .. } =>
+                (event::ScriptNotification::PathingFocus, path.pivot_from(), loaded_path.root.root, event::UntypedArgs::Bool(true)),
+            InteractionEvent::Gone { path, loaded_path, .. } =>
+                (event::ScriptNotification::PathingFocus, path.pivot_from(), loaded_path.root.root, event::UntypedArgs::Bool(false)),
         };
-        self.process_script_event(signal, marker.path, action).await
+        self.process_script_event(signal, target.pivot_from(), marker.path, action).await
     }
-    async fn process_script_event(&self, signal: event::ScriptNotification, arg0: ScriptEventArg, arg1: event::UntypedArgs) -> anyhow::Result<()> {
+    async fn process_script_event(&self, signal: event::ScriptNotification, target: ScriptPath, arg0: ScriptEventArg, arg1: event::UntypedArgs) -> anyhow::Result<()> {
+        #[cfg(todo)]
         let targets = self.iter_event_interest(signal.to_repr() as _, arg0);
+        let targets = [target];
         #[cfg(feature = "scripts-lua")]
         let lua_args = |arg1: &event::UntypedArgs| match (arg0, arg1) {
             (LoadedScriptNs::ARG_UNK, event::UntypedArgs::Empty) => None,
@@ -181,6 +205,9 @@ impl ScriptController {
                 );
                 let a1 = match *a1 {
                     event::UntypedArgs::Empty => None,
+                    event::UntypedArgs::Bool(v) => Some(
+                        Box::new(Some(v)) as Box<dyn taimi_pack::script::lua::IntoLuaMut + Send>
+                    ),
                     event::UntypedArgs::Int(i) => Some(
                         Box::new(Some(i)) as Box<dyn taimi_pack::script::lua::IntoLuaMut + Send>
                     ),
@@ -215,6 +242,8 @@ impl ScriptController {
                         args,
                     }
                 };
+                #[cfg(taimi_debug)]
+                log::debug!("sending: {msg:?}");
                 let _ = rt::log::warn_ok(tx.send(msg).await);
             }
         }
@@ -353,11 +382,13 @@ pub enum ScriptMessage {
     TearDown,
     Exit(Interruption),
     #[cfg(feature = "scripts-lua")]
+    RefreshPacks,
+    #[cfg(feature = "scripts-lua")]
     #[strum(to_string = "Lua::{0}")]
     Lua(LuaMessage),
     /// flows in reverse *from* a script
     #[strum(to_string = "InternalReq::{0}")]
-    InternalReq(ScriptRequest)
+    InternalReq(ScriptRequest),
 }
 impl ScriptMessage {
     pub fn try_send(self) {
@@ -376,6 +407,7 @@ impl ScriptMessage {
         match () {
             #[cfg(feature = "scripts-lua")]
             _ => {
+                #[cfg(deleteme)]
                 if changed.contains(rt::bindings::GameControl::Miscellaneous_Interact)
                     && state.contains(rt::bindings::GameControl::Miscellaneous_Interact)
                 {
@@ -522,7 +554,8 @@ impl PlugSharedData {
 
     /// TODO
     pub fn is_active(&self) -> bool {
-        true
+        let status = self.state.status.load(Ordering::Relaxed);
+        status != event::ScriptSignal::Ended as usize
     }
 }
 impl AsRef<PlugSharedData> for PlugSharedData {
@@ -561,15 +594,20 @@ impl AsRef<PlugSharedData> for Arc<dyn PlugSharedRef> {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct PlugStateBeacon {
     pub shared: RwLock<PlugStateData>,
     pub state_gen: AtomicUsize,
+    pub status: AtomicUsize,
 }
 impl PlugStateBeacon {
     #[inline]
     pub fn latest_gen(&self) -> usize {
         self.state_gen.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn update_status(&self, status: event::ScriptSignal) {
+        self.status.store(status as usize, Ordering::Relaxed);
     }
 
     #[inline]
@@ -583,6 +621,15 @@ impl PlugStateBeacon {
         let w = self.shared.write().unwrap_or_else(|e| e.into_inner());
         let _ = self.state_gen.fetch_add(1, Ordering::SeqCst);
         w
+    }
+}
+impl Default for PlugStateBeacon {
+    fn default() -> Self {
+        Self {
+            shared: Default::default(),
+            state_gen: Default::default(),
+            status: AtomicUsize::new(event::ScriptSignal::Started as usize),
+        }
     }
 }
 #[derive(Debug, Clone, Default)]

@@ -20,4 +20,22 @@ for k,v in pairs(export.TriggerKind) do
 	export.TriggerMask[k] = bitop.lshift(1, v)
 end
 
+export.FilterKind = {
+	Behaviour = 1,
+	Achievement = 2,
+	Festival = 3,
+	MapType = 4,
+	Mount = 5,
+	Race = 6,
+	Schedule = 7,
+	Profession = 8,
+	Specialization = 9,
+	Raid = 10,
+	Script = 11,
+}
+export.FilterMask = {}
+for k,v in pairs(export.FilterKind) do
+	export.FilterMask[k] = bitop.lshift(1, v)
+end
+
 return export

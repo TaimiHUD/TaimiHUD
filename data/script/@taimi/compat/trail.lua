@@ -14,6 +14,7 @@ ud.wrap_method_into(Trail, "Interact")
 -- ud.wrap_method_into(Trail, "GetBehavior")
 ud.wrap_method_into(Trail, "GetAttrByKey")
 ud.wrap_method_into(Trail, "SetAttrByKey")
+-- ud.wrap_method_into(Trail, "SetPoints")
 Trail.s.attrs = {
 	Alpha = "alpha",
 	AnimationSpeed = "animspeed",
@@ -45,11 +46,7 @@ function Trail.mt.__index(t, k)
 	elseif k == "Texture" then
 		return t:GetTexture()
 	end
-	local v = ud.instance_mt.__index(t, k)
-	if v ~= nil and k == "Texture" and type(v) == "string" then
-		v = t.pack_info:GetPackAssets():OpenTexture(v)
-	end
-	return v
+	return ud.instance_mt.__index(t, k)
 end
 function Trail.mt.__newindex(t, k, v)
 	local attr = Trail.attrs[k]
@@ -63,6 +60,14 @@ function Trail.mt.__newindex(t, k, v)
 end
 function Trail.i:Remove()
 	self.pack_info:GetPackHandle():RemoveTrail(ud.unwrap(self))
+end
+function Trail.i:SetPoints(points)
+	local swizz = {}
+	for _,p in ipairs(points) do
+		-- TODO? if type(ud.unwrap(p)) == "table" then p = vectors.Vec3.new(p) end
+		table.insert(swizz, p:xzy())
+	end
+	return ud.unwrap(self):SetPoints(points)
 end
 function Trail.i:SetTexture(tex)
 	if type(tex) == "number" then

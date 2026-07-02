@@ -38,6 +38,8 @@ use {
                 TextureHandle,
                 TrailHandle,
                 TrailHandleMut,
+                MapFilterArg,
+                MapID,
             },
             user::{IntoUserHandle, ScriptUserGuid, ScriptUserStr},
             value::Vec3,
@@ -392,17 +394,31 @@ impl PackHandle for PackArc {
 }
 impl ScriptApiWorld for PackArc {}
 impl ScriptApiLookup for PackArc {
-    fn poi_by_guid<G>(&self, guid: G) -> Result<Option<Self::Poi>>
+    fn poi_by_guid<G>(&self, guid: G, map_filter: MapFilterArg) -> Result<Option<Self::Poi>>
     where
         G: ScriptUserGuid,
     {
-        guid.try_with_guid(|guid| PackPoiArc::find_poi(self, |poi, _| &poi.guid == guid))
+        guid.try_with_guid(|guid| PackPoiArc::find_poi(self, |poi, _| {
+            if let Some(target) = map_filter {
+                if poi.map_id != target as _ {
+                    return false
+                }
+            }
+            &poi.guid == guid
+        }))
     }
-    fn trail_by_guid<G>(&self, guid: G) -> Result<Option<Self::Trail>>
+    fn trail_by_guid<G>(&self, guid: G, map_filter: MapFilterArg) -> Result<Option<Self::Trail>>
     where
         G: ScriptUserGuid,
     {
-        guid.try_with_guid(|guid| PackTrailArc::find_trail(self, |trail, _| &trail.guid == guid))
+        guid.try_with_guid(|guid| PackTrailArc::find_trail(self, |trail, _| {
+            if let Some(target) = map_filter {
+                if trail.map_id != Some(target as _) {
+                    return false
+                }
+            }
+            &trail.guid == guid
+        }))
     }
     type PathablesByGuid<'a>
         = iter::Empty<<Self as PathableHandleFactory>::Pathable>
@@ -650,7 +666,7 @@ impl PathableHandle for PackTrailArc {
     fn pathable_tag_type(&self) -> MarkerType {
         MarkerType::Trail
     }
-    fn get_map_id(&self) -> Result<u32> {
+    fn get_map_id(&self) -> Result<MapID> {
         self.trail_ref()
             .map_id
             .map(|id| id as _)
@@ -703,7 +719,7 @@ impl PathableHandle for PackPoiArc {
         MarkerType::Poi
     }
 
-    fn get_map_id(&self) -> Result<u32> {
+    fn get_map_id(&self) -> Result<MapID> {
         Ok(self.poi_ref().map_id as _)
     }
     fn get_behaviour_filtered(&self) -> Result<bool> {

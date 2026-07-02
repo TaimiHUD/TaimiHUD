@@ -5,21 +5,27 @@ use {
             event::{ScriptNotification, ScriptSignal},
             lua::{LuaPlugBase, ScriptNotification0},
             menu::{PlugMenu, PlugMenuInstance},
-            pathing::{marker_index2loc, marker_loc2index, marker_ty2ns},
+            pathing::{marker_index2loc, marker_loc2index, marker_ty2ns, PackPlugStash},
             persistence::ScriptHostPersistence,
             PackPlugShared,
             PlugSharedData,
             PlugSharedRef,
         },
-        controller::pathing::registry::{
-            PackPath,
-            PackMapPath,
-            LoadedMarkerPath,
-            SharedLoaderBox as SharedLoader,
+        controller::pathing::{
+            registry::{
+                PackPath,
+                PackMapPath,
+                LoadedMarkerPath,
+                SharedLoaderBox as SharedLoader,
+                LoadedPoiPath,
+            },
+            PathingEvent,
         },
+        controller::Controller,
+        exports::runtime as rt,
     },
-    taimi_hoard::loc::{Locator, LocationRef},
-    taimi_meta::packs::{MapIndex, MarkerIndex, MarkerPath},
+    taimi_hoard::{lazyfmt, loc::{Locator, LocationRef}},
+    taimi_meta::packs::{MapIndex, MarkerIndex, MarkerPath, MarkerId, CategoryPath, CategoryIndex, VisibilityFlags},
     anyhow::Context,
     core::{fmt, mem, ops},
     mlua::{
@@ -34,13 +40,15 @@ use {
     },
     std::{
         borrow::Cow,
+        cell::RefCell,
         collections::BTreeSet,
         path::Path,
         sync::{Arc, OnceLock},
+        rc::Rc,
     },
     taimi_pack::{
         attributes::{
-            cell::{pack_attr, GetAttrDyn, PackKeyId, PackValueCell, SetAttrDyn},
+            cell::{pack_attr, GetAttrDyn, PackKeyId, PackValueCell, SetAttrDyn, AttrKeyValue, GetAttrDynExt},
             keys::{self, SetAttr},
         },
         category::{
@@ -66,6 +74,7 @@ use {
                     PackOverrides,
                     PackOverridesShared,
                     PackRootCategories,
+                    MarkerOverridesAttrs,
                 },
                 CategoryHandle,
                 CategoryHandleMut,
@@ -95,11 +104,18 @@ use {
         trail::Trail,
     },
 };
+#[cfg(feature = "paths-interact")]
+use crate::controller::pathing::{
+    state::interactive::{InteractionEvent, InteractionEventAction},
+    InteractMessage,
+};
 
+type SharedStash = Rc<RefCell<PackPlugStash>>;
 #[derive(Clone)]
 pub struct LuaPackDesc {
-    pub(crate) path: PackScriptPath,
     pub(crate) plug: LuaPlugBase,
+    /// TODO: stop cloning this, then Rc unneeded if markers can ref or something?
+    pub(crate) stash: SharedStash,
 }
 impl ops::Deref for LuaPackDesc {
     type Target = LuaPlugBase;
@@ -115,6 +131,30 @@ impl ops::DerefMut for LuaPackDesc {
     }
 }
 impl LuaPackDesc {
+    #[inline]
+    pub fn with_stash_mut<R, F>(&self, f: F) -> R where
+        F: FnOnce(&mut PackPlugStash) -> R,
+    {
+        let mut stash = match self.stash.try_borrow_mut() {
+            #[cfg(taimi_debug)]
+            s => s.unwrap(),
+            #[cfg(not(taimi_debug))]
+            s => unsafe { s.unwrap_unchecked() },
+        };
+        f(&mut *stash)
+    }
+    #[inline]
+    pub fn with_stash_ref<R, F>(&self, f: F) -> R where
+        F: FnOnce(&PackPlugStash) -> R,
+    {
+        let stash = match self.stash.try_borrow() {
+            #[cfg(taimi_debug)]
+            s => s.unwrap(),
+            #[cfg(not(taimi_debug))]
+            s => unsafe { s.unwrap_unchecked() },
+        };
+        f(&*stash)
+    }
     /// hmmmmmmmmm
     #[cfg(todo)]
     pub fn shared_arc(&self) -> &Arc<PackPlugShared> {
@@ -128,11 +168,26 @@ impl LuaPackDesc {
             )
         }
     }
+    pub fn share_state(&self) -> PackMarkerState {
+        PackMarkerState {
+            shared: self.shared_arc(),
+            stash: self.stash.clone(),
+        }
+    }
     pub fn shared(&self) -> &PackPlugShared {
         unsafe { <dyn PlugSharedRef>::as_pack_unchecked(&*self.plug.shared) }
     }
     pub fn notify0(&mut self, lua: &RuntimeLua, id: ScriptNotification) -> script::Result<()> {
         let co = self.running()?;
+        match id {
+            #[cfg(todo = "unnecessary")]
+            ScriptNotification::PathingMapExit => {
+                self.with_stash_mut(|s| {
+                    s.prepare_map_exit();
+                });
+            },
+            _ => (),
+        }
         let yielded = co.call(ScriptNotification0(id));
         self.spun(lua, yielded)
     }
@@ -158,6 +213,14 @@ impl LuaPackDesc {
         args: impl mlua::IntoLuaMulti,
     ) -> anyhow::Result<()> {
         let co = self.running()?;
+        match id {
+            ScriptNotification::PathingMapExit => {
+                self.with_stash_mut(|s| {
+                    s.prepare_map_exit();
+                });
+            },
+            _ => (),
+        }
         let args = args.into_lua_multi(lua.lua())?;
         let yielded = co.call((LuaPlugBase::signal_with(id, args),));
         self.spun(lua, yielded)
@@ -191,8 +254,25 @@ impl LuaPackDesc {
                 (id, ev)
             },
         };
+        self.state().update_status(id);
         match id {
-            ScriptSignal::Started | ScriptSignal::Pending | ScriptSignal::Resume => (),
+            ScriptSignal::Started => {
+                let gameplay = Controller::with_sender(|s| s.pathing.as_ref().map(|p|
+                    p.shared.gameplay.clone()
+                )).flatten();
+                let gameplay = gameplay.as_ref().map(|gp| gp.borrow());
+                if let Some((map_id, map_info)) = gameplay.as_ref().and_then(|gp| gp.get_info_for(self.shared().path.pivot_from())) {
+                    self.with_stash_mut(|s| {
+                        let pois = map_info.info.pois()
+                            .map(|p| MarkerPath::new_path(MarkerIndex::with_poi(p.path)));
+                        let trails = map_info.info.trails()
+                            .map(|p| MarkerPath::new_path(MarkerIndex::with_trail(p.path)));
+                        s.pending_start.extend(pois.chain(trails));
+                    });
+                }
+                drop(gameplay);
+            },
+            ScriptSignal::Pending | ScriptSignal::Resume => (),
             ScriptSignal::Ended => {
                 log::info!("{self} quit");
                 self.co = None;
@@ -214,9 +294,7 @@ impl LuaPackDesc {
                 pack.categories
                     .all_categories
                     .keys()
-                    .enumerate()
-                    .find(|&(_, k)| IdCmpRelaxed::with_ref(k.as_id()).eq_with(q))
-                    .map(|(i, _)| i)
+                    .position(|k| IdCmpRelaxed::with_ref(k.as_id()).eq_with(q))
             })
     }
     fn lookup_pack_category<'a>(pack: &'a Arc<Pack>, q: &str) -> Option<&'a Category> {
@@ -232,27 +310,150 @@ impl LuaPackDesc {
             .map(move |idx| unsafe { PackCategoryArc::new_unchecked(pack.clone(), idx) })
     }
 
-    #[cfg(deleteme)]
-    pub fn pathable_tag_for((ty, idx): MarkerLoc) -> u32 {
-        let tag = (ty as u8 as u32) << 28;
-        tag | idx as u32
-    }
-    const TAG_POI: u32 = MarkerType::Poi as u8 as u32;
-    const TAG_TRAIL: u32 = MarkerType::Trail as u8 as u32;
-    const TAG_CAT: u32 = MarkerType::Category as u8 as u32;
-    #[cfg(deleteme)]
-    pub fn pathable_tag_from(tag: u32) -> Option<MarkerLoc> {
-        let idx = tag & 0x0fffffff;
-        Some(match tag >> 28 {
-            Self::TAG_POI => (MarkerType::Poi, idx as usize),
-            Self::TAG_TRAIL => (MarkerType::Trail, idx as usize),
-            Self::TAG_CAT => (MarkerType::Category, idx as usize),
-            _ => return None,
-        })
+    pub fn path(&self) -> PackScriptPath {
+        self.plug.shared().path.path.get_pack_index()
     }
 
-    pub fn path(&self) -> PackScriptPath {
-        self.path
+    /// shadows deref btw
+    pub(crate) fn wants_poll(&self) -> bool {
+        self.plug.wants_poll() | self.with_stash_ref(|s| s.is_dirty())
+    }
+    /// shadows deref btw
+    pub(crate) fn poll_idle(&mut self, lua: &RuntimeLua) -> bool {
+        let pending_start = self.with_stash_mut(|s| {
+            s.process_changes_to_outbound(self.path().pivot_from(), self.shared());
+            s.process_outbound_pathing();
+            let to_start = (!s.pending_start.is_empty()).then(||
+                mem::take(&mut s.pending_start)
+            );
+            to_start
+        });
+        if let Some(pending_start) = pending_start {
+            let res =
+                self.start_map_markers(lua, None, &mut {pending_start.into_iter()});
+            let _ = rt::log::warn_ok(res);
+        }
+        false
+    }
+    /// TODO: this doesn't want to use pack, it wants a way to lookup attrs
+    /// by `Locator<MarkerPath, PackKeyId>`
+    /// (or just `&mut dyn Iterator<Item = &mut dyn GetAttrDyn>`?)
+    #[cfg(feature = "paths-lua")]
+    pub(crate) fn start_map_markers(
+        &mut self,
+        lua: &RuntimeLua,
+        map_id: Option<MapIndex>,
+        markers: &mut dyn Iterator<Item = MarkerPath>,
+    ) -> anyhow::Result<()> {
+        use mlua::ObjectLike;
+
+        let pack = self.shared().get_pack()?;
+        let overrides = self.shared().overrides.clone();
+
+        // TODO: lol
+        let eventloop = self
+            .globals
+            .get::<mlua::Table>("Taimi")?
+            .get::<mlua::Table>("ctx")?
+            .get::<mlua::Table>("events")?;
+
+        #[cfg(deleteme)]
+        let shared = self.shared_arc();
+        #[cfg(deleteme)]
+        let mut marker_focus = shared.active_markers.try_lock().ok();
+        if let Some(map_id) = map_id {
+            #[cfg(deleteme)]
+            if let Some(focus) = &mut marker_focus {
+                focus.clear();
+            }
+            // event loop may want to clean up prior to receiving new set of handlers...
+            let res = self.notify_with(lua, ScriptNotification::PathingMapExit, (map_id.get(),));
+            let _ = rt::log::error_ok(res);
+        }
+
+        let key_once = keys::ScriptOnce::pack_key_of();
+        for marker_path in markers {
+            let loc = marker_index2loc(marker_path.path);
+            #[cfg(deleteme)]
+            if loc.0 == MarkerType::Trail {
+                log::debug!("Starting trail#{}!! {marker_path}", loc.1);
+            }
+            #[cfg(deleteme)]
+            if let Some(focus) = &mut marker_focus {
+                let _ = focus.entry(marker_path).or_default();
+            }
+            let marker = unsafe { PackMarkerRef::new_unchecked(pack.clone(), loc) };
+            let overrides = PackOverrides::shared_read(&overrides);
+            let attrs_o;
+            let o = overrides.overrides.get(&loc).map(MarkerOverrides::shared_read);
+            let attrs = match o.as_ref() {
+                None => marker.get_attrs_dyn(),
+                Some(o) => {
+                    attrs_o = MarkerOverridesAttrs::wrap_with_overrides(&marker, o);
+                    &attrs_o as &_
+                },
+            };
+            let script_attrs = [
+                (keys::ScriptFocus::pack_key_of(), ScriptNotification::PathingFocus),
+                (
+                    keys::ScriptFilter::pack_key_of(),
+                    ScriptNotification::PathingFilterMarker,
+                ),
+                (
+                    keys::ScriptTrigger::pack_key_of(),
+                    ScriptNotification::PathingTrigger,
+                ),
+                (
+                    keys::ScriptTick::pack_key_of(),
+                    ScriptNotification::PathingTickMarker,
+                ),
+                (key_once, ScriptNotification::PathingLoadMarker),
+            ];
+            /// ew but they're all repr(transparent) to the same type so let's skip some pain...
+            unsafe fn script_cell_to_str(cell: &dyn AttrKeyValue) -> &keys::Script {
+                let inconspicuous_whisling = cell as &dyn core::any::Any;
+                &*(inconspicuous_whisling as *const _ as *const keys::Script)
+            }
+            let mut has_once = false;
+            let markertag = marker_path.path.repr();
+            let guid = attrs.clone_attr_dyn_of::<keys::Guid>();
+            let name = lazyfmt::fmt_fn(|f| {
+                if let Some(guid) = &guid {
+                    write!(f, "{guid}")
+                } else {
+                    write!(f, "{}#{}", loc.0, loc.1)
+                }
+            });
+            for (key, id) in script_attrs {
+                let Some(attr) = attrs.get_attr_dyn(key) else { continue };
+                if key == key_once {
+                    has_once = true;
+                }
+                let attr = unsafe { script_cell_to_str(&*attr) };
+                let name = format!("{name}/{key}");
+                let args = lua.prepare_script_attr_args(&name, attr[..].as_bytes(), self.globals.clone());
+                let Some((fname, lazyargs)) = rt::log::warn_ok(args) else { continue };
+                let globals = self.globals.clone();
+                let callback = self.globals.get::<mlua::Function>(&fname).or_else(|_| {
+                    lua.lua().create_function(move |_lua, a: mlua::MultiValue| {
+                        mlua::ErrorContext::with_context(globals.get::<mlua::Function>(&fname), |_| {
+                            format!("{key} handler {}() missing", fname.display())
+                        })
+                        .and_then(move |f| f.call::<()>(a))
+                    })
+                })?;
+                eventloop.call_method::<()>("RegisterMarkerAttr", (id, markertag, callback, lazyargs))?;
+            }
+            if has_once {
+                // TODO: maybe schedule for next tick instead?
+                let res = self
+                    .notify_with(lua, ScriptNotification::PathingLoadMarker, (markertag,))
+                    .with_context(|| format!("{name}/{key_once}"));
+                let _ = rt::log::warn_ok(res);
+            }
+        }
+
+        Ok(())
     }
 }
 impl fmt::Display for LuaPackDesc {
@@ -356,14 +557,14 @@ impl ScriptApiPack for LuaPackDesc {
     type PackSpace<'a> = Self;
 }
 impl ScriptApiLookup for LuaPackDesc {
-    fn poi_by_guid<G>(&self, guid: G) -> script::Result<Option<Self::Poi>>
+    fn poi_by_guid<G>(&self, guid: G, map_filter: Option<u32>) -> script::Result<Option<Self::Poi>>
     where
         G: ScriptUserGuid,
     {
         guid.try_with_guid(|guid| {
             let pack = self.shared().get_pack()?;
             let poi = PackArc::from_ref(&pack)
-                .poi_by_guid(guid)?
+                .poi_by_guid(guid, map_filter)?
                 .map(|p| PackPoi::new(p, self));
             let path = {
                 let overrides = PackOverrides::shared_read(&self.shared().overrides);
@@ -379,20 +580,20 @@ impl ScriptApiLookup for LuaPackDesc {
                 PackPoi::from_marker_unchecked(
                     PackMarkerRef::new_unchecked(pack, path),
                     self.path(),
-                    self.shared_arc(),
+                    self.share_state(),
                 )
             }))
         })
         .and_then(|res| res)
     }
-    fn trail_by_guid<G>(&self, guid: G) -> script::Result<Option<Self::Trail>>
+    fn trail_by_guid<G>(&self, guid: G, map_filter: Option<u32>) -> script::Result<Option<Self::Trail>>
     where
         G: ScriptUserGuid,
     {
         guid.try_with_guid(|guid| {
             let pack = self.shared().get_pack()?;
             let trail = PackArc::from_ref(&pack)
-                .trail_by_guid(guid)?
+                .trail_by_guid(guid, map_filter)?
                 .map(|p| PackTrail::new(p, self));
             let path = {
                 let overrides = PackOverrides::shared_read(&self.shared().overrides);
@@ -408,21 +609,21 @@ impl ScriptApiLookup for LuaPackDesc {
                 PackTrail::from_marker_unchecked(
                     PackMarkerRef::new_unchecked(pack, path),
                     self.path(),
-                    self.shared_arc(),
+                    self.share_state(),
                 )
             }))
         })
         .and_then(|res| res)
     }
-    fn pathable_by_guid<G>(&self, guid: G) -> script::Result<Option<Self::Pathable>>
+    fn pathable_by_guid<G>(&self, guid: G, map_filter: Option<u32>) -> script::Result<Option<Self::Pathable>>
     where
         G: ScriptUserGuid,
     {
         guid.try_with_guid(|guid| {
             let pack = self.shared().get_pack()?;
-            let poi = PackArc::from_ref(&pack).poi_by_guid(guid)?;
+            let poi = PackArc::from_ref(&pack).poi_by_guid(guid, map_filter)?;
             let trail = match &poi {
-                None => Some(PackArc::from_ref(&pack).trail_by_guid(guid)?),
+                None => Some(PackArc::from_ref(&pack).trail_by_guid(guid, map_filter)?),
                 _ => None,
             };
             let path = {
@@ -435,14 +636,14 @@ impl ScriptApiLookup for LuaPackDesc {
                             PackMarker::from_marker_unchecked(
                                 marker,
                                 self.path(),
-                                self.shared_arc(),
+                                self.share_state(),
                             )
                         }))
                     }
                 }
                 let trail = match trail {
                     Some(t) => t,
-                    None => PackArc::from_ref(&pack).trail_by_guid(guid)?,
+                    None => PackArc::from_ref(&pack).trail_by_guid(guid, map_filter)?,
                 };
                 if let Some(trail) = trail {
                     let path = (MarkerType::Trail, trail.trail_idx());
@@ -452,7 +653,7 @@ impl ScriptApiLookup for LuaPackDesc {
                             PackMarker::from_marker_unchecked(
                                 marker,
                                 self.path(),
-                                self.shared_arc(),
+                                self.share_state(),
                             )
                         }))
                     }
@@ -462,7 +663,7 @@ impl ScriptApiLookup for LuaPackDesc {
             let Some(path) = path else { return Ok(None) };
             Ok(Some(unsafe {
                 let marker = PackMarkerRef::new_unchecked(pack, path);
-                PackMarker::from_marker_unchecked(marker, self.path(), self.shared_arc())
+                PackMarker::from_marker_unchecked(marker, self.path(), self.share_state())
             }))
         })
         .and_then(|res| res)
@@ -481,14 +682,55 @@ impl ScriptApiLookup for LuaPackDesc {
             None => None,
         }
         .map(|m| unsafe {
-            PackMarker::from_marker_unchecked(m, self.path(), self.shared_arc())
+            PackMarker::from_marker_unchecked(m, self.path(), self.share_state())
         }))
     }
-    fn pathables_by_guid<G>(&self, guid: G) -> script::Result<Self::PathablesByGuid<'_>>
+    fn pathables_by_guid<G>(&self, guid: G, map_filter: Option<u32>) -> script::Result<Self::PathablesByGuid<'_>>
     where
         G: ScriptUserGuid,
     {
-        script::script_unimpl!("PathablesByGuid")
+        guid.try_with_guid(|guid| {
+            let overrides = PackOverrides::shared_read(&self.shared().overrides);
+            let pack = self.shared().get_pack()?;
+            let pois = pack.pois.iter().enumerate()
+                .filter(|(_, poi)| map_filter.map(|map_id| poi.map_id as u32 == map_id).unwrap_or(true))
+                .filter(|(_, poi)| poi.get_attr_of::<keys::Guid>().map(|g| &*g == guid).unwrap_or(guid.is_empty()));
+            let trails = pack.trails.iter().enumerate()
+                .filter(|(_, trail)| map_filter.map(|map_id| trail.map_id == Some(map_id as _)).unwrap_or(true))
+                .filter(|(_, trail)| trail.get_attr_of::<keys::Guid>().map(|g| &*g == guid).unwrap_or(guid.is_empty()));
+            let pois = pois.filter_map(|(i, _poi)| {
+                let path = (MarkerType::Poi, i);
+                (!overrides.is_masked(path) && overrides.assert_guid(path, guid)).then_some(
+                    path
+                )
+            });
+            let trails = trails.filter_map(|(i, _trail)| {
+                let path = (MarkerType::Trail, i);
+                (!overrides.is_masked(path) && overrides.assert_guid(path, guid)).then_some(
+                    path
+                )
+            });
+            let markers = pois.chain(trails)
+                .map(|path| (path, false));
+            let dynamic = overrides.paths_by_guid(None, guid)
+                .map(|path| (path, true));
+            Ok(markers.chain(dynamic).filter_map(|(path, dynamic)| unsafe {
+                let marker = PackMarkerRef::new_unchecked(pack.clone(), path);
+                if let (Some(target), true) = (map_filter, dynamic) {
+                    let map_id = overrides.overrides.get(&path).map(MarkerOverrides::shared_read)
+                        .and_then(|o| o.get::<keys::GameMap>().flatten().map(|map| *map.get()));
+                    if map_id != Some(keys::GameMap::from(target)) {
+                        return None
+                    }
+                }
+                Some(PackMarker::from_marker_unchecked(
+                    marker,
+                    self.path(),
+                    self.share_state(),
+                ))
+            }).collect::<Vec<_>>())
+        })
+        .and_then(|res| res.map(|pathables| Box::new(pathables.into_iter()) as Box<_>))
     }
 
     fn pois_in_category<I>(&self, cat: I) -> script::Result<Self::CategoryPois<'_>>
@@ -792,7 +1034,7 @@ impl PackHandle for LuaPackDesc {
                     })
                 });
             if let Some((&path, o)) = found_dyn.next() {
-                let shared = self.shared_arc();
+                let shared = self.share_state();
                 unsafe {
                     return Ok(Some(PackCategory {
                         marker: PackMarker {
@@ -881,8 +1123,18 @@ impl PackHandleMut for LuaPackDesc {
         let pack = self.shared().get_pack()?;
         let mut changes = Vec::new();
         let path = {
+            let path = Controller::with_sender(|s| s.pathing.as_ref().and_then(|p| p.shared.packs.packs.borrow().lookup_ref(&self.path().pivot_from()).map(|p| p.info.dynamics.paths.reserve_poi()))).flatten()
+                .context("poi alloc")?;
             let mut overrides = PackOverrides::shared_write(&self.shared().overrides);
-            let path = overrides.allocate_dynamic(MarkerType::Poi, &pack)?;
+            let path = match () {
+                #[cfg(todo)]
+                _ => overrides.allocate_dynamic(MarkerType::Poi, &pack)?,
+                _ => {
+                    let p = marker_index2loc(MarkerIndex::with_poi(path.path));
+                    overrides.allocate_dynamic_post(p);
+                    p
+                },
+            };
             let mut o = overrides
                 .overrides
                 .get(&path)
@@ -892,25 +1144,18 @@ impl PackHandleMut for LuaPackDesc {
             path
         };
 
-        #[cfg(deleteme)]
-        SpaceEvent::ScriptCreate {
-            generation: self.path.generation,
-            pack_idx: self.path.index,
-            marker_path: path,
-        }
-        .try_send();
-        if let Ok(mut pending) = self.shared().pending_start.lock() {
-            if pending.is_empty() {
-                super::LuaMessage::InternalMarkersStarted.try_send();
-            }
-            pending.push(marker_loc2index(path));
-        }
-
         let poi = unsafe {
             let marker = PackMarkerRef::new_unchecked(pack, path);
-            PackPoi::from_marker_unchecked(marker, self.path(), self.shared_arc())
+            PackPoi::from_marker_unchecked(marker, self.path(), self.share_state())
         };
-        poi.marker.notify_allocated();
+        self.with_stash_mut(|stash| {
+            stash.record_start(marker_loc2index(path));
+
+            stash.queue_outbound_pathing(PathingEvent::CommitMarkerLoad {
+                marker_path: poi.marker.pack_path().rel(marker_loc2index(path).path),
+                map_id: None,
+            });
+        });
         poi.marker.notify_change(changes);
         Ok(poi)
     }
@@ -921,8 +1166,18 @@ impl PackHandleMut for LuaPackDesc {
         let pack = self.shared().get_pack()?;
         let mut changes = Vec::new();
         let path = {
+            let path = Controller::with_sender(|s| s.pathing.as_ref().and_then(|p| p.shared.packs.packs.borrow().lookup_ref(&self.path().pivot_from()).map(|p| p.info.dynamics.paths.reserve_trail()))).flatten()
+                .context("trail alloc")?;
             let mut overrides = PackOverrides::shared_write(&self.shared().overrides);
-            let path = overrides.allocate_dynamic(MarkerType::Trail, &pack)?;
+            let path = match () {
+                #[cfg(todo)]
+                _ => overrides.allocate_dynamic(MarkerType::Trail, &pack)?,
+                _ => {
+                    let p = marker_index2loc(MarkerIndex::with_trail(path.path));
+                    overrides.allocate_dynamic_post(p);
+                    p
+                },
+            };
             let mut o = overrides
                 .overrides
                 .get(&path)
@@ -932,19 +1187,17 @@ impl PackHandleMut for LuaPackDesc {
             path
         };
 
-        #[cfg(deleteme)]
-        SpaceEvent::ScriptCreate {
-            generation: self.path.generation,
-            pack_idx: self.path.index,
-            marker_path: path,
-        }
-        .try_send();
-
         let trail = unsafe {
             let marker = PackMarkerRef::new_unchecked(pack, path);
-            PackTrail::from_marker_unchecked(marker, self.path(), self.shared_arc())
+            PackTrail::from_marker_unchecked(marker, self.path(), self.share_state())
         };
-        trail.marker.notify_allocated();
+        trail.marker.shared.with_stash_mut(|s| {
+            s.record_start(marker_loc2index(path));
+            s.queue_outbound_pathing(PathingEvent::CommitMarkerLoad {
+                marker_path: trail.marker.pack_path().rel(marker_loc2index(path).path),
+                map_id: None,
+            });
+        });
         trail.marker.notify_change(changes);
         Ok(trail)
     }
@@ -1001,7 +1254,9 @@ impl PackHandleMut for LuaPackDesc {
                 CategoryId::try_with_full_id(ids).map(|id| (id, parent_ref.map(|(p, ..)| p), id_name))
             });
             let (id, parent_id, name_id) = id.ok_or_else(|| script::format_err!("invalid category id"))?;
-            let path = overrides.allocate_dynamic_cat(id, &pack)?;
+            let path = Controller::with_sender(|s| s.pathing.as_ref().and_then(|p| p.shared.packs.packs.borrow().lookup_ref(&self.path().pivot_from()).map(|p| p.info.dynamics.paths.reserve_category()))).flatten()
+                .context("cat alloc")?;
+            let path = overrides.allocate_dynamic_cat(id, &pack, Some(marker_index2loc(MarkerIndex::with_category(path.path))))?;
             let mut o = overrides
                 .overrides
                 .get(&path)
@@ -1023,19 +1278,17 @@ impl PackHandleMut for LuaPackDesc {
             path
         };
 
-        #[cfg(deleteme)]
-        SpaceEvent::ScriptCreate {
-            generation: self.path.generation,
-            pack_idx: self.path.index,
-            marker_path: path,
-        }
-        .try_send();
-
         let cat = unsafe {
             let marker = PackMarkerRef::new_unchecked(pack, path);
-            PackCategory::from_marker_unchecked(marker, self.path(), self.shared_arc())
+            PackCategory::from_marker_unchecked(marker, self.path(), self.share_state())
         };
-        cat.marker.notify_allocated();
+        cat.marker.shared.with_stash_mut(|s| {
+            s.record_start(marker_loc2index(path));
+            s.queue_outbound_pathing(PathingEvent::CommitMarkerLoad {
+                marker_path: cat.marker.pack_path().rel(marker_loc2index(path).path),
+                map_id: None,
+            })
+        });
         cat.marker.notify_change(changes);
         Ok(cat)
     }
@@ -1049,13 +1302,9 @@ impl PackHandleMut for LuaPackDesc {
         } else {
             o.mask_marker(path);
         }
-        #[cfg(deleteme)]
-        SpaceEvent::ScriptMask {
-            generation: self.path.generation,
-            pack_idx: self.path.index,
-            marker_path: path,
-        }
-        .try_send();
+        self.with_stash_mut(|s| s.queue_outbound_pathing(
+            PathingEvent::MaskMarker { marker: MarkerId::for_marker(poi.marker.pack_marker_index())  }
+        ));
         Ok(())
     }
     fn remove_trail(&self, trail: &Self::Trail) -> script::Result<()> {
@@ -1067,13 +1316,9 @@ impl PackHandleMut for LuaPackDesc {
         } else {
             o.mask_marker(path);
         }
-        #[cfg(deleteme)]
-        SpaceEvent::ScriptMask {
-            generation: self.path.generation,
-            pack_idx: self.path.index,
-            marker_path: path,
-        }
-        .try_send();
+        self.with_stash_mut(|s| s.queue_outbound_pathing(
+            PathingEvent::MaskMarker { marker: MarkerId::for_marker(trail.marker.pack_marker_index())  }
+        ));
         Ok(())
     }
     fn remove_category(&self, cat: &Self::Category) -> script::Result<()> {
@@ -1086,13 +1331,9 @@ impl PackHandleMut for LuaPackDesc {
             o.mask_marker(path);
         }
 
-        #[cfg(deleteme)]
-        SpaceEvent::ScriptMask {
-            generation: self.path.generation,
-            pack_idx: self.path.index,
-            marker_path: path,
-        }
-        .try_send();
+        self.with_stash_mut(|s| s.queue_outbound_pathing(
+            PathingEvent::MaskMarker { marker: MarkerId::for_marker(cat.marker.pack_marker_index())  }
+        ));
 
         Ok(())
     }
@@ -1132,16 +1373,18 @@ impl TextureHandle for PackTexture {}
 #[derive(Debug, Clone)]
 pub struct PackRoot {
     root: PackRootCategories,
-    overrides: PackOverridesShared,
+    shared: PackMarkerState,
 }
 impl PackRoot {
     pub fn with_lua_pack(desc: &LuaPackDesc) -> script::Result<Self> {
+        let shared = desc.share_state();
         Ok(Self {
-            root: PackRootCategories::new(desc.shared().get_pack()?),
-            overrides: desc.shared().overrides.clone(),
+            root: PackRootCategories::new(shared.get_pack()?),
+            shared,
         })
     }
     /// XXX: case-sensitive, ensure callers canonicalize!
+    #[cfg(deleteme)]
     pub fn category_state(pack: &Pack, id: &FullIdRef) -> script::Result<bool> {
         let state = crate::SETTINGS.get().map(|s| {
             let s = s.blocking_read();
@@ -1154,6 +1397,7 @@ impl PackRoot {
         Ok(state.unwrap_or(true))
     }
     /// XXX: case-sensitive, ensure callers canonicalize!
+    #[cfg(deleteme)]
     pub fn category_state_set(id: &FullIdRef, show_hide: Option<bool>) -> script::Result<bool> {
         let mut new_state = show_hide;
         let changed = crate::SETTINGS.get().map(|s| {
@@ -1205,29 +1449,31 @@ impl CategoryHandleMut for PackRoot {
         Ok(self
             .root
             .iter_root_categories()
-            .any(|c| Self::category_state(&self.root.pack, &c.full_id).ok() == Some(true)))
+            .any(|c| {
+                let idx = self.root.pack.categories.all_categories.get_index_of(c.full_id.as_id());
+                idx.and_then(|idx|
+                    PackCategory::configured_cat_state(self.shared.path.pivot_from().rel(idx as CategoryIndex), None).ok()
+                ) == Some(true)
+            })
+        )
     }
     fn show(&self) -> script::Result<()> {
-        let mut res = Ok(());
+        let mut res = None;
         for cat in self.root.iter_root_categories() {
-            if let Err(e) = Self::category_state_set(&cat.full_id, Some(true)) {
-                if res.is_ok() {
-                    res = Err(e)
-                }
-            }
+            res = Some(Ok(()));
+            PathingEvent::CategoryEnableById(self.shared.path.pivot_from(), cat.full_id.to_id_box().into_owned(), Some(true))
+                .try_send();
         }
-        res
+        res.unwrap_or_else(|| Err(script::format_err!("missing root")))
     }
     fn hide(&self) -> script::Result<()> {
-        let mut res = Ok(());
+        let mut res = None;
         for cat in self.root.iter_root_categories() {
-            if let Err(e) = Self::category_state_set(&cat.full_id, Some(false)) {
-                if res.is_ok() {
-                    res = Err(e)
-                }
-            }
+            res = Some(Ok(()));
+            PathingEvent::CategoryEnableById(self.shared.path.pivot_from(), cat.full_id.to_id_box().into_owned(), Some(true))
+                .try_send();
         }
-        res
+        res.unwrap_or_else(|| Err(script::format_err!("missing root")))
     }
 }
 #[derive(Debug, Clone)]
@@ -1242,14 +1488,14 @@ impl PackCategory {
     pub unsafe fn from_marker_unchecked(
         marker: PackMarkerRef,
         pack_path: PackScriptPath,
-        shared: Arc<PackPlugShared>,
+        shared: PackMarkerState,
     ) -> Self {
         Self {
             marker: PackMarker::from_marker_unchecked(marker, pack_path, shared),
         }
     }
     pub fn new(cat: PackCategoryArc, desc: &LuaPackDesc) -> Self {
-        unsafe { Self::from_marker_unchecked(cat.into(), desc.path(), desc.shared_arc()) }
+        unsafe { Self::from_marker_unchecked(cat.into(), desc.path(), desc.share_state()) }
     }
     pub fn category(&self) -> Option<&Category> {
         self.marker
@@ -1259,6 +1505,30 @@ impl PackCategory {
             .all_categories
             .get_index(self.marker.marker_index().path.index() as usize)
             .map(|(_, c)| c)
+    }
+    /// TODO: is this effective or configured state?
+    fn configured_cat_state(path: CategoryPath<PackPath>, defaulttoggle: Option<bool>) -> script::Result<bool> {
+        let cat_path: CategoryPath = path.unscope();
+        let pathing = Controller::with_sender(|s| s.pathing.as_ref().map(|p|
+            p.shared.clone()
+        )).flatten().context("controller offline")?;
+        let (defaulttoggle, config) = {
+            let packs = pathing.packs.packs.borrow();
+            let pack = packs.lookup_ref(&path.root).context("pack unloaded")?;
+            let defaulttoggle = defaulttoggle.or_else(||
+                pack.info.category_info().map(|(c, _)| !c.disabled.contains(cat_path))
+            ).unwrap_or(true);
+            (defaulttoggle, pack.config.clone())
+        };
+        let vis_dev = {
+            let config = config.borrow();
+            config.config.visibility_deviation_for(path.unscope())
+        };
+        let config_vis = defaulttoggle ^ vis_dev.contains(VisibilityFlags::TOGGLE);
+        Ok(config_vis)
+    }
+    fn set_cat_state(path: CategoryPath<PackPath>, state: Option<bool>) {
+        PathingEvent::CategoryEnableSet(path.root, path.unscope(), state).try_send();
     }
 }
 impl CategoryHandle for PackCategory {
@@ -1332,22 +1602,83 @@ impl CategoryHandleMut for PackCategory {
         Ok(())
     }
     fn is_visible(&self) -> script::Result<bool> {
+        let defaulttoggle = self.marker.marker.lookup_override::<keys::DefaultToggle>()
+            .map(|v| bool::from(v.unwrap_or_default()));
+        Self::configured_cat_state(self.marker.pack_path().rel(self.marker.marker_index().path.index_category_unchecked()), defaulttoggle)
+    }
+    fn hide(&self) -> script::Result<()> {
+        Self::set_cat_state(self.marker.pack_path().rel(self.marker.marker_index().path.index_category_unchecked()), Some(false));
+        Ok(())
+    }
+    fn show(&self) -> script::Result<()> {
+        Self::set_cat_state(self.marker.pack_path().rel(self.marker.marker_index().path.index_category_unchecked()), Some(true));
+        Ok(())
+    }
+    #[cfg(deleteme)]
+    fn is_visible(&self) -> script::Result<bool> {
         let id = self.get_id()?;
         Ok(PackRoot::category_state(&self.marker.marker.pack(), &id).ok() == Some(true))
     }
+    #[cfg(deleteme)]
     fn show(&self) -> script::Result<()> {
         let id = self.get_id()?;
         PackRoot::category_state_set(&id, Some(true)).map(drop)
     }
+    #[cfg(deleteme)]
     fn hide(&self) -> script::Result<()> {
         let id = self.get_id()?;
         PackRoot::category_state_set(&id, Some(false)).map(drop)
     }
 }
+#[derive(Clone)]
+pub struct PackMarkerState {
+    shared: Arc<PackPlugShared>,
+    stash: SharedStash,
+}
+impl PackMarkerState {
+    #[inline]
+    pub fn with_stash_mut<R, F>(&self, f: F) -> R where
+        F: FnOnce(&mut PackPlugStash) -> R,
+    {
+        let mut stash = match self.stash.try_borrow_mut() {
+            #[cfg(taimi_debug)]
+            s => s.unwrap(),
+            #[cfg(not(taimi_debug))]
+            s => unsafe { s.unwrap_unchecked() },
+        };
+        f(&mut *stash)
+    }
+    #[inline]
+    pub fn with_stash_ref<R, F>(&self, f: F) -> R where
+        F: FnOnce(&PackPlugStash) -> R,
+    {
+        let stash = match self.stash.try_borrow() {
+            #[cfg(taimi_debug)]
+            s => s.unwrap(),
+            #[cfg(not(taimi_debug))]
+            s => unsafe { s.unwrap_unchecked() },
+        };
+        f(&*stash)
+    }
+}
+impl fmt::Debug for PackMarkerState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("PackMarkerState")
+            .field(&self.shared)
+            .finish()
+    }
+}
+impl ops::Deref for PackMarkerState {
+    type Target = PackPlugShared;
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        &self.shared
+    }
+}
 #[derive(Debug, Clone)]
 pub struct PackMarker {
     marker: PackMarkerMut,
-    shared: Arc<PackPlugShared>,
+    shared: PackMarkerState,
     pack_path: PackScriptPath,
     lpath: Locator<PackMapPath, LoadedMarkerPath>,
 }
@@ -1356,7 +1687,7 @@ impl PackMarker {
     pub unsafe fn from_marker_unchecked(
         marker: PackMarkerRef,
         pack_path: PackScriptPath,
-        shared: Arc<PackPlugShared>,
+        shared: PackMarkerState,
     ) -> Self {
         Self {
             lpath: Self::empty_path_of(pack_path, marker.marker_kind()),
@@ -1390,6 +1721,9 @@ impl PackMarker {
     pub fn marker_index(&self) -> MarkerPath {
         marker_loc2index(self.marker.path())
     }
+    pub fn pack_marker_index(&self) -> MarkerPath<PackPath> {
+        self.marker_index().pivot(self.pack_path())
+    }
     fn empty_path_of(pack_path: PackScriptPath, ty: MarkerType) -> Locator<PackMapPath, LoadedMarkerPath> {
         let ns = marker_ty2ns(ty);
         Locator::with_parts(PackMapPath::with_parts(pack_path.pivot_from(), MapIndex::MAX), Locator::new_path(MarkerIndex::new_invalid(ns)))
@@ -1416,46 +1750,33 @@ impl PackMarker {
         }
     }
 
-    pub fn notify_allocated(&self) {
-        if let Ok(mut markers) = self.shared.active_markers.lock() {
-            let marker = markers.entry(self.marker_index())
-                .or_default();
-            marker.dynamic = true;
-        }
-    }
-    #[cfg(todo)]
-    pub fn notify_allocated(&self, marker_path: MarkerPath) {
-        let lpath = crate::controller::Controller::with_sender(|s| {
-            let mut lpath = None;
-            if let Some(p) = s.pathing.as_ref() {
-                p.shared.gameplay.send_if_modified(|gameplay| {
-                    lpath = gameplay.state.lookup_ref(&self.shared.path)
-                        .and_then(|s| s.as_ref())
-                        .map(|s| match self.marker_index().path.namespace() {
-                            MarkerIndex::NS_CAT => MarkerIndex::with_category(s.categories.len() as _),
-                            MarkerIndex::NS_POI => MarkerIndex::with_poi(s.pois.len() as _),
-                            MarkerIndex::NS_TRAIL => MarkerIndex::with_trail(s.trails.len() as _),
-                        });
-                    false
-                });
-            }
-            lpath
-        }).flatten();
-    }
+    #[inline]
     pub fn notify_change(&self, keys: impl IntoIterator<Item = PackKeyId>) {
-        if let Ok(mut markers) = self.shared.active_markers.lock() {
-            let marker = markers.entry(self.marker_index())
-                .or_default();
-            marker.pending_changes.extend(keys);
-        }
-        #[cfg(deleteme)]
-        SpaceEvent::ScriptOverrideUpdate {
-            generation: self.marker.pack_path.generation,
-            pack_idx: self.marker.pack_path.index,
-            marker_path: self.marker.path(),
-            changed: (Some(key), Default::default()),
-        }.try_send();
+        self.shared.with_stash_mut(|s|
+            s.record_changes(self.marker_index(), keys)
+        );
     }
+}
+impl GetAttrDyn for PackMarker {
+    /// TODO
+    fn has_attr_dyn(&self, key: PackKeyId) -> bool {
+        self.marker.get_attrs_dyn().has_attr_dyn(key)
+            || self.marker.lookup_override_dyn(key).is_some()
+    }
+    /// TODO
+    fn get_attr_dyn_ref(&self, key: PackKeyId) -> Option<&dyn AttrKeyValue> {
+        self.marker.lookup_attr_dyn(key).and_then(|v| match v {
+            Cow::Borrowed(v) => Some(v),
+            _ => None,
+        })
+    }
+    fn get_attr_dyn(&self, key: PackKeyId) -> Option<Cow<'_, dyn AttrKeyValue>> {
+        self.marker.lookup_attr_dyn(key)
+    }
+    #[inline]
+    fn holds_attr_dyn(_: PackKeyId) -> bool { true }
+    #[cfg(todo)]
+    fn iter_attrs_dyn(&self) -> impl Iterator<Item = Cow<'_, dyn AttrKeyValue>> + '_ {}
 }
 #[cfg(deleteme)]
 impl ops::Deref for PackMarker {
@@ -1490,21 +1811,81 @@ impl PathableHandle for PackMarker {
         }
     }
 
-    /// TODO
+    #[cfg(feature = "paths-filter")]
+    fn get_behaviour_filtered(&self) -> script::Result<bool> {
+        let pack_path = self.pack_path();
+        let marker_path = self.marker_index();
+        let marker_id = MarkerId::for_marker(pack_path.rel(marker_path));
+        let hidden = crate::controller::Controller::with_sender(|s| {
+            let gameplay = s.pathing
+                .as_ref()
+                .map(|s| s.shared.gameplay.borrow());
+            let map = gameplay.as_ref().and_then(|gp| gp.map_id.and_then(|map_id|
+                gp.for_ref(pack_path.rel(map_id)).and_then(|(info, map)| map.map(|m| (map_id, info, m)))
+            ));
+            map.map(|(map_id, info, map)| {
+                let map_path = pack_path.rel(map_id);
+                let lpath = info.marker_index(marker_path);
+                let mut mids = [
+                    marker_id,
+                    MarkerId::EMPTY,
+                    MarkerId::EMPTY,
+                ];
+                let mut amt = 1;
+                let mut write = mids.iter_mut().skip(1)
+                    .inspect(|_| amt += 1);
+                if let Some(lpath) = lpath {
+                    if let Some(dest) = write.next() {
+                        *dest = MarkerId::for_marker(map_path.rel(lpath));
+                    }
+                }
+                let guid = self.marker.lookup_override::<keys::Guid>()
+                    .unwrap_or_else(|| lpath
+                        .and_then(|lpath| match lpath.path.namespace() {
+                            MarkerIndex::NS_POI => info.poi_guid_by_index(LoadedPoiPath::new_path(lpath.path.index_poi_unchecked())).cloned(),
+                            MarkerIndex::NS_TRAIL => self.shared.get_pack().ok().and_then(|pack|
+                                pack.trails.get(self.marker.marker_index()).and_then(|t|
+                                    keys::Guid::from_ref(&t.guid).or_empty().cloned()
+                                )),
+                            _ => None,
+                        })
+                    );
+                if let Some(guid) = guid {
+                    if let Some(dest) = write.next() {
+                        *dest = MarkerId::with_uuid(guid.into());
+                    }
+                }
+                map.is_hidden(unsafe { mids.get_unchecked(..amt) })
+            })
+        }).flatten().unwrap_or(false);
+        Ok(hidden)
+    }
+    #[cfg(not(feature = "paths-filter"))]
     fn get_behaviour_filtered(&self) -> script::Result<bool> {
         Ok(false)
     }
 
+    #[cfg(feature = "paths-interact")]
     fn get_focused(&self) -> script::Result<bool> {
-        let shared = crate::controller::Controller::with_sender(|s| {
-            s.scripting
+        let marker_path = self.marker_index();
+        let poi_path = match marker_path.path.namespace() {
+            MarkerIndex::NS_POI => Locator::new_path(marker_path.path.index_poi_unchecked()),
+            _ => return Ok(false),
+        };
+        let poi_path = self.pack_path().rel(poi_path);
+        let focused = crate::controller::Controller::with_sender(|s|
+            s.pathing
                 .as_ref()
-                .and_then(|s| s.plugs_shared.borrow().packs.get(&self.pack_path).cloned())
-        })
-        .flatten()
-        .context("missing pack.shared")?;
-        let Ok(markers) = shared.active_markers.lock() else { return Ok(false) };
-        Ok(markers.get(&self.marker_index()).map(|s| s.focused).unwrap_or(false))
+                .map(|s| s.shared.interact.nearby.borrow().pois
+                    .contains_key(&poi_path)
+                )
+        ).flatten().unwrap_or(false);
+        Ok(focused)
+    }
+    #[cfg(not(feature = "paths-interact"))]
+    fn get_focused(&self) -> script::Result<bool> {
+        log::debug!("interaction focus disabled");
+        Ok(false)
     }
 }
 impl PathableHandleMut for PackMarker {
@@ -1536,14 +1917,14 @@ impl PackPoi {
     pub unsafe fn from_marker_unchecked(
         marker: PackMarkerRef,
         pack_path: PackScriptPath,
-        shared: Arc<PackPlugShared>,
+        shared: PackMarkerState,
     ) -> Self {
         Self {
             marker: PackMarker::from_marker_unchecked(marker, pack_path, shared),
         }
     }
     pub fn new(poi: PackPoiArc, desc: &LuaPackDesc) -> Self {
-        unsafe { Self::from_marker_unchecked(poi.into(), desc.path(), desc.shared_arc()) }
+        unsafe { Self::from_marker_unchecked(poi.into(), desc.path(), desc.share_state()) }
     }
     pub fn poi(&self) -> Option<&Poi> {
         self.marker.marker.pack().pois.get(self.marker.marker_index().path.index() as usize)
@@ -1567,20 +1948,13 @@ impl PathableHandle for PackPoi {
             .map(|v| v.into_owned().into_inner()))
     }
 
+    #[inline]
     fn get_behaviour_filtered(&self) -> script::Result<bool> {
-        Ok(false)
+        self.marker.get_behaviour_filtered()
     }
-
+    #[inline]
     fn get_focused(&self) -> script::Result<bool> {
-        let shared = crate::controller::Controller::with_sender(|s| {
-            s.scripting
-                .as_ref()
-                .and_then(|s| s.plugs_shared.borrow().packs.get(&self.marker.pack_path).cloned())
-        })
-        .flatten()
-        .context("missing pack.shared")?;
-        let Ok(markers) = shared.active_markers.lock() else { return Ok(false) };
-        Ok(markers.get(&self.marker.marker_index()).map(|s| s.focused).unwrap_or(false))
+        self.marker.get_focused()
     }
 }
 impl PathableHandleMut for PackPoi {
@@ -1598,50 +1972,85 @@ impl PathableHandleMut for PackPoi {
                 }
             },
         } }
-        #[cfg(deleteme)]
-        SpaceEvent::ScriptOverrideUpdate {
-            generation: self.marker.pack_path.generation,
-            pack_idx: self.marker.pack_path.index,
-            marker_path: self.marker.path(),
-            changed: (Some(key), Default::default()),
-        }
-        .try_send();
         Ok(())
     }
+    #[cfg(feature = "paths-interact")]
     fn focus(&self) -> script::Result<()> {
-        let shared = crate::controller::Controller::with_sender(|s| {
-            s.scripting
-                .as_ref()
-                .and_then(|s| s.plugs_shared.borrow().packs.get(&self.marker.pack_path).cloned())
-        })
-        .flatten()
-        .context("missing pack.shared")?;
-        let Ok(mut markers) = shared.active_markers.lock() else { return Ok(()) };
-        let status = markers
-            .get_mut(&self.marker.marker_index())
-            .context("marker not present")?;
-        if !status.focused {
-            if let Some(info) = self.marker.marker.lookup_attr::<keys::Info>() {
-                // TODO: if InfoRange < TriggerRange { confirm_still_inside_idk }
-                crate::controller::script::ui::ScriptHostUiX::new().info_notify(&info.0[..], None);
-            }
-        }
-        status.focused = true;
+        let marker_path = self.marker.marker_index();
+        let poi_path = match marker_path.path.namespace() {
+            MarkerIndex::NS_POI => Locator::new_path(marker_path.path.index_poi_unchecked()),
+            _ => return Err(script::format_err!("don't know how to focus {marker_path}")),
+        };
+        let pack_path = self.marker.pack_path();
+        let lpath = crate::controller::Controller::with_sender(|s| {
+            let gp = s.pathing.as_ref().map(|s| s.shared.gameplay.borrow()).and_then(|gp|
+                gp.map_id.map(|map_id| (map_id, gp))
+            );
+
+            gp.and_then(|(map_id, gp)| {
+                let map_path = pack_path.rel(map_id);
+                gp.get_info(map_path)
+                    .and_then(|info| info.poi_index(poi_path))
+                    .map(|lpath| map_path.rel(lpath))
+            })
+        }).flatten().context("marker unloaded")?;
+        self.marker.shared.with_stash_mut(|s| s.queue_outbound_pathing(InteractMessage::Event(
+            InteractionEvent::Nearby { path: poi_path, loaded_path: lpath.map_path(|p| p.path) }
+        )));
         Ok(())
     }
+    #[cfg(feature = "paths-interact")]
     fn unfocus(&self) -> script::Result<()> {
-        let shared = crate::controller::Controller::with_sender(|s| {
-            s.scripting
-                .as_ref()
-                .and_then(|s| s.plugs_shared.borrow().packs.get(&self.marker.pack_path).cloned())
-        })
-        .flatten()
-        .context("missing pack.shared")?;
-        let Ok(mut markers) = shared.active_markers.lock() else { return Ok(()) };
-        let status = markers
-            .get_mut(&self.marker.marker_index())
-            .context("marker not present")?;
-        status.focused = false;
+        let marker_path = marker_loc2index(self.marker.marker.path());
+        let poi_path = match marker_path.path.namespace() {
+            MarkerIndex::NS_POI => Locator::new_path(marker_path.path.index_poi_unchecked()),
+            _ => return Ok(()),
+        };
+        let pack_path = self.marker.pack_path();
+        let lpath = crate::controller::Controller::with_sender(|s| {
+            let gp = s.pathing.as_ref().map(|s| s.shared.gameplay.borrow()).and_then(|gp|
+                gp.map_id.map(|map_id| (map_id, gp))
+            );
+
+            gp.and_then(|(map_id, gp)| {
+                let map_path = pack_path.rel(map_id);
+                gp.get_info(map_path)
+                    .and_then(|info| info.poi_index(poi_path))
+                    .map(|lpath| map_path.rel(lpath))
+            })
+        }).flatten().context("marker unloaded")?;
+        self.marker.shared.with_stash_mut(|s| s.queue_outbound_pathing(InteractMessage::Event(
+            InteractionEvent::Gone { path: poi_path, loaded_path: lpath.map_path(|p| p.path) }
+        )));
+        Ok(())
+    }
+    #[cfg(feature = "paths-interact")]
+    fn interact(&self, auto: bool) -> script::Result<()> {
+        let marker_path = marker_loc2index(self.marker.marker.path());
+        let poi_path = match marker_path.path.namespace() {
+            MarkerIndex::NS_POI => Locator::new_path(marker_path.path.index_poi_unchecked()),
+            _ => return Ok(()),
+        };
+        let pack_path = self.marker.pack_path();
+        let lpath = crate::controller::Controller::with_sender(|s| {
+            let gp = s.pathing.as_ref().map(|s| s.shared.gameplay.borrow()).and_then(|gp|
+                gp.map_id.map(|map_id| (map_id, gp))
+            );
+
+            gp.and_then(|(map_id, gp)| {
+                let map_path = pack_path.rel(map_id);
+                gp.get_info(map_path)
+                    .and_then(|info| info.poi_index(poi_path))
+                    .map(|lpath| map_path.rel(lpath))
+            })
+        }).flatten().context("marker unloaded")?;
+        let action = match auto {
+            true => InteractionEventAction::AutoTrigger,
+            false => InteractionEventAction::Interact,
+        };
+        self.marker.shared.with_stash_mut(|s| s.queue_outbound_pathing(InteractMessage::Event(
+            InteractionEvent::Interact { path: poi_path, loaded_path: lpath.map_path(|p| p.path), action }
+        )));
         Ok(())
     }
 }
@@ -1732,14 +2141,14 @@ impl PackTrail {
     pub unsafe fn from_marker_unchecked(
         marker: PackMarkerRef,
         pack_path: PackScriptPath,
-        shared: Arc<PackPlugShared>,
+        shared: PackMarkerState,
     ) -> Self {
         Self {
             marker: PackMarker::from_marker_unchecked(marker, pack_path, shared),
         }
     }
     pub fn new(trail: PackTrailArc, desc: &LuaPackDesc) -> Self {
-        unsafe { Self::from_marker_unchecked(trail.into(), desc.path(), desc.shared_arc()) }
+        unsafe { Self::from_marker_unchecked(trail.into(), desc.path(), desc.share_state()) }
     }
     pub fn trail(&self) -> Option<&Trail> {
         self.marker.marker.pack().trails.get(self.marker.marker_index().path.index() as usize)
@@ -1764,33 +2173,105 @@ impl PathableHandle for PackTrail {
     }
 
     fn get_behaviour_filtered(&self) -> script::Result<bool> {
-        Ok(false)
+        self.marker.get_behaviour_filtered()
     }
 }
 impl PathableHandleMut for PackTrail {
     fn set_marker_attr_dyn(&self, v: PackValueCell) -> script::Result<()> {
         let key = v.id();
+        #[cfg(deleteme)]
+        log::debug!("trail.{key} = something");
         self.marker.marker.overrides_write().attrs.set_attr_dyn(v);
         self.marker.notify_change([key]);
-        #[cfg(deleteme)]
-        SpaceEvent::ScriptOverrideUpdate {
-            generation: self.marker.pack_path.generation,
-            pack_idx: self.marker.pack_path.index,
-            marker_path: self.marker.path(),
-            changed: (Some(key), Default::default()),
-        }
-        .try_send();
         Ok(())
+    }
+    fn focus(&self) -> script::Result<()> {
+        self.unfocus()
+    }
+    fn unfocus(&self) -> script::Result<()> {
+        script::bail!("how2focus trail?")
+    }
+    fn interact(&self, _: bool) -> script::Result<()> {
+        script::bail!("how2interact trail?")
     }
 }
 impl TrailHandle for PackTrail {}
 impl TrailHandleMut for PackTrail {
+    #[cfg(feature = "space")]
     fn set_points<P>(&self, points: P) -> script::Result<()>
     where
         //P: ScriptUserIterable,
         P: IntoIterator<Item = Vec3>,
     {
-        log::warn!("TODO: Trail::SetPoints");
+        use {
+            crate::controller::{
+                pathing::{registry::PackLoader, state::LoadedTrail, shared::{LoadReport, LoadedTrailSection}, PathingEvent},
+                Controller,
+            },
+            taimi_hoard::vec::vec32_eq,
+            taimi_pack::trail::{TrailData, TrailSection},
+            glamour::Point3,
+        };
+        let path = match self.marker.marker_index() {
+            p if p.path.namespace() == MarkerIndex::NS_TRAIL => Locator::new_path(p.path.trail_index_unchecked()),
+            p => return Err(script::format_err!("{p} not trail")),
+        };
+        let pack_path = self.marker.pack_path();
+        let lpath = Controller::with_sender(|s| s.pathing.as_ref().and_then(|p|
+            p.shared.gameplay.borrow().get_info_for(pack_path).and_then(|(map_path, map_info)| map_info.trail_index(path).map(|lp| map_path.rel(lp)))
+        )).flatten().context("trail unloaded")?;
+        let mut sections = Vec::new();
+        let mut section = Vec::<Point3<f32>>::new();
+        for point in points.into_iter().map(Point3::<f32>::from) {
+            if vec32_eq(point, Point3::ZERO) {
+                // section delimiter
+                sections.push(mem::take(&mut section));
+                continue
+            }
+            section.push(point.into());
+        }
+        sections.retain(|s| !s.is_empty());
+        let trl = TrailData {
+            header: Default::default(),
+            sections: sections.into_iter().filter_map(|s| match s.is_empty() {
+                true => None,
+                false => Some(TrailSection::with_points(s)),
+            }).collect(),
+        };
+        #[cfg(todo)]
+        let attrs = self;
+        let attrs = &self.marker as &dyn GetAttrDyn;
+        /*let scale = match self {
+            #[cfg(todo)]
+            s => s.get_marker_attr_dyn(keys::TrailScale::pack_key_of()),
+            s => s.marker.marker.lookup_attr::<keys::TrailScale>().map(|s|
+                s.into_owned()
+            ).unwrap_or_default().into(),
+        };
+        let is_wall = match self {
+            #[cfg(todo)]
+            s => s.get_marker_attr_dyn(keys::IsWall::pack_key_of()),
+            s => s.marker.marker.lookup_attr::<keys::IsWall>().map(|s|
+                s.into_owned()
+            ).unwrap_or_default().into(),
+        };*/
+        let params = crate::SETTINGS.get().and_then(|s| s.blocking_read().pathing.as_ref().map(|p| PackLoader::trail_params_for(p))).unwrap_or_default();
+        let y_off = 0.0;
+        let geo = LoadedTrail::load_with_data(
+            &trl,
+            &params,
+            attrs,
+            y_off,
+        );
+        let res = LoadReport::TrailGeometry {
+            section_info: Some(trl.sections.iter().map(LoadedTrailSection::with_section).collect()),
+            path: lpath,
+            geometry: Ok(geo),
+        };
+        self.marker.shared.with_stash_mut(|s| s.queue_outbound_pathing(PathingEvent::ReportResourceLoaded(
+            res
+        )));
+
         Ok(())
     }
 }
@@ -1927,8 +2408,7 @@ impl IntoUserHandle for PackMarker {
             m.to_lua_handle(lua)
         } else {
             Err(to_lua_error(script::format_err!(
-                "unknown pathable {}#{}",
-                self.marker.marker_kind(),
+                "unknown pathable {}",
                 self.marker.marker_index()
             )))
         }

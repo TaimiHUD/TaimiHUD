@@ -1,5 +1,6 @@
 use {
     crate::script::{
+        pathing::MapID,
         script_unimpl,
         value::{Size2U, TickSpan, TimeSpan, Vec2, Vec3},
         Result,
@@ -76,7 +77,7 @@ pub trait ScriptApiMumble {
         script_unimpl!()
     }
 
-    fn map_id(&self) -> Result<u32> {
+    fn map_id(&self) -> Result<MapID> {
         script_unimpl!()
     }
     fn map_is_competitive(&self) -> Result<bool> {

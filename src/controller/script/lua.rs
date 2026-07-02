@@ -1,17 +1,11 @@
 #[cfg(feature = "paths-lua")]
 use {
     crate::{
-        controller::script::{pathing::{marker_index2loc, LuaPackDesc}, PackScriptPath},
+        controller::script::{pathing::LuaPackDesc, PackScriptPath},
         controller::pathing::registry::PackPath,
     },
     core::num::NonZero,
     taimi_hoard::lazyfmt,
-    taimi_pack::{
-        script::pathing::{
-            imp::{MarkerOverrides, MarkerOverridesAttrs, PackMarkerRef, PackOverrides},
-            ScriptApiUser,
-        },
-    },
     taimi_meta::packs::MarkerPath,
     tokio::sync::mpsc,
 };
@@ -54,7 +48,7 @@ use {
     taimi_meta::map::MapID,
     taimi_pack::{
         attributes::{
-            cell::{pack_attr, AttrKeyValue, GetAttrDyn, GetAttrDynExt, PackKeyId, PackValueCell},
+            cell::{pack_attr, GetAttrDyn, PackKeyId, PackValueCell},
             keys,
         },
         category::{id, CategoryId},
@@ -89,8 +83,6 @@ pub struct LuaController {
     /// latest/previous tick event time
     pub timestamp_tick: Instant,
     pub prev_tick: u32,
-    /// hack
-    pub signal_markers_started: bool,
 }
 impl LuaController {
     pub fn new(rx: mpsc::Receiver<LuaMessage>, plugs_shared: watch::Sender<PlugsShared>) -> Self {
@@ -105,7 +97,6 @@ impl LuaController {
             timestamp_start: Instant::now(),
             timestamp_tick: Instant::now(),
             prev_tick: 0,
-            signal_markers_started: false,
         }
     }
     pub fn run_new(
@@ -117,11 +108,7 @@ impl LuaController {
     pub fn run(&mut self) -> anyhow::Result<()> {
         while !self.exiting {
             let mut notif = Some(ScriptNotification::Nop);
-            let incoming = if self.signal_markers_started {
-                Ok(LuaMessage::InternalMarkersStarted)
-            } else {
-                self.rx.try_recv()
-            };
+            let incoming = self.rx.try_recv();
             let mut msg = match incoming {
                 #[cfg(feature = "paths-lua")]
                 Ok(
@@ -149,7 +136,11 @@ impl LuaController {
                 'pack: for desc in &mut self.packs {
                     match (desc.received, next) {
                         (ScriptSignal::Ended, _) => continue 'pack,
-                        (ScriptSignal::Pending, ScriptNotification::Nop) => continue 'pack,
+                        (ScriptSignal::Pending, ScriptNotification::Nop) => {
+                            if !desc.poll_idle(lua) {
+                                continue 'pack
+                            }
+                        },
                         (ScriptSignal::Started | ScriptSignal::Resume | _, _) => (),
                     }
                     let Some(thread) = rt::log::warn_ok(desc.running()) else {
@@ -165,7 +156,11 @@ impl LuaController {
                 'plug: for desc in &mut self.plugs {
                     match (desc.received, next) {
                         (ScriptSignal::Ended, _) => continue 'plug,
-                        (ScriptSignal::Pending, ScriptNotification::Nop) => continue 'plug,
+                        (ScriptSignal::Pending, ScriptNotification::Nop) => {
+                            if !desc.poll_idle(lua) {
+                                continue 'plug
+                            }
+                        },
                         (ScriptSignal::Started | ScriptSignal::Resume | _, _) => (),
                     }
                     let Some(thread) = rt::log::warn_ok(desc.running()) else {
@@ -178,10 +173,6 @@ impl LuaController {
                         still_waiting |= true;
                     }
                 }
-            }
-            #[cfg(todo = "unnecessary")]
-            if self.signal_markers_started {
-                still_waiting = true;
             }
             if msg.is_none() && !still_waiting {
                 msg = self
@@ -224,39 +215,6 @@ impl LuaController {
                 self.prev_tick = tick;
                 let args = vec![Box::new(Some(args)) as Box<dyn IntoLuaMut + Send>];
                 Some(LuaMessage::NotifyScriptWith { id, context, args })
-            },
-            #[cfg(feature = "paths-lua")]
-            LuaMessage::InternalMarkersStarted => {
-                let mut processed = None;
-                self.signal_markers_started = false;
-                for pack in &self.packs {
-                    {
-                        // XXX: HACK!
-                        if let Ok(mut active) = pack.shared().active_markers.lock() {
-                            for (&path, s) in active.iter_mut() {
-                                s.flush_changes_to(pack.shared(), path);
-                            }
-                        }
-                    }
-                    let Ok(mut pending) = pack.shared().pending_start.lock() else { continue };
-                    if pending.is_empty() {
-                        continue
-                    }
-                    if processed.is_some() {
-                        // more than one pack wants attention
-                        self.signal_markers_started = true;
-                        break
-                    }
-                    let markers = core::mem::take(&mut *pending);
-                    processed = Some(LuaMessage::NotifyMapEnter {
-                        target: pack.path(),
-                        map_id: 0,
-                        active_markers: Box::new(IntoIterator::into_iter(markers.into_boxed_slice()))
-                            as Box<_>,
-                        append: true,
-                    });
-                }
-                processed
             },
             m => Some(m),
         }
@@ -444,241 +402,6 @@ impl LuaController {
                 let () = res.with_context(|| format!("notifying {context} {id:?}"))?;
             },
             #[cfg(feature = "paths-lua")]
-            LuaMessage::InternalMarkersStarted => {
-                self.signal_markers_started = true;
-            },
-            #[cfg(feature = "paths-lua")]
-            LuaMessage::RefreshMarkerFocus { and_interact } => {
-                use taimi_pack::script::pathing::imp::MarkerType;
-
-                let playerpos = rt::mumble_link_ptr().ok().map(|ml| {
-                    glam::Vec3A::from_array(unsafe { *&raw const (*ml.as_ptr()).avatar.position })
-                });
-                let Some(playerpos) = playerpos else { return Ok(true) };
-                let mut good_enough = false;
-                let mut msg_queue = Vec::new();
-                for desc in &self.packs {
-                    let Ok(mut active) = desc.shared().active_markers.try_lock() else { continue };
-                    let mut focused = active.iter_mut().filter(|(_, s)| s.focused).peekable();
-                    if focused.peek().is_none() {
-                        continue
-                    }
-                    let Some(pack) = desc.shared().get_pack().ok() else { continue };
-                    let Some(overrides) = PackOverrides::shared_try_read(&desc.shared().overrides) else {
-                        continue
-                    };
-                    for (&tag, status) in focused {
-                        let path @ (MarkerType::Poi, idx) = marker_index2loc(tag.path) else {
-                            continue
-                        };
-                        let o = overrides.overrides.get(&path).map(MarkerOverrides::shared_read);
-                        let mo;
-                        let attrs = match (pack.pois.get(idx), o.as_ref()) {
-                            (Some(poi), Some(o)) => {
-                                mo = MarkerOverridesAttrs::wrap_with_overrides(poi, &*o);
-                                &mo as &dyn GetAttrDyn
-                            },
-                            (None, Some(o)) => &o.attrs as &_,
-                            (Some(poi), None) => poi as &_,
-                            (None, None) => continue,
-                        };
-                        let pos = glam::Vec3A::new(
-                            attrs
-                                .clone_attr_dyn_of::<keys::PositionX>()
-                                .and_then(|v| v.into_value())
-                                .unwrap_or_default()
-                                .into(),
-                            attrs
-                                .clone_attr_dyn_of::<keys::PositionY>()
-                                .and_then(|v| v.into_value())
-                                .unwrap_or_default()
-                                .into(),
-                            attrs
-                                .clone_attr_dyn_of::<keys::PositionZ>()
-                                .and_then(|v| v.into_value())
-                                .unwrap_or_default()
-                                .into(),
-                        );
-                        let range = attrs
-                            .clone_attr_dyn_of::<keys::TriggerRange>()
-                            .and_then(|v| v.into_value())
-                            .map(f32::from)
-                            .or_else(|| {
-                                attrs
-                                    .clone_attr_dyn_of::<keys::InfoRange>()
-                                    .and_then(|v| v.into_value())
-                                    .map(f32::from)
-                            })
-                            .unwrap_or(keys::TriggerRange::DEFAULT.into());
-                        if playerpos.distance_squared(pos) > range.powi(2) {
-                            status.focused = false;
-                            if attrs.has_attr_dyn_of::<keys::ScriptFocus>() {
-                                let msg = ScriptMessage::marker_event_bool(
-                                    ScriptNotification::PathingFocus,
-                                    false,
-                                    tag,
-                                    desc.path.pivot_from(),
-                                );
-                                match msg {
-                                    ScriptMessage::Lua(m) => {
-                                        msg_queue.push(m);
-                                    },
-                                    #[cfg(todo = "unnecessary")]
-                                    m => m.try_send(),
-                                    _ => (),
-                                }
-                            }
-                            continue
-                        }
-                        let seems_interactive = || {
-                            attrs.has_attr_dyn_of::<keys::ScriptTrigger>()
-                                || attrs.has_attr_dyn_of::<keys::CopyValue>()
-                                || attrs.has_attr_dyn_of::<keys::Info>()
-                        };
-                        if and_interact && seems_interactive() {
-                            let msg = ScriptMessage::marker_event_bool(
-                                ScriptNotification::PathingTrigger,
-                                false,
-                                tag,
-                                    desc.path.pivot_from(),
-                            );
-                            match msg {
-                                ScriptMessage::Lua(m) => {
-                                    msg_queue.push(m);
-                                },
-                                #[cfg(todo = "unnecessary")]
-                                m => m.try_send(),
-                                _ => (),
-                            }
-                            if let Some(copy) = attrs
-                                .clone_attr_dyn_of::<keys::CopyValue>()
-                                .and_then(|v| v.into_value())
-                            {
-                                if !copy[..].is_empty() {
-                                    let msg = attrs
-                                        .clone_attr_dyn_of::<keys::CopyMessage>()
-                                        .and_then(|v| v.into_value());
-                                    super::ui::ScriptHostUiX::new()
-                                        .set_clipboard(&copy.0[..], msg.as_ref().map(|m| &m.0[..]));
-                                }
-                            }
-                            #[cfg(todo)]
-                            if let Some(info) = attrs
-                                .clone_attr_dyn_of::<keys::Info>()
-                                .and_then(|v| v.into_value())
-                            {
-                                super::ui::ScriptHostUiX::new().info_notify(&info.0[..], None);
-                            }
-                        }
-                        good_enough |= range < 10.0;
-                    }
-                }
-                #[cfg(todo)]
-                let focus = (!good_enough).then_some(self.packs.iter()).into_iter().flatten();
-                let focus = self.packs.iter();
-                for desc in focus {
-                    // otherwise, try to find something...
-                    let Ok(mut active) = desc.shared().active_markers.try_lock() else { continue };
-                    if active.is_empty() {
-                        continue
-                    }
-                    let Some(pack) = desc.shared().get_pack().ok() else { continue };
-                    let Some(overrides) = PackOverrides::shared_try_read(&desc.shared().overrides) else {
-                        continue
-                    };
-                    for (&tag, status) in active.iter_mut() {
-                        if status.focused {
-                            continue
-                        }
-                        let path @ (MarkerType::Poi, idx) = marker_index2loc(tag.path) else {
-                            continue
-                        };
-                        let o = overrides.overrides.get(&path).map(MarkerOverrides::shared_read);
-                        let mo;
-                        let attrs = match (pack.pois.get(idx), o.as_ref()) {
-                            (Some(poi), Some(o)) => {
-                                mo = MarkerOverridesAttrs::wrap_with_overrides(poi, &*o);
-                                &mo as &dyn GetAttrDyn
-                            },
-                            (None, Some(o)) => &o.attrs as &_,
-                            (Some(poi), None) => poi as &_,
-                            (None, None) => continue,
-                        };
-                        let wants_focus_event = attrs.has_attr_dyn_of::<keys::ScriptFocus>();
-                        let auto_trigger = || -> bool {
-                            attrs
-                                .clone_attr_dyn_of::<keys::AutoTrigger>()
-                                .and_then(|v| v.into_value())
-                                .unwrap_or_default()
-                                .into()
-                        };
-                        let seems_interactive = attrs.has_attr_dyn_of::<keys::CopyValue>()
-                            || attrs.has_attr_dyn_of::<keys::Info>()
-                            || attrs.has_attr_dyn_of::<keys::ScriptTrigger>()
-                            || wants_focus_event;
-                        if !seems_interactive && !auto_trigger() {
-                            continue
-                        }
-                        let pos = glam::Vec3A::new(
-                            attrs
-                                .clone_attr_dyn_of::<keys::PositionX>()
-                                .and_then(|v| v.into_value())
-                                .unwrap_or_default()
-                                .into(),
-                            attrs
-                                .clone_attr_dyn_of::<keys::PositionY>()
-                                .and_then(|v| v.into_value())
-                                .unwrap_or_default()
-                                .into(),
-                            attrs
-                                .clone_attr_dyn_of::<keys::PositionZ>()
-                                .and_then(|v| v.into_value())
-                                .unwrap_or_default()
-                                .into(),
-                        );
-                        let range = attrs
-                            .clone_attr_dyn_of::<keys::TriggerRange>()
-                            .and_then(|v| v.into_value())
-                            .map(f32::from)
-                            .or_else(|| {
-                                attrs
-                                    .clone_attr_dyn_of::<keys::InfoRange>()
-                                    .and_then(|v| v.into_value())
-                                    .map(f32::from)
-                            })
-                            .unwrap_or(keys::TriggerRange::DEFAULT.into());
-                        if playerpos.distance_squared(pos) <= range.powi(2) {
-                            status.focused = true;
-                            if wants_focus_event {
-                                let msg = ScriptMessage::marker_event_bool(
-                                    ScriptNotification::PathingFocus,
-                                    true,
-                                    tag,
-                                    desc.path.pivot_from(),
-                                );
-                                match msg {
-                                    ScriptMessage::Lua(m) => {
-                                        msg_queue.push(m);
-                                    },
-                                    #[cfg(todo = "unnecessary")]
-                                    m => m.try_send(),
-                                    _ => (),
-                                }
-                            }
-                            if let Some(info) = attrs
-                                .clone_attr_dyn_of::<keys::Info>()
-                                .and_then(|v| v.into_value())
-                            {
-                                super::ui::ScriptHostUiX::new().info_notify(&info.0[..], None);
-                            }
-                        }
-                    }
-                }
-                for m in msg_queue {
-                    let _ = rt::log::warn_ok(self.process_message(m));
-                }
-            },
-            #[cfg(feature = "paths-lua")]
             LuaMessage::NotifyMapEnter { target, map_id, active_markers, append } => {
                 let map_id = match NonZero::new(map_id) {
                     None if append => Some(None),
@@ -687,15 +410,6 @@ impl LuaController {
                 };
                 if let Some(map_id) = map_id {
                     self.start_map_markers(target, map_id, active_markers)?;
-                }
-            },
-            #[cfg(feature = "paths-lua")]
-            LuaMessage::DebugFlushMarkerChanges(target) => {
-                let desc = Self::locate_pack_mut(&mut self.packs, target)?;
-                let shared = desc.shared();
-                let mut active = shared.active_markers.lock().ok().context("poison")?;
-                for (&path, s) in active.iter_mut() {
-                    s.flush_changes_to(shared, path);
                 }
             },
             #[cfg(feature = "paths-lua")]
@@ -737,10 +451,15 @@ impl LuaController {
                         let target = context.get_plug_index();
                         let desc = Self::locate_plug_mut(&mut self.plugs, target)?;
                         let idx = unsafe { (&*desc as *const LuaPlugDesc).offset_from_unsigned(base) };
+                        let reload_path = desc.entry_path.clone();
                         let res = self.runtime.as_ref().context("lualess")
                             .and_then(|lua| desc.exit(lua))
                             .with_context(|| format!("stopping {desc}"));
                         self.plugs.swap_remove(idx);
+                        self.plugs_shared.send_modify(|shared| {
+                            shared.plugs.remove(&target);
+                            shared.available_plugs.insert(reload_path);
+                        });
                         res
                     },
                     #[cfg(feature = "paths-lua")]
@@ -753,6 +472,10 @@ impl LuaController {
                             .and_then(|lua| desc.exit(lua))
                             .with_context(|| format!("stopping {desc}"));
                         self.packs.swap_remove(idx);
+                        self.plugs_shared.send_modify(|shared| {
+                            shared.packs.remove(&target);
+                            shared.available_packs.insert(target.pivot_from());
+                        });
                         res
                     },
                     _ => anyhow::bail!("how to stop {context}?"),
@@ -867,8 +590,8 @@ impl LuaController {
     #[inline]
     fn locate_plug_mut(plugs: &mut [LuaPlugDesc], loc: PlugPath) -> anyhow::Result<&mut LuaPlugDesc> {
         let idx = match plugs.get(loc.path as usize) {
-            Some(p) if p.index == loc => Some(loc.path as usize),
-            _ => plugs.iter().position(|p| p.index == loc),
+            Some(p) if p.index() == loc => Some(loc.path as usize),
+            _ => plugs.iter().position(|p| p.index() == loc),
         };
         idx.map(|idx| unsafe { plugs.get_unchecked_mut(idx) })
             .with_context(|| format!("lost plug#{loc}"))
@@ -884,10 +607,10 @@ impl LuaController {
     #[inline]
     fn locate_plug(plugs: &[LuaPlugDesc], loc: PlugPath) -> anyhow::Result<&LuaPlugDesc> {
         match plugs.get(loc.path as usize) {
-            Some(p) if p.index == loc => Some(p),
+            Some(p) if p.index() == loc => Some(p),
             _ => None,
         }
-        .or_else(|| plugs.iter().find(|p| p.index == loc))
+        .or_else(|| plugs.iter().find(|p| p.index() == loc))
         .with_context(|| format!("lost plug#{loc}"))
     }
     fn context_plug<'a>(
@@ -982,7 +705,7 @@ impl LuaController {
                 pack_globals,
                 shared,
             ),
-            path: pack_path.pivot_from(),
+            stash: Default::default(),
         };
 
         let runner = {
@@ -996,14 +719,6 @@ impl LuaController {
             main
         }
         .context("preparing pack.lua loader")?;
-
-        #[cfg(deleteme)]
-        SpaceEvent::ScriptStart {
-            generation,
-            pack_idx,
-            shared: pack_info.shared_arc(),
-        }
-        .try_send();
 
         runner
             .call::<LuaCallable>((
@@ -1032,7 +747,7 @@ impl LuaController {
         }
         .unwrap_or(name.as_ref());
         { entrypoint }.read_to_end(&mut main_lua).context("reading src")?;
-        let dir = path.parent().unwrap_or(path);
+        let entry_path = Arc::<Path>::from(path);
 
         let lua = {
             let _ = self.init_lua()?;
@@ -1057,10 +772,11 @@ impl LuaController {
             Some(lua::UnsafeRuntime) => chunk,
         }
         .into_function()?;
-        let index = PlugPath::new_path(self.plug_count as PlugIndex);
+        let index: PlugPath = PlugPath::new_path(self.plug_count as PlugIndex);
         let mut plug_info = LuaPlugDesc {
-            index,
-            dir: dir.into(),
+            #[cfg(todo = "unnecessary")]
+            dir: path.parent().unwrap_or(path),
+            entry_path,
             base: LuaPlugBase::with_globals(
                 pack_globals,
                 PlugSharedData::with_name(index.pivot_from(), &name.to_string_lossy()[..]),
@@ -1133,7 +849,7 @@ impl LuaController {
         }
         if desc.received != ScriptSignal::Ended {
             self.plugs_shared.send_modify(|shared| {
-                shared.plugs.insert(desc.index, desc.shared_arc());
+                shared.plugs.insert(desc.index(), desc.shared_arc());
             });
             self.plugs.push(desc);
         }
@@ -1149,116 +865,16 @@ impl LuaController {
     where
         I: IntoIterator<Item = MarkerPath>,
     {
-        use mlua::ObjectLike;
-
         let mut markers = markers.into_iter().peekable();
         if markers.peek().is_none() {
             return Ok(())
         }
 
-        let lua = self.runtime.as_ref().context("lualess")?;
+        let Some(lua) = self.runtime.as_ref() else { return Ok(()) };
 
-        let desc = Self::locate_pack_mut(&mut self.packs, target)?;
-        let pack = desc.shared().get_pack()?;
-        let _ = desc.running()?;
-        let overrides = desc.shared().overrides.clone();
-
-        // TODO: lol
-        let eventloop = desc
-            .globals
-            .get::<mlua::Table>("Taimi")?
-            .get::<mlua::Table>("ctx")?
-            .get::<mlua::Table>("events")?;
-
-        let shared = desc.shared_arc();
-        let mut marker_focus = shared.active_markers.try_lock().ok();
-        if let Some(map_id) = map_id {
-            if let Some(focus) = &mut marker_focus {
-                focus.clear();
-            }
-            // event loop may want to clean up prior to receiving new set of handlers...
-            let res = desc.notify_with(lua, ScriptNotification::PathingMapExit, (map_id.get(),));
-            let _ = rt::log::error_ok(res);
-        }
-
-        let key_once = keys::ScriptOnce::pack_key_of();
-        for marker_path in markers {
-            let loc = marker_index2loc(marker_path.path);
-            if let Some(focus) = &mut marker_focus {
-                let _ = focus.entry(marker_path).or_default();
-            }
-            let marker = unsafe { PackMarkerRef::new_unchecked(pack.clone(), loc) };
-            let overrides = PackOverrides::shared_read(&overrides);
-            let attrs_o;
-            let o = overrides.overrides.get(&loc).map(MarkerOverrides::shared_read);
-            let attrs = match o.as_ref() {
-                None => marker.get_attrs_dyn(),
-                Some(o) => {
-                    attrs_o = MarkerOverridesAttrs::wrap_with_overrides(&marker, o);
-                    &attrs_o as &_
-                },
-            };
-            let script_attrs = [
-                (keys::ScriptFocus::pack_key_of(), ScriptNotification::PathingFocus),
-                (
-                    keys::ScriptFilter::pack_key_of(),
-                    ScriptNotification::PathingFilterMarker,
-                ),
-                (
-                    keys::ScriptTrigger::pack_key_of(),
-                    ScriptNotification::PathingTrigger,
-                ),
-                (
-                    keys::ScriptTick::pack_key_of(),
-                    ScriptNotification::PathingTickMarker,
-                ),
-                (key_once, ScriptNotification::PathingLoadMarker),
-            ];
-            /// ew but they're all repr(transparent) to the same type so let's skip some pain...
-            unsafe fn script_cell_to_str(cell: &dyn AttrKeyValue) -> &keys::Script {
-                let inconspicuous_whisling = cell as &dyn core::any::Any;
-                &*(inconspicuous_whisling as *const _ as *const keys::Script)
-            }
-            let mut has_once = false;
-            let markertag = marker_path.path.repr();
-            let guid = attrs.clone_attr_dyn_of::<keys::Guid>();
-            let name = lazyfmt::fmt_fn(|f| {
-                if let Some(guid) = &guid {
-                    write!(f, "{guid}")
-                } else {
-                    write!(f, "{}#{}", loc.0, loc.1)
-                }
-            });
-            for (key, id) in script_attrs {
-                let Some(attr) = attrs.get_attr_dyn(key) else { continue };
-                if key == key_once {
-                    has_once = true;
-                }
-                let attr = unsafe { script_cell_to_str(&*attr) };
-                let name = format!("{name}/{key}");
-                let args = lua.prepare_script_attr_args(&name, attr[..].as_bytes(), desc.globals.clone());
-                let Some((fname, lazyargs)) = rt::log::warn_ok(args) else { continue };
-                let globals = desc.globals.clone();
-                let callback = desc.globals.get::<mlua::Function>(&fname).or_else(|_| {
-                    lua.lua().create_function(move |_lua, a: mlua::MultiValue| {
-                        mlua::ErrorContext::with_context(globals.get::<mlua::Function>(&fname), |_| {
-                            format!("{key} handler {}() missing", fname.display())
-                        })
-                        .and_then(move |f| f.call::<()>(a))
-                    })
-                })?;
-                eventloop.call_method::<()>("RegisterMarkerAttr", (id, markertag, callback, lazyargs))?;
-            }
-            if has_once {
-                // TODO: maybe schedule for next tick instead?
-                let res = desc
-                    .notify_with(lua, ScriptNotification::PathingLoadMarker, (markertag,))
-                    .with_context(|| format!("{name}/{key_once}"));
-                let _ = rt::log::warn_ok(res);
-            }
-        }
-
-        Ok(())
+        let Ok(desc) = Self::locate_pack_mut(&mut self.packs, target) else { return Ok(()) };
+        if desc.running().is_err() { return Ok(()) }
+        desc.start_map_markers(lua, map_id, &mut markers)
     }
 }
 
@@ -1304,18 +920,6 @@ pub enum LuaMessage {
         active_markers: Box<dyn Iterator<Item = MarkerPath> + Send>,
         append: bool,
     },
-    #[cfg(feature = "paths-lua")]
-    DebugFlushMarkerChanges(PackScriptPath),
-    #[cfg(todo)]
-    SpawnPlug(String, Box<dyn std::io::BufRead>),
-    /// signals that [PackPlugShared.pending_start] has some entries to process
-    #[cfg(feature = "paths-lua")]
-    InternalMarkersStarted,
-    /// typically to prepare to process interaction
-    #[cfg(feature = "paths-lua")]
-    RefreshMarkerFocus {
-        and_interact: bool,
-    },
 }
 impl LuaMessage {
     pub fn try_send(self) {
@@ -1335,21 +939,21 @@ impl LuaMessage {
             _ => false,
         }
     }
-
+}
+impl ScriptMessage {
     /// TODO: compare based on next scheduled interest, skip if idle, etc
     pub fn tick(ui_tick: Option<u32>) -> Option<Self> {
         match ui_tick {
             #[cfg(feature = "paths-lua")]
-            _ => Some(Self::NotifyScript0 {
+            _ => Some(LuaMessage::NotifyScript0 {
                 id: ScriptNotification::PathingTick,
                 context: ScriptIndex::GLOBAL,
-            }),
+            }.into()),
             #[cfg(not(feature = "paths-lua"))]
             _ => None,
         }
     }
-}
-impl ScriptMessage {
+
     pub fn menu_clicked_with(id: CategoryId, context: ScriptPath) -> Self {
         let args = vec![Box::new(Some(id)) as Box<dyn taimi_pack::script::lua::IntoLuaMut + Send>];
         LuaMessage::NotifyScriptWith {
@@ -1399,6 +1003,9 @@ impl LuaPlugBase {
             _ => true,
         }
     }
+    /// true would indicate to continue poking even though [Self::wants_poll] may indicate idling
+    #[inline(always)]
+    pub fn poll_idle(&mut self, _: &RuntimeLua) -> bool { false }
     pub fn running(&self) -> anyhow::Result<&LuaCallable> {
         match self.received {
             ScriptSignal::Ended => None,
@@ -1575,8 +1182,9 @@ impl fmt::Debug for LuaPlugBase {
 #[derive(Debug, Clone)]
 pub struct LuaPlugDesc {
     pub base: LuaPlugBase,
+    #[cfg(todo = "unnecessary")]
     pub dir: Arc<Path>,
-    pub index: PlugPath,
+    pub entry_path: Arc<Path>,
 }
 impl LuaPlugDesc {
     pub fn spun(
@@ -1608,6 +1216,7 @@ impl LuaPlugDesc {
                 (id, ev)
             },
         };
+        self.state().update_status(id);
         match id {
             ScriptSignal::Started | ScriptSignal::Pending | ScriptSignal::Resume => (),
             ScriptSignal::Ended => {
@@ -1655,7 +1264,9 @@ impl LuaPlugDesc {
     }
 
     pub fn get_loader(&self) -> script::Result<impl taimi_pack::PackLoaderContext + '_> {
-        Ok(DirectoryLoader::new(&*self.dir))
+        self.entry_path.parent()
+            .context("no parent")
+            .map(DirectoryLoader::new)
     }
     pub fn shared_arc(&self) -> Arc<PlugSharedData> {
         unsafe {
@@ -1667,6 +1278,9 @@ impl LuaPlugDesc {
     }
     pub fn shared(&self) -> &PlugSharedData {
         unsafe { <dyn PlugSharedRef>::as_plug_unchecked(&*self.base.shared) }
+    }
+    pub fn index(&self) -> PlugPath {
+        self.base.shared().path.path.get_plug_index()
     }
 }
 impl script::pathing::ScriptApiPack for LuaPlugDesc {

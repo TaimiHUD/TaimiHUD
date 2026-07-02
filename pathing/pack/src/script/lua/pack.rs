@@ -20,6 +20,7 @@ use {
                 CategoryHandleMut,
                 InstanceTexture,
                 InstanceVec3,
+                MapFilterArg,
                 MarkerType,
                 MenuInstance,
                 PackHandle,
@@ -394,9 +395,9 @@ where
     where
         U: Borrow<T>,
     {
-        reg.add_method("PathableByGuid", |lua, this, (guid,): (LuaGuid,)| {
+        reg.add_method("PathableByGuid", |lua, this, (guid,filter): (LuaGuid,MapFilterArg)| {
             this.borrow()
-                .pathable_by_guid(guid)
+                .pathable_by_guid(guid, filter)
                 .map_err(to_lua_error)
                 .and_then(|h| h.map(|h| h.to_lua_handle(lua)).transpose())
         });
@@ -406,21 +407,21 @@ where
                 .map_err(to_lua_error)
                 .and_then(|h| h.map(|h| h.to_lua_handle(lua)).transpose())
         });
-        reg.add_method("PathablesByGuid", |lua, this, (guid,): (LuaGuid,)| {
+        reg.add_method("PathablesByGuid", |lua, this, (guid,filter): (LuaGuid,MapFilterArg)| {
             this.borrow()
-                .pathables_by_guid(guid)
+                .pathables_by_guid(guid, filter)
                 .map_err(to_lua_error)
                 .and_then(|b| lua.create_sequence_from(b.into_iter().map(|b| HandleToLua(b))))
         });
-        reg.add_method("MarkerByGuid", |lua, this, (guid,): (LuaGuid,)| {
+        reg.add_method("MarkerByGuid", |lua, this, (guid,filter): (LuaGuid,MapFilterArg)| {
             this.borrow()
-                .poi_by_guid(guid)
+                .poi_by_guid(guid, filter)
                 .map_err(to_lua_error)
                 .and_then(|h| h.map(|h| h.to_lua_handle(lua)).transpose())
         });
-        reg.add_method("TrailByGuid", |lua, this, (guid,): (LuaGuid,)| {
+        reg.add_method("TrailByGuid", |lua, this, (guid,filter): (LuaGuid,MapFilterArg)| {
             this.borrow()
-                .trail_by_guid(guid)
+                .trail_by_guid(guid, filter)
                 .map_err(to_lua_error)
                 .and_then(|h| h.map(|h| h.to_lua_handle(lua)).transpose())
         });

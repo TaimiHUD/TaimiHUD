@@ -51,6 +51,7 @@ pub struct EventTarget {
 pub enum UntypedArgs {
     Empty,
     Int(isize),
+    Bool(bool),
     #[cfg(feature = "scripts-lua")]
     Lua(Box<dyn lua::IntoLuaMultiMut + Send>),
     #[cfg(todo)]
@@ -63,6 +64,7 @@ impl fmt::Debug for UntypedArgs {
         match self {
             Self::Empty => f.field(&()),
             Self::Int(v) => f.field(&v),
+            Self::Bool(v) => f.field(&v),
             #[cfg(feature = "scripts-lua")]
             Self::Lua(..) => f.field(&"LuaValue"),
             #[cfg(todo)]

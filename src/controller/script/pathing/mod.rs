@@ -1,10 +1,14 @@
 #[cfg(feature = "paths-lua")]
 use {
-    crate::controller::script::{
-        event::ScriptNotification,
-        lua::LuaMessage,
+    crate::{
+        controller::script::{
+            event::ScriptNotification,
+            lua::LuaMessage,
+            ScriptController,
+        },
+        exports::runtime as rt,
     },
-    taimi_meta::map::MapID,
+    taimi_meta::{packs::MapIndex, map::MapID},
     taimi_pack::{category::id::CategoryId, script::lua::RuntimeLua},
 };
 use {
@@ -12,25 +16,26 @@ use {
         pathing::{
             shared::SharedPackLoad,
             registry::{LoadedMarkerPath, PackPath, SharedLoaderBox},
+            PathingEvent,
         },
         script::{id::{PackScriptPath, ScriptIndex}, PlugSharedData, ScriptMessage},
         Controller,
     },
     anyhow::Context,
-    core::fmt,
+    core::{fmt, mem},
     std::{
         collections::{BTreeMap, BTreeSet},
-        sync::{Arc, Mutex},
+        sync::Arc,
     },
     taimi_pack::{
-        attributes::{keys, cell::{PackKeyId, GetAttrDyn, SetAttrDyn, PackValueCell, PackValueOf, pack_attr}, RenderAttributes},
+        attributes::{keys, cell::{PackKeyId, GetAttrDyn, SetAttrDyn, PackValueCell, PackValueOf, PackKeySet, pack_attr}, RenderAttributes},
         pack::Pack,
         script::{
             self,
             pathing::imp::{MarkerLoc, MarkerType, PackOverridesShared, PackOverrides, MarkerOverrides},
         },
     },
-    taimi_meta::packs::{MarkerIndex, MarkerPath, CategoryIndex, VisibilityFlags},
+    taimi_meta::packs::{MarkerIndex, MarkerId, MarkerPath, CategoryIndex, VisibilityFlags},
     taimi_hoard::loc::LocationRef,
 };
 
@@ -45,22 +50,11 @@ pub type LuaPackDesc = ();
 #[cfg(feature = "paths-lua")]
 pub const PACK_ENTRYPOINT: &'static str = RuntimeLua::PACK_ENTRYPOINT;
 
-#[cfg(deleteme)]
-pub type WeakLoader = Weak<tokio::sync::Mutex<Box<dyn PackLoaderContext + Send + 'static>>>;
 pub struct PackPlugShared {
     pub plug: PlugSharedData,
     pub path: PackScriptPath,
-    #[cfg(deleteme)]
-    pub pack: Weak<Pack>,
     pub load: SharedPackLoad,
-    #[cfg(deleteme)]
-    pub loader: WeakLoader,
     pub overrides: PackOverridesShared,
-    /// fresh (dynamic) markers that may need script attr events registered
-    ///
-    /// TODO: this should remain private on pack desc local state, like a RefCell at most
-    pub(super) pending_start: Mutex<Vec<MarkerPath>>,
-    pub(super) active_markers: Mutex<BTreeMap<MarkerPath, PoiStatus>>,
 }
 impl PackPlugShared {
     #[inline]
@@ -83,12 +77,8 @@ impl PackPlugShared {
             path,
             load,
             overrides: Default::default(),
-            pending_start: Default::default(),
-            active_markers: Default::default(),
         }
     }
-}
-impl PackPlugShared {
     pub fn get_pack(&self) -> script::Result<Arc<Pack>> {
         self.load.loaded.borrow().pack.clone()
             .context("pack unloaded")
@@ -119,340 +109,141 @@ impl fmt::Debug for PackPlugShared {
     }
 }
 
-#[derive(Clone)]
-pub(super) struct PoiStatus {
-    pub focused: bool,
-    pub dynamic: bool,
-    #[cfg(todo = "unnecessary")]
-    pub filtered: bool,
-    pub lpath: LoadedMarkerPath,
-    pub pending_changes: BTreeSet<PackKeyId>,
+/// private implementation details
+#[derive(Default)]
+pub(super) struct PackPlugStash {
+    /// fresh markers that may need script attr events registered
+    pub pending_start: BTreeSet<MarkerPath>,
+    pub pending_changes: BTreeMap<MarkerPath, PackKeySet>,
+    pub outbound_pathing: PathingEvent,
+    pub changes_dirty: bool,
 }
-impl PoiStatus {
-    pub fn flush_changes_to(&mut self, shared: &PackPlugShared, marker_path: MarkerPath) {
-        if self.pending_changes.is_empty() { return }
-        let gp = Controller::with_sender(|s| s.pathing.as_ref().map(|s| s.shared.gameplay.clone())).flatten();
-        let Some(gp) = gp else { return };
-        let changes = {
-            let o = PackOverrides::shared_read(&shared.overrides)
-                .overrides.get(&marker_index2loc(marker_path.path)).cloned();
-            o.as_ref().map(MarkerOverrides::shared_read).map(|o|
-                self.pending_changes.iter().filter_map(|&key| o.get_dyn(key).map(|v| (key, v.and_then(|v| v.clone_dyn()).map(PackValueCell::from_box)))).collect::<Vec<_>>()
-            )
-        };
-        let Some(changes) = changes else {
-            return
-        };
-        self.pending_changes.clear();
-        gp.send_if_modified(|gp| {
-            #[cfg(todo)]
-            if gp.map_id != Some(map_id) { return }
-            let (Some(map_info), map) = gp.for_pack_mut(shared.path.pivot_from()) else {
-                return false
-            };
-            let lpath = if self.lpath.path == MarkerIndex::UNK {
-                if self.dynamic {
-                    MarkerPath::new_path(match marker_path.path.namespace() {
-                        MarkerIndex::NS_POI => MarkerIndex::with_poi(map_info.pois[..].len() as _),
-                        MarkerIndex::NS_TRAIL => MarkerIndex::with_trail(map_info.trails[..].len() as _),
-                        MarkerIndex::NS_CAT => MarkerIndex::with_category(map_info.categories[..].len() as _),
-                        _ => {
-                            return false
-                        },
-                    })
-                } else {
-                    let Some(idx) = map_info.marker_index(marker_path) else {
-                        return false
-                    };
-                    self.lpath = idx;
-                    self.lpath
-                }
-            } else {
-                self.lpath
-            };
-            let idx = lpath.path.index() as usize;
-            let (mut pois, mut pois_state, mut poi) = (Vec::<crate::controller::pathing::info::LoadedPoiInfo>::new(), None, None);
-            let (mut trails, mut trails_state, mut trail) = (Vec::<crate::controller::pathing::info::LoadedTrailInfo>::new(), None, None);
-            let (mut cats, mut cats_state, mut cat) = (Vec::<u32>::new(), None, None);
-            match lpath.path.namespace() {
-                MarkerIndex::NS_POI => {
-                    pois_state = map.as_mut().and_then(|map| if map.pois[..].len() <= idx {
-                        let mut pois = map.pois[..].to_owned();
-                        let init = crate::controller::pathing::shared::LoadedPoiShared {
-                            visibility: VisibilityFlags::all(),
-                            position: Default::default(),
-                        };
-                        pois.resize(idx + 1, init);
-                        Some(pois)
-                    } else {
-                        None
-                    });
-                    pois = map_info.pois[..].to_owned();
-                    if pois.len() <= idx {
-                        pois.resize_with(idx + 1, Default::default);
-                    }
-                    let poi = poi.insert(unsafe {
-                        pois.get_unchecked_mut(idx)
-                    });
-                    if poi.category_path.path == CategoryIndex::MAX {
-                        if let Some((cat_info, ..)) = shared.load.info.category_info() {
-                            if let Some(root) = cat_info.root_paths().next() {
-                                poi.marker_info.category_path = root;
-                            }
-                        }
-                    }
-                },
-                MarkerIndex::NS_TRAIL => {
-                    trails_state = map.as_mut().and_then(|map| if map.trails[..].len() <= idx {
-                        let mut trails = map.trails[..].to_owned();
-                        let init = crate::controller::pathing::shared::LoadedTrailShared {
-                            visibility: VisibilityFlags::all(),
-                        };
-                        trails.resize(idx + 1, init);
-                        Some(trails)
-                    } else {
-                        None
-                    });
-                    trails = map_info.trails[..].to_owned();
-                    if trails.len() <= idx {
-                        trails.resize_with(idx + 1, Default::default);
-                    }
-                    let trail = trail.insert(unsafe {
-                        trails.get_unchecked_mut(idx)
-                    });
-                    if trail.category_path.path == CategoryIndex::MAX {
-                        if let Some((cat_info, ..)) = shared.load.info.category_info() {
-                            if let Some(root) = cat_info.root_paths().next() {
-                                trail.marker_info.category_path = root;
-                            }
-                        }
-                    }
-                },
-                MarkerIndex::NS_CAT => {
-                    cats_state = map.as_mut().and_then(|map| if map.categories[..].len() <= idx {
-                        let mut cats = map.categories[..].to_owned();
-                        cats.resize_with(idx + 1, Default::default);
-                        Some(cats)
-                    } else {
-                        None
-                    });
-                    cats = map_info.categories[..].to_owned();
-                    let resizing = cats.len() <= idx;
-                    if resizing {
-                        cats.resize_with(idx + 1, Default::default);
-                    }
-                    let cat = cat.insert(unsafe {
-                        cats.get_unchecked_mut(idx)
-                    });
-                    if resizing {
-                        **cat = marker_path.path.index();
-                    }
-                },
-                _ => {
-                    return false
-                },
-            }
-            let mut modified = false;
-            for (key, value) in changes {
-                let applied = pack_attr! { match =id_is(key) {
-                    = keys::CategoryRef => {
-                        // TODO
-                        Some(false)
-                    },
-                    = keys::DefaultToggle => {
-                        let vis = match lpath.path.namespace() {
-                            MarkerIndex::NS_POI => {
-                                if pois_state.is_none() {
-                                    pois_state = map.as_mut().map(|map| map.pois[..].to_owned());
-                                }
-                                let poi = pois_state.as_mut().map(|pois| unsafe {
-                                    pois.get_unchecked_mut(idx)
-                                });
-                                poi.map(|poi| &mut poi.visibility)
-                            },
-                            MarkerIndex::NS_TRAIL => {
-                                if trails_state.is_none() {
-                                    trails_state = map.as_mut().map(|map| map.trails[..].to_owned());
-                                }
-                                let trail = trails_state.as_mut().map(|trails| unsafe {
-                                    trails.get_unchecked_mut(idx)
-                                });
-                                trail.map(|trail| &mut trail.visibility)
-                            },
-                            MarkerIndex::NS_CAT => {
-                                if cats_state.is_none() {
-                                    cats_state = map.as_mut().map(|map| map.categories[..].to_owned());
-                                }
-                                let cat = cats_state.as_mut().map(|cats| unsafe {
-                                    cats.get_unchecked_mut(idx)
-                                });
-                                cat.map(|cat| &mut cat.visibility)
-                            },
-                            _ => None,
-                        };
-                        let on = value.as_ref().and_then(|v| PackValueOf::<keys::DefaultToggle>::from_cell_ref(v))
-                            .map(|v| *v.get())
-                            .unwrap_or_default();
-                        Some(if let Some(vis) = vis {
-                            vis.set(VisibilityFlags::TOGGLES, on.into());
-                            true
-                        } else { false })
-                    },
-                    = keys::PositionX => Some({
-                        match lpath.path.namespace() {
-                            MarkerIndex::NS_POI => {
-                                if pois_state.is_none() {
-                                    pois_state = map.as_mut().map(|map| map.pois[..].to_owned());
-                                }
-                                let poi = pois_state.as_mut().map(|pois| unsafe {
-                                    pois.get_unchecked_mut(idx)
-                                });
-                                if let Some(poi) = poi {
-                                    poi.position.x = value.as_ref().and_then(|v| PackValueOf::<keys::PositionX>::from_cell_ref(v))
-                                        .map(|v| f32::from(*v.get()))
-                                        .unwrap_or_default();
-                                    true
-                                } else {
-                                    false
-                                }
-                            },
-                            _ => false,
-                        }
-                    }),
-                    = keys::PositionY => Some({
-                        match lpath.path.namespace() {
-                            MarkerIndex::NS_POI => {
-                                if pois_state.is_none() {
-                                    pois_state = map.as_mut().map(|map| map.pois[..].to_owned());
-                                }
-                                let poi = pois_state.as_mut().map(|pois| unsafe {
-                                    pois.get_unchecked_mut(idx)
-                                });
-                                if let Some(poi) = poi {
-                                    poi.position.y = value.as_ref().and_then(|v| PackValueOf::<keys::PositionY>::from_cell_ref(v))
-                                        .map(|v| f32::from(*v.get()))
-                                        .unwrap_or_default();
-                                    true
-                                } else {
-                                    false
-                                }
-                            },
-                            _ => false,
-                        }
-                    }),
-                    = keys::PositionZ => Some({
-                        match lpath.path.namespace() {
-                            MarkerIndex::NS_POI => {
-                                if pois_state.is_none() {
-                                    pois_state = map.as_mut().map(|map| map.pois[..].to_owned());
-                                }
-                                let poi = pois_state.as_mut().map(|pois| unsafe {
-                                    pois.get_unchecked_mut(idx)
-                                });
-                                if let Some(poi) = poi {
-                                    poi.position.z = value.as_ref().and_then(|v| PackValueOf::<keys::PositionZ>::from_cell_ref(v))
-                                        .map(|v| f32::from(*v.get()))
-                                        .unwrap_or_default();
-                                    true
-                                } else {
-                                    false
-                                }
-                            },
-                            _ => false,
-                        }
-                    }),
-                    _ => None,
-                } };
-                if let Some(applied) = applied {
-                    modified |= applied;
-                    continue
-                }
-                let (mut marker_attrs, mut attrs) = (None, None);
-                let info = match lpath.path.namespace() {
-                    MarkerIndex::NS_POI => poi.as_mut().map(|poi| match RenderAttributes::holds_attr_dyn(key) {
-                        true => {
-                            let attrs = attrs.insert(poi.marker_info.attrs_mut());
-                            Arc::make_mut(attrs) as &mut dyn SetAttrDyn
-                        },
-                        false => {
-                            let marker_attrs = marker_attrs.insert(poi.marker_info.marker_attrs_mut());
-                            Arc::make_mut(marker_attrs) as &mut dyn SetAttrDyn
-                        },
-                    }),
-                    MarkerIndex::NS_TRAIL => trail.as_mut().map(|trail| match RenderAttributes::holds_attr_dyn(key) {
-                        true => {
-                            let attrs = attrs.insert(trail.marker_info.attrs_mut());
-                            Arc::make_mut(attrs) as &mut dyn SetAttrDyn
-                        },
-                        false => {
-                            let marker_attrs = marker_attrs.insert(trail.marker_info.marker_attrs_mut());
-                            Arc::make_mut(marker_attrs) as &mut dyn SetAttrDyn
-                        },
-                    }),
-                    MarkerIndex::NS_CAT => {
-                        // TODO?
-                        None
-                    },
-                    _ => None,
-                };
-                let Some(info) = info else {
-                    continue
-                };
-                modified |= info.set_attr_dyn(value.unwrap_or_else(|| PackValueCell::new_empty(key)));
-                if !modified {
-                }
-            }
-            if modified {
-                log::debug!("flushing to {marker_path}");
-                self.lpath = lpath;
-                if !pois.is_empty() {
-                    map_info.pois.data = Arc::from(&pois[..]);
-                    if !map_info.info.pois.get(idx).map(|v| *v).unwrap_or(false) {
-                        let info = Arc::make_mut(&mut map_info.info);
-                        if info.pois.len() <= idx {
-                            info.pois.resize(idx + 1, false);
-                        }
-                        unsafe { *info.pois.get_unchecked_mut(idx) = true; }
-                        //info.info_sig.hash = info.info_sig.hash.wrapping_add(1);
-                    }
-                }
-                if let (Some(pois), Some(map)) = (pois_state, map.as_mut()) {
-                    map.pois.data = Arc::from(&pois[..]);
-                }
-                if !trails.is_empty() {
-                    map_info.trails.data = Arc::from(&trails[..]);
-                    if !map_info.info.trails.get(idx).map(|v| *v).unwrap_or(false) {
-                        let info = Arc::make_mut(&mut map_info.info);
-                        if info.trails.len() <= idx {
-                            info.trails.resize(idx + 1, false);
-                        }
-                        unsafe { *info.trails.get_unchecked_mut(idx) = true; }
-                        //info.info_sig.hash = info.info_sig.hash.wrapping_add(1);
-                    }
-                }
-                if let (Some(trails), Some(map)) = (trails_state, map.as_mut()) {
-                    map.trails.data = Arc::from(&trails[..]);
-                }
-                if !cats.is_empty() {
-                    let info = Arc::make_mut(&mut map_info.info);
-                    info.categories = cats.into_boxed_slice();
-                    info.info_sig.hash = info.info_sig.hash.wrapping_add(1);
-                }
-                if let (Some(cats), Some(map)) = (cats_state, map.as_mut()) {
-                    map.categories = Arc::from(&cats[..]);
-                }
-            }
-            modified
-        });
+impl PackPlugStash {
+    /// TODO: event should be unnecessary if signal any other way...
+    pub fn record_start(&mut self, marker_path: MarkerPath) {
+        self.pending_start.insert(marker_path);
     }
-}
-impl Default for PoiStatus {
-    fn default() -> Self {
-        Self {
-            focused: false,
-            dynamic: false,
-            lpath: LoadedMarkerPath::new_path(MarkerIndex::UNK),
-            pending_changes: Default::default(),
+    pub fn record_changes(&mut self, marker_path: MarkerPath, keys: impl IntoIterator<Item = PackKeyId>) {
+        let dirty = &mut self.changes_dirty;
+        #[cfg(todo = "unnecessary")]
+        let keys = keys.into_iter().inspect(|_| *dirty |= true);
+        *dirty = true;
+        self.pending_changes.entry(marker_path).or_default().extend(keys);
+    }
+    pub fn collect_changes_from(pending: &PackKeySet, shared: &PackPlugShared, marker_path: MarkerPath) -> Option<Vec<PackValueCell>> {
+        let o = PackOverrides::shared_read(&shared.overrides)
+            .overrides.get(&marker_index2loc(marker_path.path)).cloned();
+        o.as_ref().map(MarkerOverrides::shared_read).map(|o|
+            pending.iter().filter_map(|&key| o.get_dyn(key).and_then(|v|
+                match v.map(|v| v.clone_dyn()) {
+                    None => Some(PackValueCell::new_empty(key)),
+                    Some(None) => {
+                        log::warn!("lost {key} to clone");
+                        None
+                    },
+                    Some(Some(v)) => Some(PackValueCell::from_box(v)),
+                }
+            )).collect::<Vec<_>>()
+        )
+    }
+    pub fn drain_changes_for(&mut self, shared: &PackPlugShared, marker_path: MarkerPath) -> Vec<PackValueCell> {
+        let pending = self.pending_changes.get_mut(&marker_path).and_then(|c|
+            (!c.is_empty()).then_some(c)
+        );
+        let Some(pending) = pending else {
+            return Vec::new()
+        };
+        let changes = Self::collect_changes_from(&*pending, shared, marker_path);
+        if changes.is_some() {
+            //pending.clear();
+            self.pending_changes.remove(&marker_path);
+        }
+        #[cfg(deleteme)]
+        if let (MarkerIndex::NS_TRAIL, Some(changes)) = (marker_path.path.namespace(), &changes) {
+            for c in changes {
+                log::debug!("changing a trail key {}", c.id());
+            }
+        }
+        changes.unwrap_or_default()
+    }
+    #[inline]
+    #[cfg(todo = "unused")]
+    pub fn drain_all_changes<'a>(&'a mut self, shared: &'a PackPlugShared) -> impl Iterator<Item = (MarkerPath, Vec<PackValueCell>)> + 'a {
+        Self::drain_all_changes_imp(&mut self.changes_dirty, &mut self.pending_changes, shared)
+    }
+    pub(super) fn drain_all_changes_imp<'a>(dirty: &'_ mut bool, pending: &'a mut BTreeMap<MarkerPath, PackKeySet>, shared: &'a PackPlugShared) -> impl Iterator<Item = (MarkerPath, Vec<PackValueCell>)> + 'a {
+        *dirty = false;
+        pending.iter_mut().filter_map(move |(&path, pending)| {
+            let changes = Self::collect_changes_from(&*pending, shared, path);
+            if changes.is_some() {
+                pending.clear();
+            }
+        #[cfg(deleteme)]
+            if let (MarkerIndex::NS_TRAIL, Some(changes)) = (path.path.namespace(), &changes) {
+                for c in changes {
+                    log::debug!("changing a trail key {}", c.id());
+                }
+            } else if MarkerIndex::NS_TRAIL == path.path.namespace() {
+                log::debug!("trail#{} changes empty?", path.path.trail_index_unchecked());
+            }
+            changes.map(|c| (path, c))
+        })
+    }
+    pub fn prune_changes(&mut self) {
+        self.pending_changes.retain(|_, c|
+            !c.is_empty()
+        );
+        self.changes_dirty = !self.pending_changes.is_empty();
+    }
+    pub fn prepare_map_exit(&mut self) {
+        #[cfg(deleteme)]
+        log::debug!("AAAAAKJNASD preparing map exit!");
+        self.changes_dirty = false;
+        self.pending_changes.clear();
+        self.pending_start = Default::default();
+        self.outbound_pathing = Default::default();
+    }
+    pub fn is_dirty(&self) -> bool { self.changes_dirty | !self.pending_start.is_empty() }
+
+    #[inline]
+    pub fn queue_outbound_pathing(&mut self, event: impl Into<PathingEvent>) {
+        self.outbound_pathing.push(event.into())
+    }
+    #[inline]
+    pub fn process_changes_to_outbound(&mut self, pack_path: PackPath, shared: &PackPlugShared) {
+        if !self.changes_dirty { return }
+        let changes = PackPlugStash::drain_all_changes_imp(&mut self.changes_dirty, &mut self.pending_changes, shared)
+            .map(|(marker_path, changes)| PathingEvent::CommitMarkerAttrs {
+                marker: MarkerId::for_marker(pack_path.rel(marker_path)),
+                write_attrs: Box::new(changes.into_iter()) as Box<_>,
+            });
+        self.outbound_pathing.extend(changes);
+        self.prune_changes();
+    }
+    /// [try_send](crate::controller::pathing::PathingController::try_send) but queue
+    #[inline]
+    pub fn process_outbound_pathing(&mut self) {
+        use tokio::sync::mpsc::error::TrySendError;
+        let outgoing = mem::replace(&mut self.outbound_pathing, PathingEvent::Nop);
+        if let PathingEvent::Nop = outgoing {
+            return
+        }
+        let leftover = Controller::with_sender(|s| match s.pathing.as_ref() {
+            Some(p) => match p.command.try_send(outgoing) {
+                | Ok(())
+                | Err(TrySendError::Closed(..))
+                => PathingEvent::Nop,
+                Err(TrySendError::Full(e)) => {
+                    #[cfg(taimi_debug)]
+                    log::debug!("SPACE QUEUE FULL");
+                    e
+                },
+            },
+            None => PathingEvent::Nop,
+        });
+        match leftover {
+            None | Some(PathingEvent::Nop) => (),
+            Some(e) => self.outbound_pathing = e,
         }
     }
 }
@@ -462,7 +253,7 @@ pub fn marker_index2loc(path: MarkerIndex) -> MarkerLoc {
     let idx = path.index();
     match path.namespace() {
         MarkerIndex::NS_CAT => (MarkerType::Category, idx as _),
-        MarkerIndex::NS_TRAIL => (MarkerType::Trail, idx as _),
+        MarkerIndex::NS_TRAIL => (MarkerType::Trail, path.trail_index_unchecked() as _),
         _ => (MarkerType::Poi, idx as _),
     }
 }
@@ -533,5 +324,52 @@ impl ScriptMessage {
             append: false,
         }
         .into()
+    }
+    pub fn map_left_pack(target: PackPath, left: Option<MapIndex>) -> Self {
+        let map_id = left.map(|l| l.get()).unwrap_or(0);
+        let args = vec![
+            Box::new(Some(map_id))
+                as Box<dyn taimi_pack::script::lua::IntoLuaMut + Send>,
+        ];
+        LuaMessage::NotifyScriptWith {
+            id: ScriptNotification::PathingMapExit,
+            context: ScriptIndex::for_pack(target),
+            args,
+        }.into()
+    }
+}
+#[cfg(feature = "paths-lua")]
+impl ScriptController {
+    pub(super) async fn do_refresh_packs() {
+        let shared = Controller::with_sender(|s|
+            s.pathing.as_ref().map(|p| p.shared.clone())
+            .and_then(|p| s.scripting.as_ref().map(|s| (p, s.plugs_shared.clone())))
+        ).flatten();
+        let Some((pathing, script)) = shared else {
+            // pathing.context("pathing offline")?
+            return
+        };
+        let packs = pathing.packs.packs.borrow().iter()
+            .filter_map(|(path, pack)|
+                pack.loaded.borrow().loader.clone().map(|l| (path, l))
+            ).collect::<Vec<_>>();
+        let packs = packs.into_iter().map(|(path, l)| async move {
+            let has = l.lock().await.contains_asset(PACK_ENTRYPOINT)
+                .context("detecting pack.lua");
+            rt::log::warn_ok(has).unwrap_or(false)
+                .then_some(path)
+        });
+        // TODO: async collect etc
+        let mut avail = std::collections::BTreeSet::new();
+        for pack in packs {
+            if let Some(pack) = pack.await {
+                avail.insert(pack);
+            }
+        }
+        script.send_if_modified(|plugs| {
+            let prev_empty = plugs.available_packs.is_empty();
+            plugs.available_packs = avail;
+            plugs.available_packs.is_empty() != prev_empty
+        });
     }
 }

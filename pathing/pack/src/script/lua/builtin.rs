@@ -11,9 +11,9 @@ impl UserData for ApiCoreRt {
             IntoLuaFn::new(|lua| Ok(LuaValue::Boolean(RuntimeLua::lua_is_unsecured(lua).is_some()))),
         );
         reg.add_field("is_stub", false);
-        reg.add_field("pathing_hack_autotrigger", true);
-        reg.add_field("pathing_hack_interact", true);
-        // TODO: currently hacked into script controller instead
+        // TODO: lol
+        reg.add_field("pathing_hack_autotrigger", false);
+        reg.add_field("pathing_hack_interact", false);
         reg.add_field("pathing_hack_manualtrigger", false);
     }
 }

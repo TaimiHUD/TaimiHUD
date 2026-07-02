@@ -2,6 +2,7 @@
 use {
     crate::controller::script::lua::LuaMessage,
     taimi_hoard::loc::LocationRef,
+    taimi_meta::packs::MarkerPath,
     anyhow::Context,
     taimi_pack::{
         attributes::keys,
@@ -207,36 +208,36 @@ impl<'a> PlugConfig<'a> {
                 ui.same_line();
                 if ui.button(c"reset") {}
             }
+            #[cfg(deleteme)] {
             ui.same_line();
             if ui.button(c"dbgmarkerrefresh") {
                 LuaMessage::DebugFlushMarkerChanges(path).try_send();
+            }
+            }
+            ui.same_line();
+            if ui.button(c"initial map markers") {
+                Controller::with_sender(|s| s.pathing.as_ref().and_then(|p| {
+                    let map = p.shared.gameplay.borrow();
+                    let map_id = map.map_id;
+                    let Some(map_info) = map_id.and_then(|map_id| map.get_info(path.pivot_from().rel(map_id))) else { return None };
+                    let pois = map_info.info.pois()
+                        .map(|poi_path| poi_path.pivot_from());
+                    let trails = map_info.info.trails()
+                        .map(|trail_path| trail_path.pivot_from());
+                    let markers = pois.chain(trails).collect::<Vec<MarkerPath>>();
+                    ScriptMessage::map_prepared_pack(
+                        path.pivot_from(),
+                        map_id.map(|id| id.get()).unwrap_or(0) as u32,
+                        markers,
+                    )
+                    .try_send();
+                    Some(())
+                }));
             }
             #[cfg(todo)]
             if pack.has_scripts() {
                 Self::draw_cats_lua(ui, context, target, pack);
                 ui.same_line();
-                #[cfg(deleteme)]
-                if ui.button(c"reset markers") {
-                    let active_pois = pack
-                        .active_pois
-                        .values()
-                        .filter_map(|poi| (!poi.filtered).then_some(poi.poi_idx))
-                        .collect::<Vec<_>>();
-                    let active_trails = pack
-                        .active_trails
-                        .values()
-                        .filter_map(|trail| (!trail.filtered).then_some(trail.trail_idx))
-                        .collect::<Vec<_>>();
-                    let active_pois = active_pois.into_iter().map(|i| (MarkerType::Poi, i));
-                    let active_trails = active_trails.into_iter().map(|i| (MarkerType::Trail, i));
-                    ScriptMessage::map_prepared_pack(
-                        path.generation,
-                        path.index,
-                        map_id.unwrap_or(0) as u32,
-                        active_pois.chain(active_trails),
-                    )
-                    .try_send();
-                }
             } else {
                 let src = ui
                     .button(c"pack.lua")
@@ -424,19 +425,20 @@ impl<'a> PlugConfig<'a> {
         }
         let node = ui.begin_tree_node_framed(ImCondition::startup(false), c"menus", c"menus", true);
         let Some(_node) = node else { return };
-        ui.indent();
+        //ui.indent();
         for (id, state) in menus.iter() {
             let _id = ui.push_id(id.as_str());
+            ui.unindent();
             if let Some(mut checked) = state.checked {
-                ui.unindent();
                 if ui.checkbox(c"", &mut checked) {
                     ScriptMessage::menu_clicked_with(id.clone(), target).try_send();
                 }
-                ui.indent();
-                ui.same_line();
+            } else if ui.button(c"O") {
+                ScriptMessage::menu_clicked_with(id.clone(), target).try_send();
             }
-            ui.text(format_args!("{id}"));
+            ui.indent();
             ui.same_line();
+            ui.text(format_args!("{id}"));
             ui.text(&state.display_name[..]);
             if let Some(tt) = state.tooltip.as_ref() {
                 if ui.item_is_hovered() {
@@ -444,7 +446,7 @@ impl<'a> PlugConfig<'a> {
                 }
             }
         }
-        ui.unindent();
+        //ui.unindent();
     }
     #[cfg(feature = "scripts-lua")]
     #[cfg(todo)]
@@ -563,12 +565,15 @@ impl<'a> PlugConfig<'a> {
                     shared.available_plugs = found.map(|p| p.into()).collect();
                 });
             }
+            #[cfg(todo)]
             let found_packs = rt::log::error_ok(self.refresh_packs());
+            #[cfg(todo)]
             if let Some(found) = found_packs {
                 self.state.plugs.write_with(|shared| {
                     shared.available_packs = found.map(|p| p.into()).collect();
                 });
             }
+            ScriptMessage::RefreshPacks.try_send();
         }
         let plugs = self.state.plugs.get_mut();
         for path in &plugs.available_plugs {
