@@ -160,6 +160,10 @@ impl<'a, S, A: 'a> I18nRef<'a, S, A> {
     pub const fn from_parts(id: S, args: A) -> Self {
         Self { id, args, _args: PhantomData }
     }
+    #[inline(always)]
+    pub const fn id_name(&self) -> &S {
+        &self.id
+    }
 }
 impl<'a, S, A> I18nRef<'a, S, A>
 where
