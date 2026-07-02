@@ -120,6 +120,14 @@ impl InfoTabState {
         {
             ui.text_wrapped(im_fmt!("Built from {git_head_ref}@{git_hash}{}.", fmt_opt(in_ci)));
         }
+        #[allow(unreachable_patterns)]
+        match () {
+            #[cfg(taimi_debug)]
+            _ => ui.text("debug variant"),
+            #[cfg(taimi_dev)]
+            _ => ui.text("test variant"),
+            _ => (),
+        }
         ui.dummy([4.0, 4.0]);
         ui.text_wrapped(im_fmt!(i18n: "having-issues"));
         ui.dummy([4.0, 4.0]);
@@ -140,8 +148,6 @@ impl InfoTabState {
         let description = env!("CARGO_PKG_DESCRIPTION");
         ui.text_wrapped(description);
         ui.dummy([4.0, 4.0]);
-
-        ui.text_wrapped(fl!("keybind-triggers"));
 
         if let Some((wrap_limit, wrap_y)) = wrap_limit {
             wrap_limit.end();
@@ -279,7 +285,7 @@ impl InfoTabState {
                 }
             }
             let _table = ui.begin_table_with_flags("stats", 2, Default::default());
-            let mut section_prev = 0usize;
+            let mut section_prev = None;
             for (desc, counter) in stats.iter() {
                 if desc.detailed & !detailed {
                     continue
@@ -288,7 +294,7 @@ impl InfoTabState {
                     0 => continue,
                     v => v,
                 };
-                let section = desc.section.as_ptr() as usize;
+                let section = Some(desc.section);
                 if section_prev != section {
                     section_prev = section;
                     ui.table_next_column();
