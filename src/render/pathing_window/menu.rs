@@ -102,27 +102,33 @@ impl PathingWindowState {
                 }
             }
         }
-        #[cfg(feature = "scripts")]
-        {
-            let plugs = crate::controller::Controller::with_sender(|s| {
-                s.scripting
-                    .as_ref()
-                    .map(|s| s.plugs_shared.borrow().plugs.clone())
-            })
-            .flatten()
-            .into_iter()
-            .flat_map(|p| p);
-            for (path, plug) in plugs {
-                let script_menus = plug.menus.shared.read().unwrap_or_else(|e| e.into_inner());
+    }
+    #[cfg(feature = "scripts")]
+    pub fn draw_context_menu_plugs<'ui, U>(
+        &mut self,
+        ui: &mut U,
+        _machine: &mut RenderMachine,
+    ) where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        let plugs = crate::controller::Controller::with_sender(|s| {
+            s.scripting
+                .as_ref()
+                .map(|s| s.plugs_shared.borrow().plugs.clone())
+        })
+        .flatten()
+        .into_iter()
+        .flat_map(|p| p);
+        for (path, plug) in plugs {
+            let script_menus = plug.menus.shared.read().unwrap_or_else(|e| e.into_inner());
 
-                let _id = ui.push_id(std::sync::Arc::as_ptr(&plug));
-                let Some(_token) = ui.begin_menu(&plug.name[..]) else { continue };
-                let clicked = self.draw_context_menu_scripts(ui, &*script_menus, &plug.menus);
-                drop(script_menus);
-                if let Some(clicked) = clicked {
-                    if plug.menus.menu_write(&clicked, |s| s.click_state()).is_some() {
-                        ScriptMessage::menu_clicked_with(clicked, path.pivot_from()).try_send();
-                    }
+            let _id = ui.push_id(std::sync::Arc::as_ptr(&plug));
+            let Some(_token) = ui.begin_menu(&plug.name[..]) else { continue };
+            let clicked = self.draw_context_menu_scripts(ui, &*script_menus, &plug.menus);
+            drop(script_menus);
+            if let Some(clicked) = clicked {
+                if plug.menus.menu_write(&clicked, |s| s.click_state()).is_some() {
+                    ScriptMessage::menu_clicked_with(clicked, path.pivot_from()).try_send();
                 }
             }
         }

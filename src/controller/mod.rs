@@ -869,7 +869,7 @@ impl Controller {
             LoadTextureIntegrated(identifier, data) => self.load_texture_integrated(identifier, data).await,
             UiTick(tick) => {
                 #[cfg(feature = "scripts")]
-                if let Some(m) = script::LuaMessage::tick(Some(tick.ui_tick())) {
+                if let Some(m) = script::ScriptMessage::tick(Some(tick.ui_tick())) {
                     m.try_send();
                 }
 

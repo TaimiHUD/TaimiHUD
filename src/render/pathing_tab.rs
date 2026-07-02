@@ -693,31 +693,46 @@ impl PathingConfig {
             }
             #[cfg(feature = "paths-lua")]
             {
-                let enables = self.enables.get_mut();
-                if ui.checkbox_flags("scripts", enables, PathingEnables::SCRIPTING_LUA) {
+                let (mut en, mut tick_rate, mut autostart, mut unsecured) =
+                    Self::get_pathing(|s| (s.scripting_enable, s.scripting_tick_rate, s.scripting_auto, s.scripting_unsecured))?;
+                // ui.checkbox_flags("scripts", enables, PathingEnables::SCRIPTING_LUA)?
+                if ui.checkbox(c"scripts", &mut en) {
                     Self::set_pathing(|s| {
-                        s.scripting_enable = enables.contains(PathingEnables::SCRIPTING_LUA)
+                        s.scripting_enable = en
                     });
-                    PathingEvent::ScriptsEnable(Some(enables.contains(PathingEnables::SCRIPTING_LUA)))
-                        .try_send();
+                    if en {
+                        machine.plug_ui_state.enabled = en;
+                    }
+                    if autostart | !en {
+                        PathingEvent::ScriptsEnable(Some(en))
+                            .try_send();
+                    }
                 }
                 if ui.item_is_hovered() {
                     ui.tooltip_text("EXPERIMENTAL AND PROBABLY BROKEN");
                 }
-                if enables.contains(PathingEnables::SCRIPTING_LUA) {
-                    let (mut tick_rate, mut autostart) =
-                        Self::get_pathing(|s| (s.scripting_tick_rate, s.scripting_auto))?;
+                if en {
                     ui.same_line();
-                    if ui.checkbox("autostart", &mut autostart) {
+                    if ui.checkbox(c"autostart", &mut autostart) {
                         Self::set_pathing(|s| s.scripting_auto = autostart);
+                        PathingEvent::ScriptsEnable(Some(autostart))
+                            .try_send();
                     }
-                    ui.same_line();
-                    if ui.checkbox_flags("unsecured", enables, PathingEnables::SCRIPTING_UNSECURED) {
-                        Self::set_pathing(|s| {
-                            s.scripting_unsecured = enables.contains(PathingEnables::SCRIPTING_UNSECURED)
-                        });
+                    #[cfg(taimi_debug)]
+                    {
+                        ui.same_line();
+                        if ui.checkbox(c"unsecured", &mut unsecured) {
+                            Self::set_pathing(|s| {
+                                s.scripting_unsecured = unsecured
+                            });
+                            self.enables.write_if(|e| {
+                                e.set(PathingEnables::SCRIPTING_UNSECURED, unsecured);
+                                None
+                            });
+                        }
                     }
-                    if ui.slider("tickrate", &mut tick_rate, 0.0f32..=2.0f32, IM_STR_NONE) {
+                    #[cfg(todo)]
+                    if ui.slider(c"tickrate", &mut tick_rate, 0.0f32..=10.0f32, Some(c"%.01f")) {
                         Self::set_pathing(|s| s.scripting_tick_rate = tick_rate);
                     }
                 }

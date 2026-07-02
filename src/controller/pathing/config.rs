@@ -571,10 +571,15 @@ impl PathingController {
                     .as_ref()
                     .map(|i| Self::can_interact(i))
                     .unwrap_or(false);
+            #[cfg(feature = "paths-lua")]
+            #[cfg(todo = "unnecessary")]
+            let can_interact = can_interact || attrs.script.as_ref().map(|s| s.script_focus.is_some() | s.script_trigger.is_some()).unwrap_or(false);
             if can_interact {
                 return true
             }
         }
+        #[cfg(feature = "paths-lua")]
+        if attrs.script.as_ref().is_some() { return true }
 
         false
     }

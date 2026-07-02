@@ -61,6 +61,7 @@ use {
         UserDataRefMut,
         UserDataRegistry,
         Value as LuaValue,
+        ObjectLike,
     },
     std::io,
 };
@@ -667,6 +668,27 @@ where
         });
         reg.add_field_method_get("PathableTagType", |_lua, this| {
             Ok(this.borrow().pathable_tag_type())
+        });
+        reg.add_meta_function(MetaMethod::Eq.name(), |lua, (lhs,rhs): (LuaValue,LuaValue)| {
+            let lhs = match lhs {
+                LuaValue::Nil => return Ok(false),
+                LuaValue::Integer(idx) => Ok(idx as u32),
+                LuaValue::Table(v) => v.get::<u32>("PathableTagIndex"),
+                LuaValue::UserData(ud) => ud.get::<u32>("PathableTagIndex"),
+                #[cfg(todo)]
+                v => u32::from_lua(v, lua),
+                _ => return Ok(false),
+            }?;
+            let rhs = match rhs {
+                LuaValue::Nil => return Ok(false),
+                LuaValue::Integer(idx) => Ok(idx as u32),
+                LuaValue::Table(v) => v.get::<u32>("PathableTagIndex"),
+                LuaValue::UserData(ud) => ud.get::<u32>("PathableTagIndex"),
+                #[cfg(todo)]
+                v => u32::from_lua(v, lua),
+                _ => return Ok(false),
+            }?;
+            Ok(lhs == rhs)
         });
     }
 }
