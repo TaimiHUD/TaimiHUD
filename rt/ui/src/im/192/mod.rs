@@ -1551,6 +1551,14 @@ impl<'ui> ImDrawWindowStack<'ui> for &'_ Ui<'ui> {
         }
     }
     #[inline]
+    fn window_prepare_scroll(&mut self, offset: ImPos2) {
+        unsafe { sys::igSetNextWindowScroll(ImSpaces(offset).into()) }
+    }
+    #[inline]
+    fn window_prepare_alpha(&mut self, opacity: f32) {
+        unsafe { sys::igSetNextWindowBgAlpha(opacity) }
+    }
+    #[inline]
     fn window_prepare_focus(&mut self) {
         unsafe { sys::igSetNextWindowFocus() }
     }
@@ -1623,6 +1631,12 @@ impl<'ui> ImDrawWindowStack<'ui> for Ui<'ui> {
     }
     fn window_prepare_pos(&mut self, pos: ImPos2<ImSpace>, cond: ImCondition, pivot: ImVec2<f32>) {
         ImDrawWindowStack::window_prepare_pos(&mut &*self, pos, cond, pivot)
+    }
+    fn window_prepare_scroll(&mut self, offset: ImPos2) {
+        ImDrawWindowStack::window_prepare_scroll(&mut &*self, offset)
+    }
+    fn window_prepare_alpha(&mut self, opacity: f32) {
+        ImDrawWindowStack::window_prepare_alpha(&mut &*self, opacity)
     }
     fn window_prepare_focus(&mut self) {
         ImDrawWindowStack::window_prepare_focus(&mut &*self)

@@ -605,6 +605,8 @@ pub trait ImDrawWindowStack<'ui>: ImDraw {
         self.item_prepare_focus(0)
     }
     fn window_prepare_content_size(&mut self, size: ImSize2);
+    fn window_prepare_scroll(&mut self, offset: ImPos2);
+    fn window_prepare_alpha(&mut self, opacity: f32);
     fn window_prepare_collapsed(&mut self, collapsed: bool, cond: ImCondition);
     fn window_prepare_size_constraints(&mut self, min: ImSize2<ImSpace>, max: ImSize2<ImSpace>);
     #[cfg(todo)]
