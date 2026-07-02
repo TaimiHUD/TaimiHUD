@@ -259,7 +259,7 @@ end
 --	end
 --end
 function taimi_util.table_ro(t)
-	taimi_util.metatable_set_from({ __newindex = function(...) error("read-only", 2) end }, t)
+	return taimi_util.metatable_set_from({ __newindex = function(...) error("read-only", 2) end }, t)
 end
 taimi_util.alias_index_to(table, taimi_util.table)
 

@@ -524,6 +524,7 @@ impl LuaController {
         lua.setup_api_version(super::debug::ScriptHostVersion::new())?;
         EmbeddedLuaTaimi::preload_lib(lua, "@taimi/util/init.lua")?;
         EmbeddedLuaTaimi::preload_lib(lua, "@taimi/util/ud.lua")?;
+        EmbeddedLuaTaimi::preload_lib(lua, "@taimi/todo/lson.lua")?;
         lua.setup_api_log(super::debug::ScriptHostDebug::new())?;
         EmbeddedLuaTaimi::preload_lib(lua, "@taimi/debug.lua")?;
         EmbeddedLuaTaimi::preload_lib(lua, "@taimi/bitop.lua")?;
