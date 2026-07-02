@@ -78,6 +78,14 @@ pub trait UiTextExt<'ui>: ImDrawTextStack<'ui> + ImDrawText {
             <dyn ImStr>::write_to(&mut write, &text);
         });
     }
+    fn wrap_display<S>(&mut self, text: &S)
+    where
+        S: fmt::Display,
+        Self: ImDrawText + ImDrawItemStack<'ui>,
+        (): UiFontDyn<'ui, Self>,
+    {
+        ImDrawTextExt::wrap_display_with_font(self, (), text)
+    }
     fn wrap_display_with_font<N, S>(&mut self, font: N, text: &S)
     where
         S: fmt::Display,
