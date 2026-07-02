@@ -272,6 +272,72 @@ impl From<String0> for Cow<'_, Str0> {
         Cow::Owned(c)
     }
 }
+impl<'a> From<&'a Str0> for Cow<'a, str> {
+    #[inline(always)]
+    fn from(c: &'a Str0) -> Self {
+        Cow::Borrowed(c.as_str())
+    }
+}
+impl<'a> From<&'a String0> for Cow<'a, str> {
+    #[inline(always)]
+    fn from(c: &'a String0) -> Self {
+        Cow::Borrowed(c.as_str())
+    }
+}
+impl From<String0> for Cow<'_, str> {
+    #[inline(always)]
+    fn from(c: String0) -> Self {
+        Cow::Owned(c.into_string())
+    }
+}
+impl<'a> From<&'a Str0> for &'a CStr {
+    #[inline(always)]
+    fn from(c: &'a Str0) -> Self {
+        c.as_c_str()
+    }
+}
+impl<'a> From<&'a Str0> for &'a str {
+    #[inline(always)]
+    fn from(c: &'a Str0) -> Self {
+        c.as_str()
+    }
+}
+impl<'a> From<&'a String0> for &'a CStr {
+    #[inline(always)]
+    fn from(c: &'a String0) -> Self {
+        c.as_c_str()
+    }
+}
+impl<'a> From<&'a String0> for &'a str {
+    #[inline(always)]
+    fn from(c: &'a String0) -> Self {
+        c.as_str()
+    }
+}
+impl From<&'_ Str0> for CString {
+    #[inline(always)]
+    fn from(c: &Str0) -> Self {
+        c.as_c_str().to_owned()
+    }
+}
+impl From<String0> for CString {
+    #[inline(always)]
+    fn from(c: String0) -> Self {
+        c.into_c_string()
+    }
+}
+impl<'a> From<&'a Str0> for String {
+    #[inline(always)]
+    fn from(c: &'a Str0) -> Self {
+        c.as_str().into()
+    }
+}
+impl From<String0> for String {
+    #[inline(always)]
+    fn from(c: String0) -> Self {
+        c.into_string()
+    }
+}
 impl Borrow<Str0> for String0 {
     #[inline(always)]
     fn borrow(&self) -> &Str0 {
