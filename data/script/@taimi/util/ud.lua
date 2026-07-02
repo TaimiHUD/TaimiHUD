@@ -20,6 +20,16 @@ function ud.unwrap(v, o)
 	return unwrap(v[key_instance], v)
 end
 unwrap = ud.unwrap
+local unwrap_any
+function ud.unwrap_any(v, o)
+	local ty = type(v)
+	if ty == "table" then return unwrap_any(v[key_instance], v)
+	elseif ty == "nil" then return o
+	-- elseif ty == "userdata" then return v
+	else return v
+	end
+end
+unwrap_any = ud.unwrap_any
 
 function ud.instance_mt.__index(t, k)
 	local v = rawget((rawget(t, key_clz) or t[key_clz]), "i")[k]
@@ -46,6 +56,58 @@ function ud.instance_mt.__tostring(t)
 	else
 		return "userdata"
 	end
+end
+function ud.instance_mt.__call(t, ...)
+	local instance = rawget(t, key_instance) or t[key_instance]
+	if instance == nil then
+		error("not ud", 2)
+	end
+	return instance(...)
+end
+function ud.instance_mt.__len(t)
+	local instance = rawget(t, key_instance) or t[key_instance]
+	if instance == nil then
+		error("not ud", 2)
+	end
+	return #instance
+end
+function ud.instance_mt.__unm(t)
+	local instance = rawget(t, key_instance) or t[key_instance]
+	if instance == nil then
+		error("not ud", 2)
+	end
+	return -instance
+end
+-- TODO: ipairs?
+function ud.instance_mt.__concat(l, r)
+	return unwrap_any(l) .. unwrap_any(r)
+end
+function ud.instance_mt.__eq(l, r)
+	return unwrap_any(l) == unwrap_any(r)
+end
+function ud.instance_mt.__lt(l, r)
+	return unwrap_any(l) < unwrap_any(r)
+end
+function ud.instance_mt.__le(l, r)
+	return unwrap_any(l) <= unwrap_any(r)
+end
+function ud.instance_mt.__add(l, r)
+	return unwrap_any(l) + unwrap_any(r)
+end
+function ud.instance_mt.__sub(l, r)
+	return unwrap_any(l) - unwrap_any(r)
+end
+function ud.instance_mt.__mul(l, r)
+	return unwrap_any(l) * unwrap_any(r)
+end
+function ud.instance_mt.__div(l, r)
+	return unwrap_any(l) / unwrap_any(r)
+end
+function ud.instance_mt.__mod(l, r)
+	return unwrap_any(l) % unwrap_any(r)
+end
+function ud.instance_mt.__pow(l, r)
+	return unwrap_any(l) ^ unwrap_any(r)
 end
 
 function ud.make_ud_wrapper(c_clazz, name, clz)

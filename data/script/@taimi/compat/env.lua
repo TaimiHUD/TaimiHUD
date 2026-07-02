@@ -110,6 +110,20 @@ function Context.pack_for_pack(pack_info_key, Pack, genv)
 			rawset(genv, "Teh", nil)
 		elseif src == "scripts/Utility/Throw Helper" and genv.HMP ~= nil then
 			ok, res = pcall(assets.Require, assets, "scripts/General/Throw Helper.lua")
+		elseif src == "Data/TehsTrails/Scripts/skyscaleinfo.lua" and genv.Teh ~= nil then
+			-- Teh.triggerRangeReduced does not exist and breaks a condition guard
+			-- causes marker+prefs updates every tick if not fixed
+			ok = true
+			res = assets:Require(src)
+			if genv.Teh.skyscale ~= nil then
+				local typo_mt = {}
+				function typo_mt:__index(k)
+					if k == "triggerRangeReduced" then
+						return rawget(self, "skyscale")[k]
+					end
+				end
+				setmetatable(genv.Teh, typo_mt)
+			end
 		end
 		return ok, res
 	end
