@@ -24,6 +24,7 @@ use {
         settings::ui::UiConfig,
     },
     core::fmt,
+    std::{borrow::Cow, sync::Arc},
     taimi_ui::im::{
         self,
         image::ImTexture,
@@ -55,6 +56,7 @@ pub(crate) mod prelude {
             ImContextExt as _,
             ImDrawWindow,
             ImDrawWindowExt as _,
+            ImTextDisplay,
             IntoImStrDisplay as _,
             IntoImTextureD3d as _,
             NexusLinkFont,
@@ -125,6 +127,20 @@ pub trait ImDrawWindow<'ui>:
     fn im_io_mod_keys(&self) -> rt::keyboard::KeyState;
     /// ctrl is held, or super on mac
     fn im_io_key_is_shortcut(&self) -> bool;
+
+    fn im_font_char_replacements(&self, c: char) -> char {
+        match c {
+            '’' => 0xb4u8 as char,
+            c => c,
+        }
+    }
+    fn im_font_has_char(&self, c: char) -> bool {
+        !['’'].contains(&c)
+    }
+    fn im_text_zerowidth8(&self) -> u8;
+    fn im_text_zerowidth(&self) -> char {
+        self.im_text_zerowidth8() as char
+    }
 }
 #[cfg(taimi_imgui = "180")]
 impl<'ui> ImDrawWindow<'ui> for &'_ im::im180::Ui<'ui> {
@@ -154,6 +170,11 @@ impl<'ui> ImDrawWindow<'ui> for &'_ im::im180::Ui<'ui> {
             true => io.key_super,
             false => io.key_ctrl,
         })
+    }
+    /// TODO: check all fonts
+    #[inline]
+    fn im_text_zerowidth8(&self) -> u8 {
+        0x0d
     }
 }
 #[cfg(taimi_imgui = "192")]
@@ -189,6 +210,11 @@ impl<'ui> ImDrawWindow<'ui> for im::im192::Ui<'ui> {
             true => io.KeySuper,
             false => io.KeyCtrl,
         })
+    }
+    /// TODO: check fonts
+    #[inline]
+    fn im_text_zerowidth8(&self) -> u8 {
+        b'\r'
     }
 }
 #[cfg(todo)]
@@ -374,6 +400,175 @@ impl ImTexture for ImguiTexture {
         Some(&self.id)
     }
 }
+
+pub struct ImTextDisplay<'r, T: ?Sized = String> {
+    pub replacements: &'r taimi_hoard::collections::FlatSet<taimi_hoard::cmp::SetPair<char, &'static str>>,
+    pub inner: T,
+}
+impl<'r, T: ?Sized> ImTextDisplay<'r, T> {
+    #[inline]
+    pub fn display_fallback(inner: T) -> Self where
+        T: Sized,
+    {
+        Self {
+            replacements: ImTextDisplay::placeholder_nexus_replacements(),
+            inner,
+        }
+    }
+    /// TODO: track font for imgui context
+    #[inline]
+    pub fn display_for<U>(ui: &mut U, inner: T) -> Self where
+        T: Sized,
+        U: ?Sized + ImDrawWindow<'r>,
+    {
+        Self {
+            replacements: ImTextDisplay::replacements_for(ui),
+            inner,
+        }
+    }
+    #[inline(always)]
+    pub fn format_for<U>(ui: &mut U, inner: T) -> String where
+        U: ?Sized + ImDrawWindow<'r>,
+        T: Sized + fmt::Display
+    {
+        use core::fmt::Write;
+        let mut writer = ImTextDisplay {
+            replacements: ImTextDisplay::replacements_for(ui),
+            inner: Default::default(),
+        };
+        let _ = {
+            let writer = &mut writer as &mut dyn Write;
+            write!(writer, "{inner}")
+        };
+        writer.inner
+    }
+}
+impl<'r> ImTextDisplay<'r> {
+    pub fn display_str<'a, U>(ui: &mut U, s: &'a str) -> Cow<'a, str> where
+        U: ?Sized + ImDrawWindow<'r>,
+    {
+        if s.as_bytes().iter().all(|&b| b <= 0x7f) {
+            return Cow::Borrowed(s)
+        }
+        // TODO: check replacements
+        Cow::Owned(ImTextDisplay::format_for(ui, s))
+    }
+
+    /// need to truncate or omit a utf8 char?
+    /// use this as padding to avoid resizing mutable strings :3
+    pub const IMGUI_ZEROWIDTH_ASCII: u8 = b'\r';
+
+    /// TODO
+    pub fn replacements_for<U>(_ui: &mut U) -> &'r taimi_hoard::collections::FlatSet<taimi_hoard::cmp::SetPair<char, &'static str>> where
+        U: ?Sized + ImDrawWindow<'r>,
+    {
+        ImTextDisplay::placeholder_nexus_replacements()
+    }
+    pub fn placeholder_nexus_replacements() -> &'static taimi_hoard::collections::FlatSet<taimi_hoard::cmp::SetPair<char, &'static str>> {
+        static REPLACEMENTS: std::sync::LazyLock<taimi_hoard::collections::FlatSet<taimi_hoard::cmp::SetPair<char, &'static str>>> = std::sync::LazyLock::new(|| IntoIterator::into_iter([
+            ('’', "\u{b4}"),
+        ]).map(Into::into).collect());
+        &*REPLACEMENTS
+    }
+}
+impl<'r, T> fmt::Display for ImTextDisplay<'r, T> where
+    T: ?Sized + fmt::Display,
+{
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        use fmt::Write;
+
+        let mut proxy = ImTextDisplay {
+            replacements: self.replacements,
+            inner: f,
+        };
+        write!(proxy, "{}", &self.inner)
+    }
+}
+impl<'r, T> fmt::Write for ImTextDisplay<'r, T> where
+    T: ?Sized + fmt::Write,
+{
+    fn write_str(&mut self, s: &str) -> std::fmt::Result {
+        let any_uni = s.as_bytes().iter().position(|&c| c >= 0x80);
+        let (ascii, uni) = match any_uni {
+            None => (s, ""),
+            Some(start) => unsafe {
+                let (ascii, uni) = s.as_bytes().split_at_unchecked(start);
+                (
+                    str::from_utf8_unchecked(ascii),
+                    str::from_utf8_unchecked(uni),
+                )
+            },
+        };
+        self.inner.write_str(ascii)?;
+        let mut chars = uni.char_indices();
+        loop {
+            let uni = chars.as_str();
+            let start = chars.offset();
+            if uni.is_empty() { break Ok(()) }
+
+            let replacement = chars.find_map(|(o, c)| self.replacements.find(&c)
+                .map(|r| (o, c, r))
+            );
+            let (ok, replacement) = match replacement {
+                Some((o, _, r)) => unsafe {
+                    (
+                        uni.get_unchecked(..o - start),
+                        Some(r),
+                    )
+                },
+                None => (uni, None),
+            };
+            self.inner.write_str(ok)?;
+            let Some(replacement) = replacement else {
+                continue
+            };
+            self.inner.write_str(&*replacement)?;
+        }
+    }
+    fn write_char(&mut self, c: char) -> std::fmt::Result {
+        if let Some(r) = self.replacements.find(&c) {
+            self.inner.write_str(&*r)
+        } else {
+            self.inner.write_char(c)
+        }
+    }
+}
+impl<'r, T> From<ImTextDisplay<'r, T>> for String where
+    ImTextDisplay<'r, T>: fmt::Display,
+{
+    fn from(display: ImTextDisplay<'r, T>) -> Self {
+        display.to_string()
+    }
+}
+impl<'r, T> From<ImTextDisplay<'r, T>> for Arc<str> where
+    ImTextDisplay<'r, T>: fmt::Display,
+{
+    fn from(display: ImTextDisplay<'r, T>) -> Self {
+        String::from(display)[..].into()
+    }
+}
+impl<'r, T> From<ImTextDisplay<'r, T>> for Box<Arc<str>> where
+    ImTextDisplay<'r, T>: fmt::Display,
+{
+    fn from(display: ImTextDisplay<'r, T>) -> Self {
+        Box::new(display.into())
+    }
+}
+impl<'r, T> From<ImTextDisplay<'r, T>> for arcffi::cstr::String0 where
+    ImTextDisplay<'r, T>: fmt::Display,
+{
+    fn from(display: ImTextDisplay<'r, T>) -> Self {
+        Self::format(display)
+    }
+}
+impl<'r, T> From<ImTextDisplay<'r, T>> for std::ffi::CString where
+    ImTextDisplay<'r, T>: fmt::Display,
+{
+    fn from(display: ImTextDisplay<'r, T>) -> Self {
+        arcffi::cstr::String0::format(display).into()
+    }
+}
+
 pub trait IntoImStrDisplay {
     #[inline(always)]
     fn display_imstr(self) -> ImStrDisplay<Self>

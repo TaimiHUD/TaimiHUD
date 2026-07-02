@@ -46,14 +46,31 @@ pub trait ImDrawWindowExt<'ui>: ImDrawWindow<'ui> {
         S: fmt::Display,
         //S: taimi_ui::im::text::ImStr, I: taimi_ui::im::text::IntoImStrId,
     {
+        use crate::settings::state::ui::window::WindowState;
+
         let args = match self.imgui_version_num() {
             #[cfg(taimi_imgui = "180")]
-            #[cfg(todo)]
-            Some(im180::VERSION_NUM) => idk,
+            Some(im180::VERSION_NUM) => imw::DynArgsWindow::new(Some(
+                // TODO: exception for pathing since we want the horiz scroll on child panes instead!
+                //im180::sys::ImGuiWindowFlags_HorizontalScrollbar
+                im180::sys::ImGuiWindowFlags_NoNavFocus
+                // TODO: exception for pathing window if filter is open
+                // (but also move to WindowDraw and use settings config flags etc)
+                | im180::sys::ImGuiWindowFlags_NoFocusOnAppearing
+            )),
+            #[cfg(taimi_imgui = "192")]
+            Some(im192::VERSION_NUM) => imw::DynArgsWindow::new(Some(
+                //im192::sys::ImGuiWindowFlags_HorizontalScrollbar
+                im192::sys::ImGuiWindowFlags_NoNavFocus
+                | im192::sys::ImGuiWindowFlags_NoFocusOnAppearing
+            )),
             _ => Default::default(),
         };
+        let min_size = WindowState::MIN_SIZE.vec2.min(size.0.into());
+        let min_size = self.window_prepare_push_size_min_dyn(im::ImSpaces(min_size).into());
         self.window_prepare_size(size.0, size.1);
         let token = self.begin_window_with(ImStrId::new(id, label), Some(open), args);
+        min_size.end();
         imw::BeginVisible::pop_open(token)
     }
     fn begin_sidebar<I>(&mut self, id: I) -> Option<UiTokenDyn<'ui>>
@@ -62,9 +79,18 @@ pub trait ImDrawWindowExt<'ui>: ImDrawWindow<'ui> {
     {
         let flags = match self.imgui_version_num() {
             #[cfg(taimi_imgui = "180")]
-            Some(im::im180::VERSION_NUM) => Some(im::im180::sys::ImGuiWindowFlags_HorizontalScrollbar),
+            Some(im180::VERSION_NUM) => Some(
+                im180::sys::ImGuiWindowFlags_HorizontalScrollbar
+                // WindowDraw would inherit these automatically...
+                | im180::sys::ImGuiWindowFlags_NoFocusOnAppearing
+                | im180::sys::ImGuiWindowFlags_NoNavFocus
+            ),
             #[cfg(taimi_imgui = "192")]
-            Some(im::im192::VERSION_NUM) => Some(im::im192::sys::ImGuiWindowFlags_HorizontalScrollbar),
+            Some(im192::VERSION_NUM) => Some(
+                im192::sys::ImGuiWindowFlags_HorizontalScrollbar
+                | im192::sys::ImGuiWindowFlags_NoFocusOnAppearing
+                | im192::sys::ImGuiWindowFlags_NoNavFocus
+            ),
             _ => None,
         };
         let args = imw::DynArgsChildWindow::new(flags, None);
@@ -77,9 +103,18 @@ pub trait ImDrawWindowExt<'ui>: ImDrawWindow<'ui> {
     {
         let flags = match self.imgui_version_num() {
             #[cfg(taimi_imgui = "180")]
-            Some(im180::VERSION_NUM) => Some(im180::sys::ImGuiWindowFlags_HorizontalScrollbar),
+            Some(im180::VERSION_NUM) => Some(
+                im180::sys::ImGuiWindowFlags_HorizontalScrollbar
+                // WindowDraw would inherit these automatically...
+                | im180::sys::ImGuiWindowFlags_NoFocusOnAppearing
+                | im180::sys::ImGuiWindowFlags_NoNavFocus
+            ),
             #[cfg(taimi_imgui = "192")]
-            Some(im192::VERSION_NUM) => Some(im192::sys::ImGuiWindowFlags_HorizontalScrollbar),
+            Some(im192::VERSION_NUM) => Some(
+                im192::sys::ImGuiWindowFlags_HorizontalScrollbar
+                | im192::sys::ImGuiWindowFlags_NoFocusOnAppearing
+                | im192::sys::ImGuiWindowFlags_NoNavFocus
+            ),
             _ => None,
         };
         let args = imw::DynArgsChildWindow::new(flags, None);
