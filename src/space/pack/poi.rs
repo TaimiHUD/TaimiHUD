@@ -1,5 +1,5 @@
 use {
-    super::PackRenderState,
+    super::{instance::PoiVertex, PackRenderState},
     crate::{
         controller::pathing::shared::{LoadedPoiRef, SharedPackInfo},
         exports::runtime::{
@@ -58,6 +58,8 @@ pub struct PoiCommonRenderData {
 
     pub fallback_texture: Option<TextureSlot>,
     pub fallback_texture2: Option<TextureSlot>,
+    pub fallback_object: Option<(BufferOf<PoiVertex>, u32)>,
+    pub fallback_textureo: Option<TextureSlot>,
 }
 
 // NOTES: Please reference https://github.com/blish-hud/Pathing/blob/main/Entity/StandardMarker.World.cs
@@ -86,6 +88,8 @@ impl PoiCommonRenderData {
             ib_len: 0,
             fallback_texture: None,
             fallback_texture2: None,
+            fallback_object: None,
+            fallback_textureo: None,
         })
     }
 
@@ -163,6 +167,66 @@ impl PoiCommonRenderData {
         if self.fallback_texture2.is_none() {
             if let Some(texture) = TEXTURES.lookup_loaded(RenderMachine::TEXTURE_LOGO_LINES_KEY) {
                 self.fallback_texture2 = texture;
+            }
+        }
+        let fallback_obj = self
+            .fallback_object
+            .is_none()
+            .then(|| RenderMachine::logo_object());
+        if let Some(Some((o, m))) = fallback_obj {
+            #[cfg(taimi_debug)]
+            use {crate::exports::runtime as rt, anyhow::Context};
+
+            use crate::resources::obj_format::ObjModel;
+
+            let o = match o {
+                &[ref o] => Some(ObjModel::from_ref(o)),
+                o => {
+                    #[cfg(taimi_debug)]
+                    log::debug!("where did Curve go? {o:?}");
+                    None
+                },
+            };
+            let _m = match m {
+                &[ref m] => Some(m),
+                m => {
+                    #[cfg(taimi_debug)]
+                    log::debug!("where did SVGMat go? {m:?}");
+                    None
+                },
+            };
+            let vertices = o.map(|o| {
+                o.load(false)
+                    .0
+                    .into_iter()
+                    .map(|v| {
+                        PoiVertex::new(
+                            // this is a model made for ants .-.
+                            (glam::Vec3A::from(v.position) * 82.2f32).into(),
+                            // we're weird...
+                            glam::Vec2::new(v.texture.x, 1.0 - v.texture.y).into(),
+                            Vector2::ZERO,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            });
+            self.fallback_object = vertices.and_then(|v| {
+                match PoiVertex::alloc(device, &v[..]) {
+                    #[cfg(taimi_debug)]
+                    vb => rt::log::debug_ok(vb.context("taimihud.obj")),
+                    #[cfg(not(taimi_debug))]
+                    vb => vb.ok(),
+                }
+                .map(|vb| (vb, v.len() as u32))
+            });
+            #[cfg(todo)]
+            {
+                self.fallback_mat = m;
+            }
+        }
+        if self.fallback_object.is_some() && self.fallback_textureo.is_none() {
+            if let Some(texture) = TEXTURES.lookup_loaded(RenderMachine::TEXTURE_GLYPH_HOLO_KEY) {
+                self.fallback_textureo = texture;
             }
         }
     }
@@ -391,6 +455,7 @@ pub struct PoiRender {
     pub icon: Option<TextureSlot>,
     pub static_rotation: bool,
     pub occlude: bool,
+    pub icon_unset: bool,
     pub anim: Option<f32>,
 }
 impl PoiRender {
@@ -400,6 +465,7 @@ impl PoiRender {
             icon: None,
             static_rotation: false,
             occlude: false,
+            icon_unset: false,
             anim: None,
         }
     }
@@ -445,6 +511,11 @@ impl PoiRender {
     }
     pub fn populate_rotation(&mut self, poi: &LoadedPoiRef) {
         self.static_rotation = GetAttr::<keys::Rotate>::has_attr(&**poi.poi_attrs());
+        self.icon_unset = !poi.lpoi_info().marker_info().has_attr_of::<keys::IconFile>()
+            && !poi.lpoi_info().marker_info().has_attr_of::<keys::Occlude>();
+        if self.icon_unset {
+            self.static_rotation = true;
+        }
     }
 
     pub fn instance_data(&self, poi: &LoadedPoiRef) -> InstanceBufferData {
