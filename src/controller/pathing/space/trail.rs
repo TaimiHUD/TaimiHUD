@@ -1,7 +1,10 @@
 use {
     crate::{resources::Vertex, space::TextureSpace},
+    bitvec::vec::BitVec,
     core::f32,
     glamour::{Point2, Vec3Swizzles, Vector3},
+    glam::Vec3A,
+    taimi_meta::coords::MapLocalScale,
     taimi_pack::trail::TrailSection,
 };
 
@@ -25,7 +28,7 @@ impl TrailParams {
     pub const DEFAULT_SMOOTHING: f32 = 5.5;
     pub const DEFAULT_RESOLUTION: f32 = 1.0 / 20.0;
     pub const DEFAULT_WIDTH: f32 = Self::WIDTH_FACTOR / Self::DEFAULT_RESOLUTION;
-    pub const WIDTH_FACTOR: f32 = 0.0254 * 2.0;
+    pub const WIDTH_FACTOR: f32 = MapLocalScale::METRES_PER_INCH * 2.0;
 
     pub fn width(&self) -> f32 {
         self.width
@@ -168,23 +171,37 @@ impl TrailParams {
     pub fn interpolate_section_vertices(
         &self,
         vertices: &mut Vec<Vertex>,
+        mut map_vertices: Option<&mut Vec<Vertex>>,
         section: &TrailSection,
         scale: f32,
         is_wall: bool,
         colour: Vector3<f32>,
+        // TODO: map_colour? other params?
     ) {
+        if section.points.is_empty() { return }
         let colour = colour.to_raw();
         let width = self.width();
         let resolution = self.resolution();
+        // amount of distance^2 that spans 1/res
+        // (point at which we want to split into multiple segments
+        let dist_dist_threshold = resolution.recip().powi(2);
         let smoothing = self.smoothing();
         let mut points = Vec::with_capacity(section.points.len());
         let mut prev_point = None;
-        for mut point in section.points.iter().copied() {
+        let section_points = section.points.iter().map(|p|
+            p.to_vec3a()
+        );
+        let mut map_points: Option<BitVec> = map_vertices.is_some().then(|| BitVec::with_capacity(section.points.len()));
+        for mut point in section_points {
             point.y += self.y_offset;
 
             if let Some(prev_point) = prev_point.replace(point) {
-                let dist = prev_point.distance(point);
-                let segments = (dist * resolution) as i32;
+                let dist_dist = prev_point.distance_squared(point);
+                let segments = if dist_dist < dist_dist_threshold {
+                    0u32
+                } else {
+                    (dist_dist.sqrt() * resolution) as u32
+                };
                 for i in 0..segments {
                     let s = (i + 1) as f32 / (segments + 1) as f32;
                     let position = match smoothing {
@@ -193,8 +210,19 @@ impl TrailParams {
                         Some(smoothing) => s.powi(if smoothing > 6.0 { 3 } else { 2 }),
                     };
                     let int_point = prev_point.lerp(point, position);
+                    if let Some(mp) = &mut map_points {
+                        let is_mp = match i {
+                            #[cfg(todo)]
+                            i => i & 1 == 1,
+                            i => i & 1 == 0 && i > 0,
+                        };
+                        mp.push(is_mp);
+                    }
                     points.push(int_point);
                 }
+            }
+            if let Some(mp) = &mut map_points {
+                mp.push(true);
             }
             points.push(point);
         }
@@ -205,69 +233,143 @@ impl TrailParams {
                 let next = points.get(2).copied().unwrap_or(mid);
                 let target = prev.slerp(next, 0.5);
                 let smooth = mid.xz().lerp(target.xz(), smoothing / 10.0);
-                points[1] = smooth.extend(mid.y * 0.925 + target.y * 0.075).xzy();
+                points[1] = smooth.extend(mid.y * 0.925 + target.y * 0.075).xzy().into();
                 points = &mut points[1..];
             }
         }
 
         let mut cur_point = points[0];
-        let mut last_offset = Vector3::ZERO;
+        let mut last_offset = Vec3A::ZERO;
         let mut flip_over = 1.0f32;
         let normal_offset = width * scale / 2.0;
-        let mut mod_distance = Vector3::ZERO;
+        let normal_scale_fallback = match () {
+            #[cfg(todo = "unnecessary")]
+            _ => Vec3A::new(1.0, 0.0, 1.0).normalize(),
+            _ => {
+                use core::f32::consts::SQRT_2;
+                Vec3A::new(SQRT_2, 0.0, SQRT_2)
+            },
+        };
+        // TODO: should map walls adjust normal scale so they're visually distinct or no?
+        const MAP_NORMAL_SCALE: f32 = 1.4f32;
+        let mut mod_distance = Vec3A::ZERO;
+        // this shouldn't really be needed...
+        let mut path_direction = Vec3A::ZERO;
 
+        vertices.reserve(points.len() * 2);
+        if let (Some(map_vertices), Some(map_points)) = (&mut map_vertices, &map_points) {
+            map_vertices.reserve(map_points.count_ones() * 2);
+        }
         let mut distance = 0.0f32;
-        for &next_point in points.iter().skip(1) {
-            let path_direction = next_point - cur_point;
-            let offset = path_direction.cross(Vector3::Y);
-            let offset = if is_wall { path_direction.cross(offset) } else { offset };
+        let mut map_points = map_points.into_iter().flat_map(|mp| mp.into_iter());
+        for next_point in points.into_iter().skip(1) {
+            let map_point = map_points.next();
+            path_direction = next_point - cur_point;
+            let flat_offset = path_direction.cross(Vec3A::Y);
+            let offset = if is_wall { path_direction.cross(flat_offset) } else { flat_offset };
             let offset = offset.normalize();
 
-            if last_offset != Vector3::ZERO && offset.dot(last_offset) < 0.0 {
+            if last_offset != Vec3A::ZERO && offset.dot(last_offset) < 0.0 {
                 flip_over *= -1.0;
             }
 
             mod_distance = offset * normal_offset * flip_over;
-            let normal_scale_dir = mod_distance.to_raw().normalize_or(
-                glam::vec3(1.0, 0.0, 1.0)
+            let normal_scale_dir = mod_distance.normalize_or(
+                Vec3A::new(1.0, 0.0, 1.0)
                     .normalize()
-                    .copysign(mod_distance.to_raw()),
+                    .copysign(mod_distance),
             );
 
-            vertices.push(Vertex {
+            let v0 = Vertex {
                 position: (cur_point - mod_distance).into(),
                 colour,
-                normal: -normal_scale_dir,
+                normal: (-normal_scale_dir).into(),
                 texture: glam::vec2(1.0, distance / width - 1.0),
-            });
-            vertices.push(Vertex {
+            };
+            let v1 = Vertex {
                 position: (cur_point + mod_distance).into(),
                 colour,
-                normal: normal_scale_dir,
+                normal: normal_scale_dir.into(),
                 texture: glam::vec2(0.0, distance / width - 1.0),
-            });
+            };
+            if let (Some(true), Some(map_vertices)) = (map_point, &mut map_vertices) {
+                let v01 = if is_wall {
+                    let offset = flat_offset.normalize();
+                    let map_distance = offset * normal_offset * flip_over * MAP_NORMAL_SCALE;
+                    let normal_scale_dir = map_distance.normalize_or(
+                        normal_scale_fallback
+                            .copysign(map_distance),
+                    );
+                    [
+                        Vertex {
+                            position: (cur_point - map_distance).into(),
+                            colour,
+                            normal: (-normal_scale_dir).into(),
+                            texture: v0.texture,
+                        },
+                        Vertex {
+                            position: (cur_point + map_distance).into(),
+                            colour,
+                            normal: normal_scale_dir.into(),
+                            texture: v1.texture,
+                        },
+                    ]
+                } else {
+                    [v0.clone(), v1.clone()]
+                };
+                map_vertices.extend(v01);
+            }
+            vertices.extend([v0, v1]);
 
             distance += path_direction.length();
             last_offset = offset;
             cur_point = next_point;
         }
 
-        let normal_scale_dir = mod_distance.to_raw().normalize_or(
-            glam::vec3(1.0, 0.0, 1.0)
-                .normalize()
-                .copysign(mod_distance.to_raw()),
+        let normal_scale_dir = mod_distance.normalize_or(
+                normal_scale_fallback
+                .copysign(mod_distance),
         );
-        vertices.push(Vertex {
+        let v0 = Vertex {
             position: (cur_point - mod_distance).into(),
             colour,
-            normal: -normal_scale_dir,
+            normal: (-normal_scale_dir).into(),
             texture: glam::vec2(1.0, distance / width - 1.0),
-        });
-        vertices.push(Vertex {
+        };
+        let v1 = Vertex {
             position: (cur_point + mod_distance).into(),
             colour,
-            normal: normal_scale_dir,
+            normal: normal_scale_dir.into(),
             texture: glam::vec2(0.0, distance / width - 1.0),
-        });
+        };
+        if let Some(map_vertices) = &mut map_vertices {
+            let vend = if is_wall {
+                let flat_offset = path_direction.cross(Vec3A::Y);
+                let offset = flat_offset.normalize();
+                let map_distance = offset * normal_offset * flip_over * MAP_NORMAL_SCALE;
+                let normal_scale_dir = map_distance.normalize_or(
+                    normal_scale_fallback
+                        .copysign(map_distance),
+                );
+                [
+                    Vertex {
+                        position: (cur_point - map_distance).into(),
+                        colour,
+                        normal: (-normal_scale_dir).into(),
+                        texture: v0.texture,
+                    },
+                    Vertex {
+                        position: (cur_point + map_distance).into(),
+                        colour,
+                        normal: normal_scale_dir.into(),
+                        texture: v1.texture,
+                    },
+                ]
+            } else {
+                [v0.clone(), v1.clone()]
+            };
+            map_vertices.extend(vend);
+        }
+        vertices.extend([v0, v1]);
     }
 }

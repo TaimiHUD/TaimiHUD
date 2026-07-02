@@ -306,7 +306,7 @@ impl DrawSpaceEntity for DrawSpaceArc<'_> {
     fn draw_trail_section(&mut self, _pack_data: &PackRenderData, space_idx: usize, trail: &TrailRender, _lpath: LoadedTrailPath, section: TrailSectionPath) -> bool {
         if space_idx >= self.resources.len { return false }
         let vb = trail.section_vb_ng.as_ref()
-            .and_then(|vb| trail.section_geometry_vertices(section.path).map(|range| (vb, range)));
+            .and_then(|vb| trail.section_geometry_vertices(section.path, LocalContext::World).map(|range| (vb, range)));
         let Some((vb, ops::Range { start, end })) = vb else { return false };
         if self.bind_trail().is_none() { return false }
         let Some(poi_common) = &self.resources.poi_common else { return false };

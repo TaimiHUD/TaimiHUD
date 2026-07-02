@@ -262,20 +262,23 @@ impl MarkerInstanceData {
     pub const FADE_RESOLUTION_FAR: f32 = 4.0;
     pub fn set_fade_range(&mut self, near_start: f32, far_end: f32) {
         let start = match near_start {
-            near_start if near_start < 0.0 =>
-                IRRELEVANT_MAX.abs(),
-            near_start => near_start * Self::FADE_RESOLUTION_NEAR,
+            near_start if near_start < 0.0 => if far_end >= 0.0 {
+                0.0f32
+            } else {
+                IRRELEVANT_MAX.abs()
+            },
+            near_start => near_start / Self::FADE_RESOLUTION_NEAR,
         };
         // TODO: pick end based on distance/intensity settings if <=start as a semi-infinite mode?
         self.fade_range = match far_end {
             end => {
                 // store range relative to start rather than absolute end
-                let range = ((end - near_start) * Self::FADE_RESOLUTION_FAR).max(1.0);
+                let range = ((end - near_start) / Self::FADE_RESOLUTION_FAR).max(1.0);
                 pack_int_pair(start, range)
             },
             #[cfg(todo)]
             end => {
-                let end = (end * Self::FADE_RESOLUTION_FAR).max(start + 1.0);
+                let end = (end / Self::FADE_RESOLUTION_FAR).max(start + 1.0);
                 pack_int_pair(start, end)
             },
         };
@@ -340,6 +343,10 @@ pub struct RenderConstantDataV {
     /// used to restrict billboard sizes on-screen
     pub viewport_pixel_scale: f32,
     pub _padding2: Vector4,
+}
+impl RenderConstantDataV {
+    /// fudge for `pixel_scale = SCALE/screenheight`
+    pub const HEIGHT_SCALE_BASE: f32 = core::f32::consts::SQRT_2 * 4.0 / 3.0;
 }
 unsafe impl D3dBufferData for RenderConstantDataV {}
 #[derive(Debug, Copy, Clone, Default)]

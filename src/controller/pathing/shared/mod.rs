@@ -28,6 +28,7 @@ pub use {
             SharedTrailRef,
         },
         space::{
+            LoadResult,
             SpacePackShared,
             TextureLoadRequests,
             TextureLoadRequestsTx,

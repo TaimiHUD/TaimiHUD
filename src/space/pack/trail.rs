@@ -7,6 +7,7 @@ use {
             state::LoadedTrailGeometry,
         },
         exports::runtime::{
+            self as rt,
             textures::{TextureKey, TextureSlot},
             Counter,
         },
@@ -41,7 +42,9 @@ pub struct TrailRender {
     pub texture: Option<TextureSlot>,
     pub section_vbuffer: Option<VertexBuffer>,
     pub section_vb_ng: Option<super::instance::TrailVertexBuffer>,
+    pub section_vb_map: Option<VertexBuffer>,
     pub vbuffer_section_end: Vec<u32>,
+    pub vbuffer_section_end_map: Vec<u32>,
     pub vertex_colour: [u8; 3],
 }
 
@@ -52,7 +55,9 @@ impl TrailRender {
             texture: None,
             section_vbuffer: None,
             section_vb_ng: None,
+            section_vb_map: None,
             vbuffer_section_end: Vec::new(),
+            vbuffer_section_end_map: Vec::new(),
             vertex_colour: Self::WHITE_U8,
         }
     }
@@ -64,7 +69,7 @@ impl TrailRender {
         arcrender: bool,
     ) -> anyhow::Result<()> {
         // TODO: average colours if we ever support gradients?
-        self.vertex_colour = geometry.vertices.first()
+        self.vertex_colour = geometry.legacy.vertices.first()
             .and_then(|v| match v.colour {
                 c if c.abs_diff_eq(Self::WHITE_F32.truncate(), Self::COMPONENT_THRESH) => None,
                 c => Some(c),
@@ -72,18 +77,40 @@ impl TrailRender {
                 let [r, g, b] = (c * 255.0).to_array();
                 [r as u8, g as u8, b as u8]
             }).unwrap_or(Self::WHITE_U8);
-        let trailv = geometry.vertices.iter()
-            .map(|v| super::instance::TrailVertex::from(*v))
-            .collect::<Vec<_>>();
-        let trailv = arcrender.then(|| crate::exports::runtime::log::error_ok(super::instance::TrailVertex::alloc(device, &trailv))).flatten();
-        let model = Model::from_vertices(geometry.vertices);
-        let section_vbuffer = model.to_buffer(device).context("Creating trail vbuffer");
+        let trailv = arcrender.then(|| {
+            let trailv = geometry.legacy.vertices.iter()
+                .map(|v| super::instance::TrailVertex::from(*v))
+                .collect::<Vec<_>>();
+            crate::exports::runtime::log::error_ok(super::instance::TrailVertex::alloc(device, &trailv))
+        }).flatten();
+        let section_vb_map = match arcrender {
+            true => rt::log::warn_ok({
+                // TODO: if not visible on maps, don't bother or something idk
+                let model = Model::from_vertices(geometry.map.vertices);
+                model.to_buffer(device).context("Creating map trail vbuffer")
+            }),
+            false => None,
+        };
+        let section_vbuffer = match arcrender {
+            true if section_vb_map.is_some() => Ok(None),
+            _ => {
+                let model = Model::from_vertices(geometry.legacy.vertices);
+                model.to_buffer(device).context("Creating trail vbuffer")
+            }.map(Some),
+        };
         #[cfg(feature = "statistics")]
         let prev_size_vb = self
             .section_vbuffer
             .as_ref()
             .map(|v| v.size() as isize)
             .unwrap_or(0);
+        #[cfg(feature = "statistics")]
+        let prev_size_map = self
+            .section_vb_map
+            .as_ref()
+            .map(|v| v.size() as isize)
+            .unwrap_or(0);
+        #[cfg(feature = "statistics")]
         let prev_size_ng = self
             .section_vb_ng
             .as_ref()
@@ -92,15 +119,30 @@ impl TrailRender {
         match section_vbuffer {
             Ok(vbuffer) => {
                 #[cfg(feature = "statistics")]
-                STATS_TRAIL_VERTEX_SIZE.adjust_by(|| vbuffer.size() as isize - prev_size_vb - prev_size_ng);
-                self.section_vbuffer = Some(vbuffer);
+                STATS_TRAIL_VERTEX_SIZE.adjust_by(|| {
+                    let vb_size = vbuffer.as_ref().map(|vb| vb.size() as isize).unwrap_or_default();
+                    vb_size - prev_size_vb - prev_size_ng - prev_size_map
+                });
+                self.section_vbuffer = vbuffer;
                 self.section_vb_ng = trailv;
+                self.section_vb_map = section_vb_map;
+                #[cfg(feature = "statistics")]
                 if let Some(vb) = &self.section_vb_ng {
                     STATS_TRAIL_VERTEX_SIZE.adjust_by(|| vb.size() as isize);
                 }
-                self.vbuffer_section_end = geometry.section_lengths;
+                #[cfg(feature = "statistics")]
+                if let Some(vb) = &self.section_vb_map {
+                    STATS_TRAIL_VERTEX_SIZE.adjust_by(|| vb.size() as isize);
+                }
+                self.vbuffer_section_end = geometry.legacy.section_lengths;
+                self.vbuffer_section_end_map = geometry.map.section_lengths;
                 let mut start = 0u32;
                 for out in &mut self.vbuffer_section_end {
+                    *out += start;
+                    start = *out;
+                }
+                let mut start = 0u32;
+                for out in &mut self.vbuffer_section_end_map {
                     *out += start;
                     start = *out;
                 }
@@ -131,10 +173,12 @@ impl TrailRender {
         let mut incomplete = false;
         let vb_empty = match arcrender {
             true => self.section_vb_ng.is_none(),
-            _ => self.section_vbuffer.is_none(),
+            _ => self.section_vbuffer.is_none() & self.section_vb_map.is_none(),
         };
         if vb_empty {
-            if !self.is_empty() {
+            let no_vb = self.section_vbuffer.is_none() & self.section_vb_map.is_none()
+                & self.section_vb_ng.is_none();
+            if no_vb && !self.is_empty() {
                 // marked broken, ignore this section...
                 return true
             }
@@ -192,7 +236,17 @@ impl TrailRender {
     /// Draw a trail segment.
     /// PREREQUISITES: Trail shaders and texture must already be set.
     pub fn draw_section(&self, device_context: &Dx11Context, section: TrailSectionPath, ctx: LocalContext) {
-        let Some(ops::Range { start, end }) = self.section_geometry_vertices(section.path) else {
+        let vb_legacy = self.section_vbuffer.as_ref().map(|vb| (vb, LocalContext::World));
+        let vb_map = self.section_vb_map.as_ref().map(|vb| (vb, LocalContext::GLOBAL));
+        let vbuffer = match ctx {
+            LocalContext::World => vb_legacy.or(vb_map),
+            LocalContext::Map(..) => vb_map.or(vb_legacy),
+        };
+        let sections = vbuffer.and_then(|(vb, vb_ctx)|
+            self.section_geometry_vertices(section.path, vb_ctx)
+                .map(|s| (vb, s))
+        );
+        let Some((vbuffer, ops::Range { start, end })) = sections else {
             log::error!("attempted to draw invalid {section}");
             return
         };
@@ -201,11 +255,7 @@ impl TrailRender {
             log::debug!("BUG? filter empty sections prior to scene or binding");
             return
         }
-        if let Some(section_vbuffer) = &self.section_vbuffer {
-            section_vbuffer.set(device_context, 0);
-        } else {
-            log::debug!("BUG? trail vbuffer missing while expecting {start}..{end}");
-        }
+        vbuffer.set(device_context, 0);
         unsafe {
             //PrimitiveTopology::TriangleStrip.set(device_context);
             match ctx {
@@ -229,26 +279,31 @@ impl TrailRender {
     #[cfg(feature = "paths-lua")]
     pub(crate) fn attr_dirties_render(key: PackKeyId) -> bool {
         pack_attr! { =id_is_in(key, [
+            keys::AnimSpeed, keys::IsWall,
             keys::Alpha,
             keys::Tint,
             keys::InGameVisibility,
             keys::MapVisibility,
             keys::MinimapVisibility,
             keys::GameMap,
+            keys::CanFade, keys::Cull, keys::FadeNear, keys::FadeFar,
         ]) }
     }
 
-    pub fn section_geometry_vertices(&self, section: TrailSectionIndex) -> Option<ops::Range<u32>> {
+    pub fn section_geometry_vertices(&self, section: TrailSectionIndex, ctx: LocalContext) -> Option<ops::Range<u32>> {
         let section = section as usize;
-        let end = *self.vbuffer_section_end.get(section)?;
+        let ends = match ctx {
+            LocalContext::Map(..) if !self.vbuffer_section_end_map.is_empty() => &self.vbuffer_section_end_map[..],
+            _ => &self.vbuffer_section_end[..],
+        };
+        let end = *ends.get(section)?;
         let start = match section {
             #[cfg(todo = "unnecessary")]
             section => section
                 .checked_sub(1)
-                .map(|prev| unsafe { *self.vbuffer_section_end.get_unchecked(prev) })
+                .map(|prev| unsafe { *ends.get_unchecked(prev) })
                 .unwrap_or(0),
-            section => *self
-                .vbuffer_section_end
+            section => *ends
                 .get(section.wrapping_sub(1))
                 .unwrap_or(&0),
         };
@@ -257,14 +312,24 @@ impl TrailRender {
 
     /// mark broken
     pub fn disable(&mut self) {
+        self.invalidate();
+        self.vbuffer_section_end.push(0);
+        //self.vbuffer_section_end_map.push(0);
+    }
+    /// refresh/unload
+    pub fn invalidate(&mut self) {
         self.section_vbuffer = None;
         self.section_vb_ng = None;
+        self.section_vb_map = None;
         self.vbuffer_section_end.clear();
-        self.vbuffer_section_end.push(0);
+        self.vbuffer_section_end_map.clear();
     }
 
     pub fn is_empty(&self) -> bool {
-        self.section_vbuffer.is_none() && self.vbuffer_section_end.is_empty()
+        let no_vb = self.section_vbuffer.is_none()
+            && self.section_vb_ng.is_none()
+            && self.section_vb_map.is_none();
+        no_vb && self.vbuffer_section_end.is_empty()
     }
 
     #[inline]

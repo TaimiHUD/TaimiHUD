@@ -36,7 +36,7 @@ use {
         ui::{LocalContext, MapContext},
     },
     taimi_pack::attributes::{
-        cell::{pack_attr, AttrKeyValue, GetAttrDyn, PackKeyId, PackValueCell, SetAttrDyn},
+        cell::{pack_attr, AttrKeyValue, GetAttrDynExt, PackKeyId, PackValueCell, SetAttrDyn},
         keys::{self, GetAttr, SetAttr},
     },
 };
@@ -54,6 +54,7 @@ pub struct PoiCommonRenderData {
 
     pub world_ib: Option<BufferOf<InstanceBufferData>>,
     pub map_ib: Option<BufferOf<InstanceBufferData>>,
+    ib_len: usize,
 
     pub fallback_texture: Option<TextureSlot>,
     pub fallback_texture2: Option<TextureSlot>,
@@ -84,6 +85,7 @@ impl PoiCommonRenderData {
             quad_vb,
             map_ib: None,
             world_ib: None,
+            ib_len: 0,
             fallback_texture: None,
             fallback_texture2: None,
             fallback_object: None,
@@ -153,6 +155,7 @@ impl PoiCommonRenderData {
     pub fn clear(&mut self) {
         let _ = self.world_ib.take();
         let _ = self.map_ib.take();
+        self.ib_len = 0;
     }
 
     pub fn update_fallback(&mut self, device: &Dx11Device, _machine: &RenderMachine) {
@@ -258,14 +261,46 @@ impl PoiCommonRenderData {
         self.write_ib(machine, packs, &mut data_world, &mut data_map)?;
 
         let (data_world, data_map) = (&data_world[..], &data_map[..]);
-        STATS_POI_INSTANCE_SIZE.reset_with(|| (size_of_val(data_map) + size_of_val(data_world)));
+        STATS_POI_INSTANCE_SIZE.reset_with(|| size_of_val(data_map) + size_of_val(data_world));
         let (poi_ib_world, poi_ib_map) = (
             BufferOf::new_with_data(device, Ok(data_world), ())?,
             BufferOf::new_with_data(device, Ok(data_map), ())?,
         );
         self.world_ib = Some(poi_ib_world);
         self.map_ib = Some(poi_ib_map);
+        self.ib_len = ib_len;
         Ok(())
+    }
+    pub fn update_ib_at(&self,
+        context: &Dx11Context,
+        pack: &PackRenderData,
+        machine: Option<&RenderMachine>,
+        loaded_idx: usize,
+    ) -> bool {
+        if pack.render_poi_bookmark == 0 || loaded_idx >= self.ib_len { return false }
+        let Some(poi) = pack.pois.get(loaded_idx) else { return false };
+        let bookmark = pack.render_poi_bookmark + loaded_idx;
+        let mut applied = false;
+        let lidx = taimi_hoard::loc::Locator::new_path(taimi_meta::packs::MarkerIndex::with_poi(loaded_idx as _));
+        let lpoi = pack.map_info.as_ref().and_then(|mi|
+            crate::controller::pathing::shared::SharedMarkerRef::from_parts(mi, Some(&pack.map_state), lidx)
+        ).and_then(|m| m.to_loaded_poi());
+        let Some(ref lpoi) = lpoi else { return false };
+        if let Some(ib) = &self.world_ib {
+            unsafe {
+            // TODO: if visible_in_space && !arcrender?
+                ib.update_element_at(context, &poi.instance_data(lpoi), bookmark, 0);
+            }
+            applied = true;
+        }
+        if let (Some(ib), Some(machine)) = (&self.map_ib, machine) {
+            // TODO: if visible_on_map?
+            unsafe {
+                ib.update_element_at(context, &poi.instance_data_map(lpoi, machine), bookmark, 0);
+            }
+            applied = true;
+        }
+        applied
     }
     pub fn write_ib(
         &self,
@@ -463,9 +498,7 @@ impl PoiRender {
         InstanceBufferData {
             world: Mat4::from_scale_rotation_translation(
                 Vec3::splat(
-                    GetAttr::<keys::IconSize>::get_attr_or_default(&**attrs)
-                        .into_owned()
-                        .into(),
+                    attrs.attr_or_default_into::<keys::IconSize, f32>() * 0.5
                 ),
                 attrs.rotate.map(Self::rotation_from_xyz).unwrap_or_default(),
                 poi.lpoi().position.into(),
@@ -529,10 +562,17 @@ impl PoiRender {
     #[cfg(feature = "paths-lua")]
     pub(crate) fn attr_dirties_render(key: PackKeyId) -> bool {
         pack_attr! { =id_is_in(key, [
+            keys::IconSize, keys::MapDisplaySize, keys::MinSize, keys::MaxSize,
+            keys::Rotate, keys::Occlude, keys::ScaleOnMapWithZoom,
+            keys::Bounce, keys::BounceHeight, keys::BounceDuration, keys::BounceDelay,
+            // render common
+            keys::Alpha,
+            keys::Tint,
             keys::InGameVisibility,
             keys::MapVisibility,
             keys::MinimapVisibility,
             keys::GameMap,
+            keys::CanFade, keys::Cull, keys::FadeNear, keys::FadeFar,
         ]) }
     }
 

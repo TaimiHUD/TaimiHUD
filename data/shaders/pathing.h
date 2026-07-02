@@ -63,9 +63,9 @@ struct MarkerInput {
 };
 #define FADE_RESOLUTION_NEAR 8.0f
 #define FADE_RESOLUTION_FAR 4.0f
-#define GET_FADE_START(f) (GET_PAIR0f(f) / FADE_RESOLUTION_NEAR)
+#define GET_FADE_START(f) (GET_PAIR0f(f) * FADE_RESOLUTION_NEAR)
 //#define GET_FADE_RANGE(f, start) (GET_FADE_FAR(f) - start)
-#define GET_FADE_RANGE(f, _start) (GET_PAIR1f(f) / FADE_RESOLUTION_FAR)
+#define GET_FADE_RANGE(f, _start) (GET_PAIR1f(f) * FADE_RESOLUTION_FAR)
 
 struct TrailInputV {
     float3 position: POSITION;

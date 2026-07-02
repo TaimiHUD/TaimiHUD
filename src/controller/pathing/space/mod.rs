@@ -5,6 +5,7 @@ use {
                 registry::{LoadedMarkerPath, LoadedPoiPath, LoadedTrailPath, PackLoader, SharedLoaderBox},
                 shared::{
                     LoadReport,
+                    LoadResult,
                     LocDisplay,
                     PathingShared,
                     SharedGameplayMap,
@@ -19,6 +20,7 @@ use {
                     LoadedTrail,
                     LoadedTrailGeometry,
                     LoadedTrailSection,
+                    LoadedMapInfoStorage,
                 },
                 PathingController,
                 PathingEvent,
@@ -129,17 +131,46 @@ impl SpaceContext {
             LoadReport::Texture { path, texture, resource: _ } => {
                 let id = MarkerId::for_marker(path);
                 self.inflight.remove(&id);
-                let texture = rt::log::warn_ok(texture);
+                let texture = match rt::log::warn_ok(texture) {
+                    None => LoadResult::Failed,
+                    Some(t) => LoadResult::Loaded(t),
+                };
                 self.texture_loads.fill_request(path, texture);
             },
             LoadReport::TrailGeometry { path, geometry, section_info: _ } => {
                 let lpath = path.root.rel(path.path.path);
                 let id = SpacePackShared::trail_geometry_id(&lpath);
                 self.inflight.remove(&id);
-                let geometry = rt::log::warn_ok(geometry).unwrap_or_else(LoadedTrailGeometry::empty);
+                let geometry = match rt::log::warn_ok(geometry) {
+                    None => LoadResult::Failed,
+                    Some(geo) => LoadResult::Loaded(geo),
+                };
                 self.trail_geometry.fill_request(lpath, geometry);
             },
         }
+    }
+    pub(crate) fn invalidate_texture(&mut self, path: LoadedMarkerPath<PackMapPath>) {
+        let id = MarkerId::for_marker(path);
+        self.inflight.remove(&id);
+        self.texture_loads.fill_request(path, LoadResult::Invalidate);
+    }
+    pub(crate) fn invalidate_trail_geometry(&mut self, path: Locator<PackMapPath, LoadedTrailPath>, map_info: Option<&mut LoadedMapInfoStorage>) {
+        let lpath = path.root.rel(path.path.path);
+        let id = SpacePackShared::trail_geometry_id(&lpath);
+        self.inflight.remove(&id);
+        if let Some(map_info) = map_info {
+            // clear controller section cache too...
+            let has_section_info = map_info.info.trail_info.lookup_ref(&path.path).map(|ti| ti.sections.is_some());
+            if has_section_info.unwrap_or(false) {
+                let info = Arc::make_mut(&mut map_info.info);
+                let ti = unsafe {
+                    // eh just trust lookup_ref to match lookup_mut...
+                    info.trail_info.lookup_mut(&path.path).unwrap_unchecked()
+                };
+                ti.sections = None;
+            }
+        }
+        self.trail_geometry.fill_request(lpath, LoadResult::Invalidate);
     }
 
     pub(super) fn collect_garbage(
@@ -382,14 +413,16 @@ impl PathingController {
         y_sig: usize,
     ) -> impl Future<Output = anyhow::Result<LoadedTrailGeometry>> + Send + 'static {
         let y_offset = params.y_offset_for(y_sig);
+        let mut attrs = taimi_pack::attributes::cell::PackValueSet::new();
+        attrs.set_attr_dyn_of(keys::TrailScale(scale));
+        attrs.set_attr_dyn_of(keys::IsWall(is_wall.into()));
+        attrs.set_attr_dyn_of(keys::Tint(colour.extend(1.0).into()));
         Controller::try_run_blocking("calculating vertices", move || {
-            Ok(LoadedTrail::vertices_with_data(
+            Ok(LoadedTrail::load_with_data(
                 &trl,
                 &params,
-                scale,
-                is_wall,
+                &attrs,
                 y_offset,
-                colour.into(),
             ))
         })
     }

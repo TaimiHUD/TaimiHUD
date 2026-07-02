@@ -33,7 +33,14 @@ TrailOutputV trail_main_v(TrailInput input)
 #if 1
     float fade_near = GET_MFLAG(v_trail.marker.flags, SFLAG_DISTANCE_FADE) ? GET_FADE_START(input.marker.fade) : 9999.0;
     float fade_range = GET_FADE_RANGE(input.marker.fade, fade_near);
-    float fade = 1.0 - saturate((pos.z - fade_near) / fade_range);
+#if 0
+    // camera.z is a fine estimate for long-distance fades, but not precise ranges...
+    float fade_dist = pos.z - fade_near;
+#else
+    // using displacement (from char) rather than camera.z
+    float fade_dist = length(output.displacement) - fade_near;
+#endif
+    float fade = saturate(1.0 - pow(fade_dist / fade_range, 3.0));
 #endif
     output.position = mul(v_render.projection, pos);
 #if GOGGLES2_SHADOWBOXING
@@ -64,7 +71,8 @@ TrailOutputV trail_main_v(TrailInput input)
 
     // TODO: use clip/cull planes for anything we know here (tex alpha obviously missing)
     // float clip_fade = float(GET_MFLAG(input.marker.flags, MFLAG_OPAQUE));
-    uint flags = input.marker.flags & (v_trail.marker.flags | ~MFLAG_OBSCURE_FADE);
+    uint flags = input.marker.flags
+        | (v_trail.marker.flags & MFLAG_OBSCURE_FADE);
     flags = flags ^ (uint(back_of_face) << MFLAG_FACE_CULL_FRONT_SHIFT);
     output.instance = uint2(
         flags
@@ -137,8 +145,13 @@ TrailOutputP trail_main_p(TrailInputP inp)
 #else
     // fade out when close to the player
     float obscure_fade = float(GET_MFLAG(flags, MFLAG_OBSCURE_FADE));
+    float player_feather = p_render.player_feather * lerp(
+        0.2f,
+        1.0f,
+        float(GET_MFLAG(flags, MFLAG_IS_TRAIL))
+    );
     float overlap = lerp(
-        saturate(distance_squared / p_render.player_feather),
+        saturate(distance_squared / player_feather),
         1.0f,
         obscure_fade
     );
@@ -271,10 +284,16 @@ PoiOutputV poi_main_v(PoiInput input)
 
     pos = mul(v_render.view, pos);
 #if 1
-    // TODO: consider using displacement (from char) rather than camera z?
     float fade_near = GET_MFLAG(v_poi.marker.flags, SFLAG_DISTANCE_FADE) ? GET_FADE_START(input.marker.fade) : 9999.0;
     float fade_range = GET_FADE_RANGE(input.marker.fade, fade_near);
-    float fade = 1.0 - saturate((pos.z - fade_near) / fade_range);
+#if 0
+    // camera.z is a fine estimate for long-distance fades, but not precise ranges...
+    float fade_dist = pos.z - fade_near;
+#else
+    // using displacement (from char) rather than camera.z
+    float fade_dist = length(output.displacement) - fade_near;
+#endif
+    float fade = saturate(1.0 - pow(fade_dist / fade_range, 3.0));
 #else
     float fade = 1.0;
 #endif
@@ -305,7 +324,8 @@ PoiOutputV poi_main_v(PoiInput input)
     output.colour = float4(input_colour, GET_MFLAG_ALPHA(input.marker.flags) * v_poi.marker.alpha);
     // TODO: apply+preprocess player_feather here?
 
-    uint flags = input.marker.flags & (v_poi.marker.flags | ~MFLAG_OBSCURE_FADE);
+    uint flags = input.marker.flags
+        | (v_poi.marker.flags & MFLAG_OBSCURE_FADE);
     flags = flags ^ (uint(back_of_face) << MFLAG_FACE_CULL_FRONT_SHIFT);
     output.instance = uint2(
         flags

@@ -1,9 +1,12 @@
+#[cfg(deleteme)]
 #[cfg(feature = "paths-lua")]
 use {
     crate::controller::script::PackPlugShared,
     std::collections::BTreeSet,
     taimi_pack::{attributes::cell::PackKeyId, script::pathing::imp::MarkerLoc},
 };
+#[cfg(feature = "paths-dyn")]
+use crate::controller::pathing::registry::{LoadedMarkerPath, PackMapPath};
 use {
     crate::{
         controller::{
@@ -122,6 +125,12 @@ pub enum SpaceEvent {
     UiResize(Option<Size2<ScreenSpace>>),
     ProcessShader(&'static str, ShaderKind, taimi_d3d::blob::Blob, String),
     ReloadShaders(bool),
+    /// attr change requires updating instance buffer
+    #[cfg(feature = "paths-dyn")]
+    DirtyMarkerI(LoadedMarkerPath<PackMapPath>),
+    /// attr change requires regenerating geometry vertex buffer
+    #[cfg(feature = "paths-dyn")]
+    DirtyTrailV(LoadedMarkerPath<PackMapPath>),
     #[cfg(deleteme)]
     #[cfg(feature = "goggles")]
     GogglesRefreshLens {
@@ -643,6 +652,18 @@ impl Engine {
                     },
                     MarkerFeed(phase_state) => self.new_phase(phase_state).context("marker new phase")?,
                     MarkerReset(timer) => self.remove_phase(timer).context("marker remove phase")?,
+                    #[cfg(feature = "paths-dyn")]
+                    DirtyMarkerI(lpath) => {
+                        // TODO: move impl into pack collection or w/e
+                        self.packs.invalidate_marker_ib(&self.render_backend.device, Some(machine), lpath);
+                        // quick to process and want to do so quickly!
+                        return Ok(Some(false))
+                    },
+                    #[cfg(feature = "paths-dyn")]
+                    DirtyTrailV(lpath) => {
+                        self.packs.invalidate_trail_vb(lpath);
+                        return Ok(Some(false))
+                    },
                     #[cfg(feature = "paths-lua")]
                     #[cfg(deleteme)]
                     ScriptStart { generation, pack_idx, shared } => {
@@ -2185,6 +2206,18 @@ impl Engine {
                 .update_cb_v(&device_context);
         }
         let mut query_dirs = self.world.query::<(&mut Render, &Direction)>();
+        let trail_params = core::cell::LazyCell::new({
+            let settings = self.settings.as_ref();
+            move || {
+                let mut params = settings.map(
+                    crate::controller::pathing::registry::PackLoader::trail_params_for
+                ).unwrap_or_default();
+                // none of this is helpful for 2-point trails
+                params.resolution = None;
+                params.smoothing = Some(None);
+                params
+            }
+        });
         for (r, dir) in query_dirs
             .iter(&self.world)
             .into_iter()
@@ -2226,19 +2259,28 @@ impl Engine {
                 .player
                 .truncate();
             let target = dir.direction.destination.to_vec3();
-            let mut vertices = Vec::new();
-            #[cfg(all(todo, deletemenotreally))]
-            {
-                super::pack::trail::ActiveTrail::gen_points(
-                    &mut vertices,
-                    &[player_pos.into(), target.into()],
-                    super::pack::trail::TrailParams::DEFAULT_WIDTH,
-                    1.0,
-                    false,
-                    glam::Vec3::ONE,
-                );
-                drawn = true;
-            }
+            let y_off = 1.0f32;
+            let trl = taimi_pack::trail::TrailData {
+                header: Default::default(),
+                sections: IntoIterator::into_iter([
+                    // just the one section :3
+                    taimi_pack::trail::TrailSection::with_points([
+                        glamour::Point3::<f32>::from(player_pos),
+                        target.into(),
+                    ]),
+                ]).collect(),
+            };
+            // TODO: setting for this
+            let trail_scale = 1.0;
+            let vertices = crate::controller::pathing::state::LoadedTrail::vertices_with_data(
+                &trl,
+                &*trail_params,
+                trail_scale,
+                false,
+                y_off,
+                glamour::Vector3::ONE,
+                None,
+            ).vertices;
             // TODO: cap size and reuse one buffer here
             let vbuffer = crate::resources::Model::from_vertices(vertices)
                 .to_buffer(&self.render_backend.device)
