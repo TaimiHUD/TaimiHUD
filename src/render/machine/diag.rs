@@ -1,11 +1,13 @@
 use {
     super::RenderMachine,
-    crate::exports::runtime::statistics::{MetricsSwitch, StatsCounter, StatsDesc, StatsRef, StatsUnit},
+    crate::{
+        exports::runtime::statistics::{MetricsSwitch, StatsCounter, StatsDesc, StatsRef, StatsUnit},
+        render::element::prelude::*,
+    },
     log::Log,
     std::{
         collections::LinkedList,
         mem,
-        ptr,
         sync::{
             atomic::{AtomicU32, Ordering},
             LazyLock,
@@ -13,7 +15,6 @@ use {
         },
         time::Instant,
     },
-    sync_unsafe_cell::SyncUnsafeCell,
 };
 
 impl RenderMachine {
@@ -43,6 +44,12 @@ impl RenderMachine {
             (
                 StatsRef::with_counter(&STATS_FRAME_TIME_LATENCY, StatsUnit::Time),
                 StatsDesc::new(sec, "stats-render-time-latency"),
+                true,
+            ),
+            #[cfg(todo)]
+            (
+                StatsRef::with_counter(&STATS_FRAME_IMGUI_ALLOC, StatsUnit::Size),
+                StatsDesc::new("stats-runtime-allocator", "stats-runtime-alloc-imgui"),
                 true,
             ),
         ];
@@ -75,12 +82,33 @@ impl RenderMachine {
             STATS_FRAME_TIME_SLICE.increment(amt);
         }
     }
-    pub(super) fn metrics_pre_ui(&mut self) {
+    pub(super) fn metrics_pre_ui<'ui, U>(&mut self, _ui: &mut U)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        #[cfg(todo)]
+        {
+            self.metrics_alloc_ui = ui.with_io_dyn(|io| io.metrics_active_allocations());
+        }
         if self.metrics_switch.contains(MetricsSwitch::COLLECT) {
             self.metrics_checkpoint_ui = Some(Instant::now());
         }
     }
-    pub(super) fn metrics_post_ui(&mut self) {
+    pub(super) fn metrics_post_ui<'ui, U>(&mut self, _ui: &mut U)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        #[cfg(todo)]
+        {
+            STATS_FRAME_IMGUI_ALLOC.increment_by(|| {
+                let ui_alloc_after = ui.with_io_dyn(|io| io.metrics_active_allocations());
+                let ui_alloc_pre = mem::replace(&mut self.metrics_alloc_ui, ui_alloc_after);
+                ui_alloc_after - ui_alloc_pre
+            });
+        }
+        self.metrics_post_ui_checkpoint();
+    }
+    fn metrics_post_ui_checkpoint(&mut self) {
         if let Some(checkpoint) = self.metrics_checkpoint_ui.take() {
             let amt = checkpoint.elapsed().as_micros() as u64;
             STATS_FRAME_TIME_UI.reset(amt);
@@ -141,6 +169,8 @@ static STATS_FRAME_TIME_UI: StatsCounter = StatsCounter::DEFAULT;
 static STATS_FRAME_TIME_INTERVAL: StatsCounter = StatsCounter::DEFAULT;
 static STATS_FRAME_TIME_LATENCY: StatsCounter = StatsCounter::DEFAULT;
 static STATS_FRAME_TIME_SLICE: StatsCounter = StatsCounter::DEFAULT;
+#[cfg(todo)]
+static STATS_FRAME_IMGUI_ALLOC: StatsCounter = StatsCounter::DEFAULT;
 
 pub struct FrameLog {
     records: Mutex<LinkedList<String>>,

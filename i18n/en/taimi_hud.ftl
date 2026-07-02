@@ -263,6 +263,7 @@ size-frag-kb = { $size } KB
 stats = Statistics
 stats-runtime-allocator = Runtime Allocator
 stats-runtime-alloc = Memory Usage
+stats-runtime-alloc-imgui = Imgui Buffers
 stats-render = Render Machinery
 stats-render-time = Render Time
 stats-render-time-ui = UI Time

@@ -25,7 +25,7 @@ use {
     crate::{
         controller::Controller,
         exports::runtime::{self as rt, statistics::MetricsSwitch},
-        render::RenderState,
+        render::{element::im::prelude::*, RenderState},
         settings::Settings,
     },
     anyhow::Context,
@@ -51,6 +51,7 @@ pub use self::{
     diag::{frame_log, FrameLog, FrameState},
     mumblelink::{MumblelinkFrames, MumblelinkTick},
     tasks::{RenderTask, RenderTaskPriority, RenderTaskQueue},
+    ui::{InterfaceParty, UiStateReport},
 };
 #[cfg(feature = "scripts")]
 use crate::render::plug::PlugElements;
@@ -138,6 +139,7 @@ pub struct RenderMachine {
     pub metrics_checkpoint: Option<Instant>,
     pub metrics_checkpoint_render: Option<Instant>,
     pub metrics_checkpoint_ui: Option<Instant>,
+    pub ui_report: UiStateReport,
 }
 
 pub type RenderPositioning<S = LocalSpace> = (Point3<S>, Vector3<S>);
@@ -227,6 +229,7 @@ impl RenderMachine {
             metrics_checkpoint: Default::default(),
             metrics_checkpoint_render: Default::default(),
             metrics_checkpoint_ui: Default::default(),
+            ui_report: Default::default(),
         }
     }
 
@@ -412,7 +415,7 @@ impl RenderMachine {
 
     pub fn turn_ui_entry<'ui, U>(ui: &mut U)
     where
-        U: ?Sized + super::element::im::ImDrawWindow<'ui>,
+        U: ?Sized + ImDrawWindow<'ui>,
     {
         if !RenderState::is_running() {
             return
@@ -663,9 +666,9 @@ impl RenderMachine {
 
     pub fn turn_ui<'ui, U>(&mut self, ui: &mut U)
     where
-        U: ?Sized + super::element::im::ImDrawWindow<'ui>,
+        U: ?Sized + ImDrawWindow<'ui>,
     {
-        self.metrics_pre_ui();
+        self.metrics_pre_ui(ui);
 
         let prev_display_size = *self.display_size_ref();
         let display_size = self.display_size_mut();
@@ -674,8 +677,40 @@ impl RenderMachine {
             self.act_display_size();
         }
     }
-    pub fn post_ui(&mut self) {
-        self.metrics_post_ui();
+    pub fn post_ui<'ui, U>(&mut self, ui: &mut U, context: DrawContextInput<'ui>)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        // TODO: only bother updating report every couple frames (or just check when we process relevant events)
+        self.ui_report.captured_keyboard = if ui.with_io_dyn(|io| io.want_capture_keyboard()) {
+            #[cfg(todo)]
+            if context.want_capture_keyboard {
+                Some(InterfaceParty::TAIMI)
+            }
+            Some(InterfaceParty::for_ui_context(context))
+        } else if !self.mumblelink_state.contains(UiState::Focused) && self.is_ingame().is_some() {
+            Some(InterfaceParty::OS)
+        } else if self.mumblelink_state.contains(UiState::TextInput) && self.is_ingame().is_some() {
+            Some(InterfaceParty::GAME)
+        } else if ui.with_io_dyn(|io| io.want_text_input()) {
+            #[cfg(todo)]
+            if context.want_text_input {
+                Some(InterfaceParty::TAIMI)
+            }
+            Some(InterfaceParty::for_ui_context(context))
+        } else {
+            None
+        };
+        #[cfg(todo)]
+        if self.ui_report.captured_keyboard.is_none() {
+            if let Some(ui180) = ui.im180_escape_hatch() {
+                let ctx = ui180.context();
+                will_want_keyboard |= ctx.WantCaptureKeyboardNextFrame | ctx.WantTextInputNextFrame;
+            }
+        }
+        Self::ui_publish_report(&self.ui_report);
+
+        self.metrics_post_ui(ui);
     }
     /// TODO: move to actual post-render (nexus callback)?
     pub fn post_render_late(&mut self, _render_slot: RenderSlot<'_>) {
