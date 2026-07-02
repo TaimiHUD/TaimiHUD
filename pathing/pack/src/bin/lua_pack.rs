@@ -36,6 +36,7 @@ fn main() -> anyhow::Result<()> {
     lua.setup_api_version(script::Unimplemented)?;
     preload_lib(&lua, "@taimi/util/init.lua")?;
     preload_lib(&lua, "@taimi/util/ud.lua")?;
+    preload_lib(&lua, "@taimi/todo/lson.lua")?;
     lua.setup_api_log(io::stderr())?;
     preload_lib(&lua, "@taimi/debug.lua")?;
     preload_lib(&lua, "@taimi/bitop.lua")?;
