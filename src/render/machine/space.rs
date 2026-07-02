@@ -7,6 +7,7 @@ use {
     core::{num::NonZero, ops::Range},
     glam::{Vec3A, Quat},
     glamour::{Angle, Matrix4, Point3, Transform3, Vector2, Vector3},
+    std::sync::LazyLock,
     taimi_meta::{
         spatial::record::{frame_is_lt, FrameRecordOf, FrameRecordEntry},
         coords::{camera_view, MapLocalScale, ScreenSpace},
@@ -517,6 +518,41 @@ impl RenderMachine {
             Err(intermission) =>
                 self.goggles.camera.camera_pause(intermission),
         }
+    }
+
+    fn logo_material() -> tobj::MTLLoadResult {
+        tobj::load_mtl_buf(&mut &include_bytes!("../../../data/assets/taimihud.mtl")[..])
+    }
+    /// TODO: preprocess into vertex data in a useful format
+    pub fn logo_object() -> Option<(&'static [tobj::Model], &'static [tobj::Material])> {
+        static MAT: LazyLock<Option<(Vec<tobj::Model>, Vec<tobj::Material>)>> = LazyLock::new(|| {
+            let lo = tobj::LoadOptions {
+                reorder_data: false,
+                single_index: true,
+                triangulate: true,
+                ignore_points: true,
+                ignore_lines: true,
+                // requires unstable but we don't use it...
+                #[cfg(todo = "unnecessary")]
+                merge_identical_points: false,
+                .. Default::default()
+            };
+            let res = tobj::load_obj_buf(
+                &mut &include_bytes!("../../../data/assets/taimihud.obj")[..],
+                &lo,
+                |_| RenderMachine::logo_material(),
+            ).and_then(|(o, m)| m.map(|m|
+                (o, m)
+            ));
+            match res {
+                #[cfg(taimi_debug)]
+                res => rt::log::debug_ok(
+                    anyhow::Context::context(res, "taimihud.obj")),
+                #[cfg(not(taimi_debug))]
+                res => res.ok(),
+            }
+        });
+        MAT.as_ref().map(|(o, m)| (&o[..], &m[..]))
     }
 }
 

@@ -1,19 +1,27 @@
 use {
     super::super::{Model, Vertex},
+    core::mem,
     glam::{Vec2, Vec3, Vec3Swizzles},
     tobj::Model as tobjModel,
 };
 
+#[repr(transparent)]
 pub struct ObjModel(pub tobjModel);
 impl ObjModel {
+    #[inline]
+    pub fn from_ref(model: &tobjModel) -> &Self {
+        unsafe {
+            mem::transmute(model)
+        }
+    }
     pub fn load(&self, xzy: bool) -> Model {
         let mesh = &self.0.mesh;
         let mut vertices = Vec::new();
         for index in mesh.indices.iter() {
             let start = *index as usize * 3;
-            let end = *index as usize * 3 + 3;
+            let end = start + 3;
             let start_2d = *index as usize * 2;
-            let end_2d = *index as usize * 2 + 2;
+            let end_2d = start_2d + 2;
             let vertex = &mesh
                 .positions
                 .get(start..end)

@@ -814,11 +814,18 @@ impl RenderState {
         }
         #[cfg(feature = "texture-loader")]
         {
-            let builtin = [RenderMachine::TEXTURE_LOGO_KEY, RenderMachine::TEXTURE_LOGO_LINES_KEY];
+            let builtin = [
+                RenderMachine::TEXTURE_LOGO_KEY,
+                RenderMachine::TEXTURE_LOGO_LINES_KEY,
+                #[cfg(feature = "space")]
+                RenderMachine::TEXTURE_GLYPH_HOLO_KEY,
+            ];
             TEXTURES.mark_immortal(builtin);
         }
         crate::texture_schedule_bytes(RenderMachine::TEXTURE_LOGO_KEY, RenderMachine::TEXTURE_LOGO_BIN);
         crate::texture_schedule_bytes(RenderMachine::TEXTURE_LOGO_LINES_KEY, RenderMachine::TEXTURE_LOGO_LINES_BIN);
+        #[cfg(feature = "space")]
+        crate::texture_schedule_bytes(RenderMachine::TEXTURE_GLYPH_HOLO_KEY, RenderMachine::TEXTURE_GLYPH_HOLO_BIN);
         rt::setup_stats();
         #[cfg(feature = "space")]
         crate::space::Engine::setup_stats();

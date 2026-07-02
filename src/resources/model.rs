@@ -14,7 +14,7 @@ pub enum ModelKind {
 }
 
 #[derive(Default, PartialEq, Clone)]
-pub struct Model(Vec<Vertex>);
+pub struct Model(pub(crate) Vec<Vertex>);
 
 impl Model {
     pub fn from_vertices(vertices: Vec<Vertex>) -> Self {
