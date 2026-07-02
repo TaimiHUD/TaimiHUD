@@ -491,7 +491,7 @@ impl EditMarkerWindowState {
                                 self.filetype = Some(selection);
                             }
                             ui.help_marker(|ui, _click| {
-                                ui.tooltip_text(fl!("marker-filetype-explanation"));
+                                ui.tooltip_text_wrapped(fl!("marker-filetype-explanation"));
                             });
                             let filename = self.path.get_or_insert_default();
                             with_i18n!("filename", |label| ui.input_text_managed(
