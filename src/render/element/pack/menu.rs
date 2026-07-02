@@ -87,7 +87,9 @@ where
         }
     }
     pub fn draw_menu_unloaded(&mut self) {
-        let mut menu = DrawCategoryMenu::new(self.prepare_header(), true);
+        let mut header = self.prepare_header();
+        header.is_leaf = None;
+        let mut menu = DrawCategoryMenu::new(header, true);
         let (mut act, mut stub) = menu.draw_start();
         if let Some(..) = &stub.token {
             menu.draw.ui.text("uhhhh wasn't I a leaf?");
@@ -441,13 +443,14 @@ where
     }
     pub fn draw_start(&mut self) -> (Option<UiAction>, DrawCategoryMenuStub<'ui>) {
         self.draw_spacing();
-        let (action, token) = match self.is_leaf() {
+        let is_leaf = self.is_leaf();
+        let (action, token) = match is_leaf {
             true => (self.draw_leaf(), None),
             _ => self.draw_branch(),
         };
         let stub = DrawCategoryMenuStub {
             token,
-            is_leaf: self.is_leaf(),
+            is_leaf,
             is_decorative: self.draw.is_decorative,
             is_copyable: self.is_copyable,
         };

@@ -103,6 +103,7 @@ impl PathingWindowState {
         U: ?Sized + ImDrawWindow<'ui>,
     {
         let pushy = ui.push_id(c"pathing-search");
+        #[cfg(todo)] { ui.window_prepare_item_focus(); }
         let mut search_dirty = with_i18n!("pathing-search", |hint| ui.input_text_managed(
             c"",
             &mut self.search_state.buffer,

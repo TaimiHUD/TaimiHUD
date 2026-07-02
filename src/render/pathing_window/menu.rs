@@ -51,6 +51,7 @@ impl PathingWindowState {
                     .filter_map(|(path, flags)| {
                         let filtered = match pack.categories.category_is_loaded(&pack.state, path) {
                             Some(false) if !unfiltered => return None,
+                            None if !unfiltered => return None,
                             #[cfg(todo = "unnecessary")]
                             _ if filtered => None,
                             Some(f) => Some(!f),

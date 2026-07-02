@@ -127,7 +127,16 @@ where
         if let Some(act) = pack_toggle {
             self.act_pack = Some((self.state.pack_path(), PackAction::Cat {
                 path: pseudo_root,
-                action: CategoryAction::Enable(Some(act)),
+                action: match (pseudo_root, act) {
+                    (None, false) => {
+                        #[cfg(taimi_debug)]
+                        log::debug!("MULTIROOT DISABLE HACK");
+                        CategoryAction::EnableChildren(Some(act))
+                    },
+                    _ => {
+                        CategoryAction::Enable(Some(act))
+                    },
+                },
             }));
         }
         let pack_act = match pack_act {
