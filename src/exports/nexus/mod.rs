@@ -11,6 +11,7 @@ use {
         marker::format::MarkerType,
         render::{
             i18n::{self, new_lang_id, with_i18n, LanguageIdentifier},
+            element::im::{UiFrameContainer, UiFrameViewport},
             machine::RenderMachine,
             RenderState,
         },
@@ -171,7 +172,13 @@ extern "C-unwind" fn unsafe_render() {
         if RenderState::is_host(AddonHostName::Nexus) != Some(true) {
             return
         }
-        let frame = RenderMachine::ui_read_context().to_frame_storage();
+        let host = UiFrameContainer {
+            viewport: UiFrameViewport {
+                host: AddonHostName::Nexus,
+            },
+            kind: UiFrameContainer::TYPE_VIEWPORT_PRESENT,
+        };
+        let frame = RenderMachine::ui_read_context().to_frame_storage(host);
         with_ui(|ui| {
             RenderMachine::turn_ui_entry(ui);
             RenderState::render_ui(ui, frame.as_ref());
@@ -184,7 +191,13 @@ extern "C-unwind" fn unsafe_options() {
     unsafe {
         let mut running = loaded() && RenderState::is_running();
         if running {
-            let frame = RenderMachine::ui_read_context().to_frame_storage();
+            let host = UiFrameContainer {
+                viewport: UiFrameViewport {
+                    host: AddonHostName::Nexus,
+                },
+                kind: UiFrameContainer::TYPE_FRAME_OPTIONS,
+            };
+            let frame = RenderMachine::ui_read_context().to_frame_storage(host);
             with_ui(|ui| {
                 running &= RenderState::render_options(ui, frame.as_ref(), AddonHostName::Nexus);
             });
@@ -196,7 +209,13 @@ extern "C-unwind" fn unsafe_options() {
 }
 extern "C-unwind" fn unsafe_options_fallback() {
     unsafe {
-        let frame = RenderMachine::ui_read_context().to_frame_storage();
+        let host = UiFrameContainer {
+            viewport: UiFrameViewport {
+                host: AddonHostName::Nexus,
+            },
+            kind: UiFrameContainer::TYPE_TAIMI_OPTIONS_SAFE,
+        };
+        let frame = RenderMachine::ui_read_context().to_frame_storage(host);
         with_ui(|ui| RenderState::render_options_fallback(ui, frame.as_ref(), AddonHostName::Nexus));
     }
 }

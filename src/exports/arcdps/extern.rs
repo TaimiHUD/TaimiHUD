@@ -1,10 +1,15 @@
 use {
     crate::{
         exports::{arcdps as exports, runtime as rt},
-        render::element::im::{
-            img::io::{UiAllocatorFns, UiAllocatorRaw, WinHeapAllocator},
-            ImDrawWindow,
-            UiContextCell,
+        render::{
+            element::im::{
+                img::io::{UiAllocatorFns, UiAllocatorRaw, WinHeapAllocator},
+                ImDrawWindow,
+                UiContextCell,
+                UiFrameContainer,
+                UiFrameViewport,
+            },
+            machine::RenderMachine,
         },
         settings::state::AddonHostName,
     },
@@ -183,7 +188,13 @@ unsafe extern "C" fn arc_cb_imgui(not_charsel_or_loading: c_bool32, hide_if_comb
         Some(..) => (),
     }
 
-    let frame = crate::render::machine::RenderMachine::ui_read_context().to_frame_storage();
+    let host = UiFrameContainer {
+        viewport: UiFrameViewport {
+            host: AddonHostName::ArcDPS,
+        },
+        kind: UiFrameContainer::TYPE_VIEWPORT_PRESENT,
+    };
+    let frame = RenderMachine::ui_read_context().to_frame_storage(host);
     with_imgui(|ui| {
         let ui = ui.map(|ui| (ui, frame.as_ref()));
         exports::imgui_present(ui, not_charsel_or_loading.into(), hide_if_combat_or_ooc.value)
@@ -191,12 +202,35 @@ unsafe extern "C" fn arc_cb_imgui(not_charsel_or_loading: c_bool32, hide_if_comb
 }
 
 unsafe extern "C" fn arc_cb_imgui_options_tab() {
-    let frame = crate::render::machine::RenderMachine::ui_read_context().to_frame_storage();
-    let _ = try_with_imgui(|ui| exports::imgui_draw_options_tab(ui, frame.as_ref()));
+    let host = UiFrameContainer {
+        viewport: UiFrameViewport {
+            host: AddonHostName::ArcDPS,
+        },
+        kind: UiFrameContainer::TYPE_FRAME_OPTIONS,
+    };
+    let frame = RenderMachine::ui_read_context().to_frame_storage(host);
+    let frame_fallback = core::cell::LazyCell::new(|| {
+        // ew...
+        let mut fallback = frame.clone();
+        fallback.container.kind = UiFrameContainer::TYPE_TAIMI_OPTIONS_SAFE;
+        fallback
+    });
+    let _ = try_with_imgui(|ui| {
+        let draw_fallback = exports::imgui_draw_options_tab(ui, frame.as_ref());
+        if draw_fallback {
+            exports::imgui_draw_options_fallback(ui, frame_fallback.as_ref());
+        }
+    });
 }
 
 unsafe extern "C" fn arc_cb_imgui_options_windows(window_name: Option<CStrPtr>) -> c_bool32 {
-    let frame = crate::render::machine::RenderMachine::ui_read_context().to_frame_storage();
+    let host = UiFrameContainer {
+        viewport: UiFrameViewport {
+            host: AddonHostName::ArcDPS,
+        },
+        kind: UiFrameContainer::TYPE_ARC_WINDOW_TOGGLES,
+    };
+    let frame = RenderMachine::ui_read_context().to_frame_storage(host);
     try_with_imgui(|ui| {
         let window = window_name.as_ref().map(|w| w.to_string_lossy());
         let window = window.as_ref().map(|w| &w[..]);

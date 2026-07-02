@@ -933,17 +933,9 @@ impl PathingController {
     /// TODO: might still be possible to use if bound to a mouse button maybe?
     #[cfg(feature = "paths-interact")]
     fn filter_press_gameplay(&mut self, control: GameControl) -> Option<MapIndex> {
-        let ml = match () {
-            #[cfg(todo = "unnecessary")]
-            _ => rt::mumble_link_ptr().ok(),
-            _ => self.rx.interact.player_pos.ml,
-        };
         let res = self.gameplay_map().and_then(|map_id| {
-            let is_text_input = ml
-                .map(|ml| ml.read_ui_state())
-                .map(|state| UiState::from(state).contains(UiState::TextInput))
-                .unwrap_or(true);
-            (!is_text_input).then_some(map_id)
+            let keyboard_available = crate::render::machine::RenderMachine::ui_read_captured_keyboard().is_none();
+            (keyboard_available).then_some(map_id)
         })?;
 
         match control {
