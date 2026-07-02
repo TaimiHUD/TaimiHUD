@@ -1,4 +1,7 @@
-use std::{borrow::Cow, hash};
+use std::{
+    borrow::{Borrow, Cow},
+    hash,
+};
 
 pub mod cmp;
 pub mod collections;
@@ -51,13 +54,23 @@ pub fn bool_or_none<const N: bool>(&v: &Option<bool>) -> bool {
 pub fn a_bool<const N: bool>() -> bool {
     N
 }
-/// `#[serde(skip_serializing_if = "f32_or_none::<{2.0f32.to_bits()>")]`
+/// `#[serde(skip_serializing_if = "f32_or_none::<{2.0f32.to_bits()}>")]`
 #[inline(always)]
 pub fn f32_or_none<const N: u32>(v: &Option<f32>) -> bool {
     match *v {
         Some(v) => v == f32::from_bits(N),
         None => true,
     }
+}
+/// `#[serde(skip_serializing_if = "as_a_f32::<{2.0f32.to_bits()}, _>")]`
+#[inline(always)]
+pub fn as_a_f32<const N: u32, T: Borrow<f32>>(v: T) -> bool {
+    is_a_f32::<N>(v.borrow())
+}
+/// `#[serde(skip_serializing_if = "is_a_f32::<{2.0f32.to_bits()}>")]`
+#[inline(always)]
+pub fn is_a_f32<const N: u32>(v: &f32) -> bool {
+    *v == f32::from_bits(N)
 }
 /// `#[serde(default = "a_f32::<{2.0f32.to_bits()}>")]`
 #[inline(always)]
