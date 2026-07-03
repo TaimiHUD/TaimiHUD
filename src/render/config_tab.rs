@@ -94,8 +94,6 @@ impl ConfigTabState {
 
         ui.text_wrapped(fl!("imgui-notice"));
         ui.dummy([4.0, 4.0]);
-        ui.text_wrapped(fl!("keybind-triggers"));
-        ui.dummy([4.0, 4.0]);
 
         if ui.button(fl!("quit")) {
             RenderState::try_send(RenderEvent::InitiateQuit);
@@ -323,6 +321,7 @@ impl ConfigTabState {
     ) where
         U: ?Sized + ImDrawWindow<'ui>,
     {
+        ui.text_wrapped(fl!("keybind-triggers"));
         ui.dummy([4.0, 4.0]);
         if let Some(settings) = Settings::try_read() {
             timer_window_state.progress_bar.stock = settings.progress_bar.stock;

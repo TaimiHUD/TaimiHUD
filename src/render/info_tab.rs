@@ -141,8 +141,6 @@ impl InfoTabState {
         ui.text_wrapped(description);
         ui.dummy([4.0, 4.0]);
 
-        ui.text_wrapped(fl!("keybind-triggers"));
-
         if let Some((wrap_limit, wrap_y)) = wrap_limit {
             wrap_limit.end();
             let pos = ui.cursor_screen_pos();
