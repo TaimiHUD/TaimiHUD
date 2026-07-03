@@ -4,7 +4,7 @@ use {
     anyhow::{anyhow, Context},
     glam::{Vec3, Vec4},
     std::{borrow::Cow, fmt, str::FromStr, sync::Arc},
-    taimi_hoard::str_opt_ref,
+    taimi_hoard::{str_opt_ref, vec::vec32_eq},
     xml::name::Name,
 };
 
@@ -1514,7 +1514,13 @@ cell::pack_attr! {
 }
 impl keys::GetAttr<keys::RotateX> for PoiAttributes {
     fn has_attr(&self) -> bool {
-        self.rotate.is_some()
+        match self.rotate {
+            None => false,
+            #[cfg(todo)]
+            Some(r) if vec32_eq(r, Self::ROTATE_UNSET) =>
+                false,
+            Some(..) => true,
+        }
     }
     fn get_attr_ref(&self) -> Option<&keys::RotateX> {
         self.rotate.as_ref().map(|rot| keys::RotateX::from_ref(&rot.x))
@@ -1526,8 +1532,8 @@ impl keys::SetAttr<keys::RotateX> for PoiAttributes {
     }
     fn unset_attr(&mut self) {
         let is_empty = if let Some(rot) = &mut self.rotate {
-            rot.x = Default::default();
-            *rot == Vec3::ZERO
+            rot.x = Self::ROTATE_UNSET_AXIS;
+            vec32_eq(*rot, Self::ROTATE_UNSET)
         } else {
             false
         };
@@ -1550,8 +1556,8 @@ impl keys::SetAttr<keys::RotateY> for PoiAttributes {
     }
     fn unset_attr(&mut self) {
         let is_empty = if let Some(rot) = &mut self.rotate {
-            rot.y = Default::default();
-            *rot == Vec3::ZERO
+            rot.y = Self::ROTATE_UNSET_AXIS;
+            vec32_eq(*rot, Self::ROTATE_UNSET)
         } else {
             false
         };
@@ -1574,8 +1580,8 @@ impl keys::SetAttr<keys::RotateZ> for PoiAttributes {
     }
     fn unset_attr(&mut self) {
         let is_empty = if let Some(rot) = &mut self.rotate {
-            rot.z = Default::default();
-            *rot == Vec3::ZERO
+            rot.z = Self::ROTATE_UNSET_AXIS;
+            vec32_eq(*rot, Self::ROTATE_UNSET)
         } else {
             false
         };
