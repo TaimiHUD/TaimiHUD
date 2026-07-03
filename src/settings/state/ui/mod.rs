@@ -69,10 +69,7 @@ pub struct PathingSearchState {
 }
 impl PathingSearchState {
     pub fn query(&self) -> Option<&str> {
-        match &self.query[..] {
-            s if s.is_empty() => None,
-            s => Some(s),
-        }
+        taimi_hoard::str_opt_ref(&self.query)
     }
 
     pub fn is_empty(&self) -> bool {

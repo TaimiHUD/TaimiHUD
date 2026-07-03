@@ -486,10 +486,11 @@ impl ActivePack {
     }
 
     pub(crate) fn draw_tooltip_category(ui: &Ui, category: &Category) {
-        let desc = match &category.marker_attributes.tip_description {
-            Some(desc) if !desc.is_empty() => Some(&desc[..]),
-            _ => None,
-        };
+        let desc = category
+            .marker_attributes
+            .tip_description
+            .as_deref()
+            .and_then(taimi_hoard::str_opt_ref);
         let title = match &category.marker_attributes.tip_name {
             Some(title) if !title.is_empty() && !category.display_name().starts_with(&title[..]) =>
                 Some(&title[..]),
@@ -507,10 +508,10 @@ impl ActivePack {
     }
 
     fn draw_tooltip_poi(ui: &Ui, attributes: &MarkerAttributes) {
-        let desc = match &attributes.tip_description {
-            Some(desc) if !desc.is_empty() => Some(&desc[..]),
-            _ => None,
-        };
+        let desc = attributes
+            .tip_description
+            .as_deref()
+            .and_then(taimi_hoard::str_opt_ref);
 
         if let Some(title) = &attributes.tip_name {
             let _title_font = desc.map(|_| RenderState::push_font("big", ui));
