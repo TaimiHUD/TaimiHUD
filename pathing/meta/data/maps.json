@@ -1059,5 +1059,5 @@
 ,"1620":{"region_id":58,"continent_id":1,"floors":[1],"default_floor":1,"map_rect":[[-30720,-36864],[30720,39936]],"continent_rect":[[3130,59945],[5690,63145]],"type":"Instance"}
 ,"1621":{"region_id":58,"continent_id":1,"floors":[1],"default_floor":1,"map_rect":[[-30720,-36864],[30720,39936]],"continent_rect":[[3130,59945],[5690,63145]],"type":"Instance"}
 ,"1622":{"region_id":58,"continent_id":1,"floors":[1,3,2,0],"default_floor":1,"map_rect":[[-30720,-36864],[30720,39936]],"continent_rect":[[3130,59945],[5690,63145]],"type":"Public"}
-,"1623":{"region_id":58,"continent_id":1,"floors":[-46],"default_floor":-46,"map_rect":[[-15360,-15360],[15360,15360]],"continent_rect":[[9800,54000],[12360,56560]],"type":"Instance"}
+,"1623":{"region_id":58,"continent_id":1,"floors":[-46],"default_floor":-46,"map_rect":[[-15360,-15360],[15360,15360]],"continent_rect":[[9800,54000],[11080,55280]],"type":"Instance"}
 ,"1624":{"region_id":58,"continent_id":1,"floors":[1],"default_floor":1,"map_rect":[[-30720,-36864],[30720,39936]],"continent_rect":[[3130,59945],[5690,63145]],"type":"Instance"}}
