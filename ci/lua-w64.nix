@@ -10,12 +10,18 @@ final: prev: let
       install -Dm0755 -t $out/lib/ src/libluajit-$luaversion.dll.a || true
     '';
     staticFlag = "BUILDMODE=static";
+    common = {
+      env = old.env // {
+        # TODO: bad idea? compare runtime characteristics idk
+        NIX_CFLAGS_COMPILE = old.env.NIX_CFLAGS_COMPILE or "" + " -Oz";
+      };
+    };
   in
     if luaShared
-    then {
+    then common // {
       postInstall = sharedInstall + old.postInstall or "";
     }
-    else {
+    else common // {
       makeFlags = old.makeFlags or [] ++ [staticFlag];
     };
   luaOverrideAttrs = old: let
@@ -66,7 +72,12 @@ in {
     else lua;
   fixW64Luajit = luajit:
     if isMinGW
-    then (luajit.overrideAttrs luajitOverrideAttrs)
+    then (luajit.overrideAttrs luajitOverrideAttrs).override {
+      #enable52Compat = true;
+      #deterministicStringIds = true;
+      #useSystemMalloc = true; # broken :<
+      #enableGC64 = false; # crashy!
+    }
     else luajit;
   luajit_2_1 = final.fixW64Luajit prev.luajit_2_1;
   luajit_2_0 = final.fixW64Luajit prev.luajit_2_0;

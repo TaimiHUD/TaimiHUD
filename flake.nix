@@ -120,6 +120,7 @@
           inherit
             (legacyPackages)
             lua
+            lua-build
             craneLib
             fenixPackages
             fenixToolchain

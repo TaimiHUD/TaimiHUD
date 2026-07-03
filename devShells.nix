@@ -17,6 +17,7 @@
     lua-build ? null,
     libgit2,
     pkg-config,
+    enableLua ? true,
   }: let
     libgit2'build = libgit2.__spliced.buildHost or buildPackages.libgit2 or libgit2;
     TARGET_CC = "${stdenv.cc.targetPrefix}cc";
@@ -29,8 +30,8 @@
           stdenv.cc
           arcdps-imgui_18000.cimgui-static
           arcdps-imgui_19270.cimgui-static
-          lua
         ]
+        ++ lib.optional enableLua lua
         ++ lib.optional stdenv.hostPlatform.isWindows windows.pthreads;
 
       depsBuildBuild = [
@@ -47,7 +48,7 @@
           formatter
           pkg-config
         ]
-        ++ lib.optional false lua-build;
+        ++ lib.optional enableLua lua-build;
 
       shellHook = ''
         if [[ -n ''${FLAKE_OPT_HOOKS_INSTALL-1} ]]; then
