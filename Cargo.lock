@@ -3759,7 +3759,6 @@ dependencies = [
  "serde_json",
  "serde_repr",
  "strum 0.27.1",
- "strum_macros 0.27.1",
  "sync-unsafe-cell",
  "taimi_api_client",
  "taimi_d3d",
