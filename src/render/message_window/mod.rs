@@ -286,8 +286,15 @@ impl MessageWindowState {
         if !self.ui_state.is_watching() {
             return false
         }
+        let prev_open = self.ui_state.cached.as_ref().map(|s| s.window.open);
         let ui_state = self.ui_state.read_mut();
-        ui_state.window.open.is_active()
+        let open = ui_state.window.open;
+        if let Some(prev_open) = prev_open {
+            if prev_open != open && prev_open.is_closed() {
+                self.ui_state_authorative = true;
+            }
+        }
+        open.is_active()
     }
     pub fn post_render(&mut self) {
         if mem::take(&mut self.ui_state_pending) && self.ui_state.is_watching() {
@@ -490,6 +497,24 @@ impl MessageWindowState {
         } else 
         if active {
             self.draw_content(ui)
+        } else if !collapsed {
+            ui.same_line();
+            if ui.small_button(fl!("message-sample")) {
+                let key = MessageKey::with_uuid(uuid::Uuid::new_v4());
+                let mut desc = MessageItemDesc::with_base(MessageBaseDesc::default());
+                desc.set_title(fl!("message-sample-title").to_string());
+                desc.set_id(*fl!("message-sample-body").id_name());
+                desc.set_message("");
+                desc.set_attribution(fl!("message-sample").to_string());
+                desc.set_tooltip_title(fl!("trigger-info").to_string());
+                desc.set_tooltip_desc("zzz");
+                let mut action = MessageActionDesc::blank(Box::new(move || {
+                    crate::render::RenderEvent::MessageDismiss { key: key }.try_send();
+                }) as Box<_>);
+                action.set_id(*fl!("poi-activate-info").id_name());
+                desc.actions.push(action);
+                self.register_item_with_ui(ui, key, desc);
+            }
         }
     }
     pub fn draw_content<'ui, U>(&mut self, ui: &mut U) where
