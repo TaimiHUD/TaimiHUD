@@ -960,6 +960,11 @@ impl Rotate {
     pub const fn from_ref(v: &Vec3) -> &Self {
         unsafe { mem::transmute(v) }
     }
+
+    #[inline]
+    pub fn radians(&self) -> Vec3 {
+        self.0.map(f32::to_radians)
+    }
 }
 impl AttrKey for Rotate {
     type Storage = Vec3;
@@ -1006,6 +1011,42 @@ impl Borrow<Rotate> for Vec3 {
     #[inline]
     fn borrow(&self) -> &Rotate {
         Rotate::from_ref(self)
+    }
+}
+impl Borrow<RotateX> for Rotate {
+    #[inline]
+    fn borrow(&self) -> &RotateX {
+        RotateX::from_ref(&self.0.x)
+    }
+}
+impl Borrow<RotateY> for Rotate {
+    #[inline]
+    fn borrow(&self) -> &RotateY {
+        RotateY::from_ref(&self.0.y)
+    }
+}
+impl Borrow<RotateZ> for Rotate {
+    #[inline]
+    fn borrow(&self) -> &RotateZ {
+        RotateZ::from_ref(&self.0.z)
+    }
+}
+impl RotateX {
+    #[inline]
+    pub const fn radians(&self) -> f32 {
+        self.0.to_radians()
+    }
+}
+impl RotateY {
+    #[inline]
+    pub const fn radians(&self) -> f32 {
+        self.0.to_radians()
+    }
+}
+impl RotateZ {
+    #[inline]
+    pub const fn radians(&self) -> f32 {
+        self.0.to_radians()
     }
 }
 
