@@ -192,6 +192,14 @@ impl ImIo for ImGuiIO {
         ImSpaces(self.DisplayFramebufferScale).into()
     }
     #[inline]
+    fn frame_dt(&self) -> f32 {
+        self.DeltaTime
+    }
+    #[inline]
+    fn frame_rate(&self) -> f32 {
+        self.Framerate
+    }
+    #[inline]
     fn want_text_input(&self) -> bool {
         self.WantTextInput
     }

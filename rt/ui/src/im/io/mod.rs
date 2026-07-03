@@ -238,6 +238,8 @@ impl<U: ?Sized> ImContextStateExt for U where U: ImContextState {}
 pub trait ImIo {
     fn display_size(&self) -> ImSize2<f32>;
     fn display_framebuffer_scale(&self) -> ImVec2<f32>;
+    fn frame_dt(&self) -> f32;
+    fn frame_rate(&self) -> f32;
     fn want_text_input(&self) -> bool;
     fn want_capture_mouse(&self) -> bool;
     fn want_capture_keyboard(&self) -> bool;
@@ -254,6 +256,8 @@ impl ImIo for () {
     fn display_framebuffer_scale(&self) -> ImVec2<f32> {
         Default::default()
     }
+    fn frame_dt(&self) -> f32 { self.frame_rate().recip() }
+    fn frame_rate(&self) -> f32 { 30.0f32 }
     fn want_text_input(&self) -> bool {
         false
     }

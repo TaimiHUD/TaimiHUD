@@ -203,6 +203,24 @@ impl ImIo for Io {
         }
     }
     #[inline]
+    fn frame_dt(&self) -> f32 {
+        match self {
+            #[cfg(feature = "imgui180-rs")]
+            io => io.delta_time.into(),
+            #[cfg(not(feature = "imgui180-rs"))]
+            io => io.DeltaTime,
+        }
+    }
+    #[inline]
+    fn frame_rate(&self) -> f32 {
+        match self {
+            #[cfg(feature = "imgui180-rs")]
+            io => io.framerate.into(),
+            #[cfg(not(feature = "imgui180-rs"))]
+            io => io.Framerate,
+        }
+    }
+    #[inline]
     fn want_text_input(&self) -> bool {
         match self {
             #[cfg(feature = "imgui180-rs")]
