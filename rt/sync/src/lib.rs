@@ -1,3 +1,5 @@
+#![doc(html_logo_url = "https://taimihud.com/logotype-holo.png")]
+//! Synchronization primitives and async utilities for TaimiHUD.
 pub use std::sync::PoisonError as StdPoisonError;
 
 pub mod arcs;

@@ -1,3 +1,5 @@
+#![doc(html_logo_url = "https://taimihud.com/logotype-holo.png")]
+//! Shared collection utilities, string helpers, and statistics for TaimiHUD.
 use std::{borrow::Cow, hash};
 
 pub mod cmp;

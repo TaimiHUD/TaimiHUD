@@ -1,3 +1,5 @@
+#![doc(html_logo_url = "https://taimihud.com/logotype-holo.png")]
+//! GW2 API client and typed endpoint bindings.
 pub use gw2lib_model::{self as model, BulkEndpoint, Endpoint, EndpointWithId, FixedEndpoint, Language};
 use {
     core::{fmt, marker::PhantomData, mem, ops},
