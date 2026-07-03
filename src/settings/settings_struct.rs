@@ -30,7 +30,7 @@ use {
         },
         task::Poll,
     },
-    strum_macros::EnumIter,
+    strum::EnumIter,
     tokio::{
         fs::{create_dir_all, read_dir, read_to_string, try_exists, File},
         io::AsyncWriteExt,

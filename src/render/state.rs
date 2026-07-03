@@ -47,7 +47,7 @@ use {
             MutexGuard,
         },
     },
-    strum_macros::{Display, EnumIter},
+    strum::{Display, EnumIter},
     tokio::sync::mpsc::{Receiver, Sender},
 };
 

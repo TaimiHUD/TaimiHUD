@@ -12,7 +12,7 @@ use {
     anyhow::Context,
     futures::stream::StreamExt,
     std::{collections::HashMap, sync::Arc},
-    strum_macros::Display,
+    strum::Display,
     taimi_meta::ui::UiState,
     tokio::{
         fs::{create_dir_all, metadata},

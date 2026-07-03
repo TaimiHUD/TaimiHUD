@@ -25,7 +25,7 @@ use {
     anyhow::{anyhow, Context},
     futures::{FutureExt, StreamExt},
     std::{path::PathBuf, sync::Arc},
-    strum_macros::Display,
+    strum::Display,
     taimi_meta::ui::MapContext,
     taimi_pack::{attributes::Festivals, category::CategoryId, Pack},
     tokio::{

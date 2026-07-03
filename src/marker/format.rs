@@ -21,7 +21,7 @@ use {
         path::{Path, PathBuf},
         sync::Arc,
     },
-    strum_macros::{Display, EnumIter, FromRepr},
+    strum::{Display, EnumIter, FromRepr},
     taimi_meta::coords::LocalSpace,
     tokio::{
         fs::{create_dir_all, read_to_string, File, OpenOptions},

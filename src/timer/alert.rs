@@ -3,7 +3,7 @@ use {
     relative_path::RelativePathBuf,
     serde::{Deserialize, Serialize},
     std::ops::Deref,
-    strum_macros::Display,
+    strum::Display,
     tokio::time::{Duration, Instant},
 };
 
