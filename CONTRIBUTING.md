@@ -1,5 +1,7 @@
 # Contributing
 
+Please note that PRs should target the develop branch - main is currently used as a staging branch for releases.
+
 Eventually we'll fill this out with docs links and more...
 Have questions? Reach out on IRC or Discord.
 
