@@ -230,6 +230,8 @@ pub enum ScriptSignal {
     Ended,
     /// request immediate resume (or signalled oob) since there may be something to yield
     Resume,
+    /// request exit + reinit
+    Restart,
     #[cfg(todo = "unnecessary")]
     RegisterTick,
     /// decision to filter marker as a response to [ScriptNotification::PathingFilterMarker]

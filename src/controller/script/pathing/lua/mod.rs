@@ -3,7 +3,7 @@ use {
         controller::script::{
             id::{PackScriptPath, ScriptIndex, ScriptPath},
             event::{ScriptNotification, ScriptSignal},
-            lua::{LuaPlugBase, ScriptNotification0},
+            lua::{LuaPlugBase, LuaMessage, ScriptNotification0},
             menu::{PlugMenu, PlugMenuInstance},
             pathing::{marker_index2loc, marker_loc2index, marker_ty2ns, PackPlugStash},
             persistence::ScriptHostPersistence,
@@ -193,7 +193,11 @@ impl LuaPackDesc {
     }
     pub fn exit(&mut self, lua: &RuntimeLua) -> anyhow::Result<()> {
         let mut signalled = false;
-        while !matches!(self.received, ScriptSignal::Ended | ScriptSignal::Pending) {
+        if self.received == ScriptSignal::Restart {
+            // give it one chance to clean up
+            self.received = ScriptSignal::Resume;
+        }
+        while !matches!(self.received, ScriptSignal::Ended | ScriptSignal::Restart | ScriptSignal::Pending) {
             if !signalled {
                 let Ok(..) = self.running() else { return Ok(()) };
                 let () = self
@@ -276,6 +280,11 @@ impl LuaPackDesc {
             ScriptSignal::Ended => {
                 log::info!("{self} quit");
                 self.co = None;
+                return Ok(())
+            },
+            ScriptSignal::Restart => {
+                log::info!("{self} requested a restart");
+                LuaMessage::Restart { context: self.shared().plug.path.path }.try_send();
                 return Ok(())
             },
             id => {
@@ -368,7 +377,12 @@ impl LuaPackDesc {
             }
             // event loop may want to clean up prior to receiving new set of handlers...
             let res = self.notify_with(lua, ScriptNotification::PathingMapExit, (map_id.get(),));
+            let abort = res.is_err() | matches!(self.received, ScriptSignal::Ended | ScriptSignal::Restart);
             let _ = rt::log::error_ok(res);
+            // typical packs will request restart on map changes so wait for them...
+            if abort {
+                return Ok(())
+            }
         }
 
         let key_once = keys::ScriptOnce::pack_key_of();

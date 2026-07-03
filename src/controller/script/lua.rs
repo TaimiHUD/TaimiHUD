@@ -135,7 +135,7 @@ impl LuaController {
             if let (Some(lua), Some(next)) = (self.runtime.as_ref(), notif) {
                 'pack: for desc in &mut self.packs {
                     match (desc.received, next) {
-                        (ScriptSignal::Ended, _) => continue 'pack,
+                        (ScriptSignal::Ended | ScriptSignal::Restart, _) => continue 'pack,
                         (ScriptSignal::Pending, ScriptNotification::Nop) => {
                             if !desc.poll_idle(lua) {
                                 continue 'pack
@@ -155,7 +155,7 @@ impl LuaController {
                 }
                 'plug: for desc in &mut self.plugs {
                     match (desc.received, next) {
-                        (ScriptSignal::Ended, _) => continue 'plug,
+                        (ScriptSignal::Ended | ScriptSignal::Restart, _) => continue 'plug,
                         (ScriptSignal::Pending, ScriptNotification::Nop) => {
                             if !desc.poll_idle(lua) {
                                 continue 'plug
@@ -495,6 +495,39 @@ impl LuaController {
                     }
                 });
                 let () = res?;
+            },
+            LuaMessage::Restart {
+                context,
+            } => {
+                let followup = match context.namespace() {
+                    _ if context == ScriptIndex::GLOBAL =>
+                        Err(script::format_err!("TODO: global restart")),
+                    ScriptIndex::NS_PLUG => {
+                        let target = context.get_plug_index();
+                        Self::locate_plug_mut(&mut self.plugs, target)
+                            .map(|plug|
+                                LuaMessage::SpawnPlug(plug.entry_path.to_path_buf())
+                            )
+                    },
+                    #[cfg(feature = "paths-lua")]
+                    ScriptIndex::NS_PACK => {
+                        let target = context.get_pack_index();
+                        Self::locate_pack_mut(&mut self.packs, target)
+                            .and_then(|pack|
+                                pack.shared().get_loader().and_then(|l|
+                                    l.blocking_lock().load_asset_dyn(super::pathing::PACK_ENTRYPOINT)
+                                )
+                            ).map(|entrypoint|
+                                LuaMessage::SpawnPack(target.pivot_from(), entrypoint)
+                            )
+                    },
+                    _ => Err(script::format_err!("don't know how to restart {context}")),
+                };
+                if !self.process_message(LuaMessage::Stop { context } )? {
+                    return Ok(false)
+                }
+                let followup = followup?;
+                self.process_message(followup);
             },
         }
         Ok(true)
@@ -887,6 +920,9 @@ pub enum LuaMessage {
     Stop {
         context: ScriptIndex,
     },
+    Restart {
+        context: ScriptIndex,
+    },
     NotifyScript0 {
         id: ScriptNotification,
         context: ScriptIndex,
@@ -1000,7 +1036,7 @@ impl LuaPlugBase {
 
     pub fn wants_poll(&self) -> bool {
         match self.received {
-            ScriptSignal::Ended | ScriptSignal::Pending => false,
+            ScriptSignal::Ended | ScriptSignal::Restart | ScriptSignal::Pending => false,
             _ => true,
         }
     }
@@ -1049,6 +1085,9 @@ impl LuaPlugBase {
                 return Ok(None)
             },
             ScriptSignal::Resume => Self::START_TIMEOUT_RESUME,
+            ScriptSignal::Restart => {
+                return Err(to_lua_error(script::format_err!("wants to restart before even trying?")))
+            },
             _ => 1,
         };
         *timeout = match timeout.checked_sub(weight) {
@@ -1225,6 +1264,11 @@ impl LuaPlugDesc {
                 self.co = None;
                 return Ok(())
             },
+            ScriptSignal::Restart => {
+                log::info!("{self} requested a restart");
+                LuaMessage::Restart { context: self.shared().path.path }.try_send();
+                return Ok(())
+            },
             #[cfg(todo)]
             id => {
                 log::debug!("TODO: handle {id:?}: {yielded:?}");
@@ -1239,7 +1283,11 @@ impl LuaPlugDesc {
     }
     pub fn exit(&mut self, lua: &RuntimeLua) -> anyhow::Result<()> {
         let mut signalled = false;
-        while !matches!(self.received, ScriptSignal::Ended | ScriptSignal::Pending) {
+        if self.received == ScriptSignal::Restart {
+            // give it one chance to clean up
+            self.received = ScriptSignal::Resume;
+        }
+        while !matches!(self.received, ScriptSignal::Ended | ScriptSignal::Restart | ScriptSignal::Pending) {
             if !signalled {
                 let Ok(..) = self.running() else { return Ok(()) };
                 let () = self
