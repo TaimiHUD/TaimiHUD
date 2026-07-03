@@ -193,16 +193,23 @@ impl TaimiLog {
 }
 
 impl Log for TaimiLog {
-    fn enabled(&self, _metadata: &Metadata) -> bool {
+    fn enabled(&self, metadata: &Metadata) -> bool {
+        if LogFilter::blacklisted(metadata) {
+            return false
+        }
+
         #[cfg(feature = "log-filter")]
         if let filter @ LogFilter::Env(..) = &*LOG_FILTER {
-            return filter.enabled(_metadata)
+            return filter.enabled(metadata)
         }
         true
     }
 
     fn log(&self, record: &Record) {
         use io::Write as _;
+        if !self.enabled(record.metadata()) {
+            return
+        }
 
         if let Err(e) = log_record(self, record) {
             // what can we do, log the error..?
@@ -588,7 +595,25 @@ impl LogFilter {
         }
     }
 
+    #[cfg(debug_assertions)]
+    pub fn blacklisted(_: &Metadata) -> bool {
+        false
+    }
+    #[cfg(not(debug_assertions))]
+    pub fn blacklisted(metadata: &Metadata) -> bool {
+        if metadata.target().starts_with("i18n_embed") && LevelFilter::Warn < metadata.level() {
+            // noisy and no way to disable the dep, blacklisted
+            return true
+        }
+
+        false
+    }
+
     pub fn enabled(&self, metadata: &Metadata) -> bool {
+        if Self::blacklisted(metadata) {
+            return false
+        }
+
         match self {
             Self::Level(filter) => *filter >= metadata.level(),
             #[cfg(feature = "log-filter")]
