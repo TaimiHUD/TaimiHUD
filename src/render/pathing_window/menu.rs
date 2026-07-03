@@ -60,7 +60,9 @@ impl PathingWindowState {
                         Some((path, flags, filtered))
                     })
             });
-            let multi_root = roots.clone().count() > 1;
+            let root_count = roots.clone().count();
+            if root_count == 0 && !unfiltered { continue }
+            let multi_root = root_count > 1;
             match was_multi_root {
                 Some(was) if multi_root || was => {
                     Self::dead_zone_spacing(ui, false);
@@ -71,7 +73,7 @@ impl PathingWindowState {
             }
             was_multi_root = Some(multi_root);
             drop(roots);
-            pack.draw_menu(ui);
+            pack.draw_menu(ui, unfiltered);
             #[cfg(feature = "paths-lua")]
             {
                 let script_menus = pack.state.plug.as_ref().map(|m| {
