@@ -1924,10 +1924,11 @@ impl PackRenderResources {
                             },
                             #[cfg(todo)]
                             attrs => attrs.rotation().map(|rot| rot * Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2)),
-                            attrs => attrs.get_attr_of::<keys::Rotate>().map(|rot|
+                            attrs => attrs.get_attr_of::<keys::Rotate>().map(|rot| {
+                                let rot = rot.radians();
                                 // can maybe get away with less fancy math idk...
-                                Quat::from_euler(glam::EulerRot::XZY, rot.0.x - core::f32::consts::FRAC_PI_2, rot.0.y, -rot.0.z)
-                            ),
+                                Quat::from_euler(glam::EulerRot::XZY, rot.x - core::f32::consts::FRAC_PI_2, rot.y, -rot.z)
+                            }),
                         };
                         glamour::Matrix4::from_scale_rotation_translation(scale,
                             rot.unwrap_or(Quat::IDENTITY),
