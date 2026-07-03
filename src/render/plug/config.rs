@@ -165,6 +165,15 @@ impl<'a> PlugConfig<'a> {
                 .try_send();
             }
         }
+
+        let clear_settings = ui
+            .button(c"clear all stored settings")
+            .then(|| crate::SETTINGS.get().map(|s| s.blocking_write()))
+            .flatten();
+        if let Some(mut settings) = clear_settings {
+            settings.data_storage.source_kv.clear();
+            settings.mark_dirty();
+        }
     }
     fn draw_settings<'ui, W, C>(&mut self, ui: &mut W, context: &mut C)
     where
