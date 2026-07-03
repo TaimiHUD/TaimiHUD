@@ -18,7 +18,7 @@ authors = [
 ]
 homepage = "https://taimihud.com"
 description = "Pathing, encounter timers and markers"
-version = "0.3.5"
+version = "0.3.6"
 edition = "2021"
 build = "build.rs"
 
