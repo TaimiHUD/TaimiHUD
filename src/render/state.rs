@@ -108,6 +108,7 @@ pub struct RenderState {
     pub(super) timer_window: TimerWindowState,
     receiver: Receiver<RenderEvent>,
     alert: Option<TextAlert>,
+    frame_count: u32,
     pub state_errors: HashMap<String, anyhow::Error>,
     pub task_queue: RenderTaskQueue,
     pub machine: RenderMachine,
@@ -121,6 +122,7 @@ impl RenderState {
         Self {
             receiver,
             machine: RenderMachine::new(),
+            frame_count: 0u32,
             runtime: None,
             #[cfg(feature = "space")]
             engine: None,
@@ -139,7 +141,6 @@ impl RenderState {
     }
 
     fn draw(&mut self, ui: &Ui) -> bool {
-        let io = ui.io();
         match self.receiver.try_recv() {
             Ok(event) => {
                 use RenderEvent::*;
@@ -221,7 +222,35 @@ impl RenderState {
             },
             Err(_error) => (),
         }
-        self.handle_alert(ui, io);
+        self.handle_alert(ui);
+
+        self.frame_count = self.frame_count.saturating_add(1);
+        let fps_settled = || {
+            // while initializing graphics/game/etc, it can "run" at wrong res for a bit
+            // though imgui seems to init fps at FLT_MAX or something,
+            // uncapped frame rates (600+) seem like a workable indicator for this -
+            // the moment charsel is working it will drop down to a reasonable value
+            let fps = ui.io().framerate;
+            fps <= 340.0f32 && fps.to_bits() != 0.0f32.to_bits()
+        };
+        let startup_delay = match self.frame_count {
+            0..=16 => true,
+            0..=32 if self.machine.gameplay.latest_map().is_none() => true,
+            0..=160 if self.machine.gameplay.is_initial() => {
+                if fps_settled() {
+                    // one more frame for good luck (unnecessary but why not)
+                    self.frame_count = 160;
+                }
+                true
+            },
+            _ => false,
+        };
+        if startup_delay {
+            // imgui does not like living early in the morning
+            // maybe just stop opening windows on startup and it won't matter anymore
+            return true
+        }
+
         self.timer_window.draw(ui);
         self.primary_window.draw(
             ui,
@@ -391,7 +420,7 @@ impl RenderState {
         }
     }
 
-    fn handle_alert(&mut self, ui: &Ui, io: &Io) {
+    fn handle_alert(&mut self, ui: &Ui) {
         if let Some(alert) = &self.alert {
             let message = &alert.message;
             let imfont = match rt::read_nexus_link() {
@@ -399,10 +428,10 @@ impl RenderState {
                 Ok(nexus_link) => unsafe { Self::font_from_raw(nexus_link.font_big) },
                 _ => None,
             };
-            Self::render_alert(ui, io, message, imfont);
+            Self::render_alert(ui, ui.io(), message, imfont);
         }
     }
-    pub fn render_alert(ui: &Ui, io: &nexus::imgui::Io, text: &String, font: Option<&Font>) {
+    pub fn render_alert(ui: &Ui, io: &Io, text: &String, font: Option<&Font>) {
         use WindowFlags;
         let font_handle = font.map(|font| ui.push_font(font.id()));
         let font_scale = font.map(|f| f.scale).unwrap_or(1.0);
