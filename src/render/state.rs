@@ -156,6 +156,7 @@ pub struct RenderState {
     pub engine: Option<anyhow::Result<Engine>>,
     pub container_state: elem::frame::ContainerContextState,
     pub frame_state: elem::frame::RenderFrameUi,
+    frame_count: u32,
 }
 
 impl RenderState {
@@ -168,6 +169,7 @@ impl RenderState {
             engine: None,
             container_state: Default::default(),
             frame_state: Default::default(),
+            frame_count: 0,
             task_queue: Default::default(),
             alert: Default::default(),
             primary_window: PrimaryWindowState::new(),
@@ -341,6 +343,33 @@ impl RenderState {
                 }
             },
             Err(_error) => (),
+        }
+
+        self.frame_count = self.frame_count.saturating_add(1);
+        let fps_settled = || {
+            // while initializing graphics/game/etc, it can "run" at wrong res for a bit
+            // though imgui seems to init fps at FLT_MAX or something,
+            // uncapped frame rates (600+) seem like a workable indicator for this -
+            // the moment charsel is working it will drop down to a reasonable value
+            let fps = ui.with_io_dyn(|io| io.frame_rate());
+            fps <= 340.0f32 && fps.to_bits() != 0.0f32.to_bits()
+        };
+        let startup_delay = match self.frame_count {
+            0..=16 => true,
+            0..=32 if self.machine.gameplay.latest_map().is_none() => true,
+            0..=160 if self.machine.gameplay.is_initial() => {
+                if fps_settled() {
+                    // one more frame for good luck (unnecessary but why not)
+                    self.frame_count = 160;
+                }
+                true
+            },
+            _ => false,
+        };
+        if startup_delay {
+            // imgui does not like living early in the morning
+            // maybe just stop opening windows on startup and it won't matter anymore
+            return true
         }
 
         let mut container_state = self.container_state.clone();
