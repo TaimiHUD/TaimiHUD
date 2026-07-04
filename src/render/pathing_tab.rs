@@ -69,8 +69,6 @@ impl PathingConfig {
                     crate::control_window(crate::WINDOW_PATHING, None);
                 }
             }
-
-            with_i18n!("experimental-notice", |msg| ui.text_wrapped(&msg));
         }
 
         ui.next_column();
@@ -89,6 +87,9 @@ impl PathingConfig {
                 if let Some(_tree) = tree_goggles {
                     let _id = ui.push_id(c"goggles");
                     Self::draw_goggles_opts(ui, machine);
+
+                    ui.spacing();
+                    ui.text_wrapped(fl!("experimental-notice-alpha"));
                 }
             }
         }

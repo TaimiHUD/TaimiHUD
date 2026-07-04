@@ -78,7 +78,11 @@ author-arg = { author }: { $author }
 reset = Reset
 timer = Timer
 timers = { timer }s
-experimental-notice = Hi! This feature is (mostly) experimental. Some things may be confusing and it might require more thought and effort to use than the less experimental features. My apologies for any problems you have; feel free to reach out on Discord. - Kat
+experimental-notice = Hi! This feature is (mostly) experimental.
+ Some things may be confusing and it might require more thought and effort to use than the less experimental features. My apologies for any problems you have; feel free to reach out on Discord.
+ - Kat
+experimental-notice-alpha = This feature is (quite) experimental. If you're willing to help us with testing there's a more functional (and probably unstable!) preview available as part of our ongoing alpha test.
+ Visit taimihud.com/testers for more info.
 name-empty = Name empty.
 no-trigger = No trigger position provided.
 no-category = No category provided.
