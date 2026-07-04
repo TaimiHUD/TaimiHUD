@@ -753,6 +753,14 @@ impl Controller {
     }
 
     async fn open_openable<T: AsRef<OsStr>>(&self, key: String, uri: T) {
+        use std::path::Path;
+
+        let uri = uri.as_ref();
+        let as_path = Path::new(uri);
+        if as_path.extension().is_none() && as_path.starts_with(rt::addon_dir()) {
+            // TODO: less dumb thanks
+            let _ = std::fs::create_dir(as_path);
+        }
         match open::that(uri) {
             Ok(_) => (),
             Err(err) => {
