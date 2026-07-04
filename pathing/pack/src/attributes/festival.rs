@@ -1,4 +1,9 @@
-use {anyhow::anyhow, bitflags::bitflags, std::str::FromStr};
+use {
+    crate::attributes::keys::{self, GetAttr, SetAttr},
+    anyhow::anyhow,
+    bitflags::bitflags,
+    std::str::FromStr,
+};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
@@ -136,5 +141,37 @@ impl FromIterator<Festival> for Festivals {
 impl<'a> FromIterator<&'a Festival> for Festivals {
     fn from_iter<T: IntoIterator<Item = &'a Festival>>(iter: T) -> Self {
         iter.into_iter().map(|&f| Self::from(f)).collect()
+    }
+}
+
+impl<T> GetAttr<Festival> for T
+where
+    T: ?Sized + GetAttr<keys::Festivals>,
+    // TODO: dumb hack to avoid blanket impl havoc
+    T: core::borrow::Borrow<crate::attributes::FilterAttributes>,
+{
+    fn has_attr(&self) -> bool {
+        GetAttr::<keys::Festivals>::get_attr(self)
+            .map(|f| !f.0.is_empty())
+            .unwrap_or(false)
+    }
+    fn get_attr(&self) -> Option<std::borrow::Cow<'_, Festival>> {
+        GetAttr::<keys::Festivals>::get_attr(self)
+            .and_then(|f| f.0.iter_festivals().next())
+            .map(std::borrow::Cow::Owned)
+    }
+}
+impl<T> SetAttr<Festival> for T
+where
+    T: ?Sized + SetAttr<keys::Festivals> + GetAttr<keys::Festivals>,
+    T: core::borrow::Borrow<crate::attributes::FilterAttributes>,
+{
+    fn set_attr(&mut self, value: Festival) {
+        let mut f = GetAttr::<keys::Festivals>::get_attr_or_default(self).into_owned();
+        f.0.insert(value.into());
+        SetAttr::<keys::Festivals>::set_attr(self, f)
+    }
+    fn unset_attr(&mut self) {
+        SetAttr::<keys::Festivals>::unset_attr(self)
     }
 }

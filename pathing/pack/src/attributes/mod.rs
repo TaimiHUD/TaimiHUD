@@ -4,8 +4,7 @@ use {
     anyhow::{anyhow, Context},
     glam::{Vec3, Vec4},
     std::{borrow::Cow, fmt, str::FromStr, sync::Arc},
-    taimi_hoard::str_opt_ref,
-    uuid::Uuid,
+    taimi_hoard::{str_opt_ref, vec::vec32_eq},
     xml::name::Name,
 };
 
@@ -34,6 +33,7 @@ pub fn string_into(s: impl Into<Arc<str>>) -> AttrString {
     s.into()
 }
 pub type AttrList<T> = Arc<Box<[T]>>;
+#[cfg(todo = "unused")]
 fn list_into<T>(l: impl Into<Box<[T]>>) -> AttrList<T> {
     Arc::new(l.into())
 }
@@ -190,23 +190,23 @@ impl MarkerAttributes {
             self.trail_mut().is_wall = Some(parse_bool(&value)?);
         // === Filters === //
         } else if attr_name.eq_ignore_ascii_case("festival") {
-            self.filters_mut().festivals = Some(parse_list::<Festival>(&value)?.into_iter().collect());
+            self.filters_mut().festivals = Some(parse_into_iter::<Festival, _>(&value)?);
         } else if attr_name.eq_ignore_ascii_case("mount") {
-            self.filters_mut().mounts = Some(parse_list::<Mount>(&value)?.into_iter().collect());
+            self.filters_mut().mounts = Some(parse_into_iter::<Mount, _>(&value)?);
         } else if attr_name.eq_ignore_ascii_case("profession") {
-            self.filters_mut().professions = Some(parse_list::<Profession>(&value)?.into_iter().collect());
+            self.filters_mut().professions = Some(parse_into_iter::<Profession, _>(&value)?);
         } else if attr_name.eq_ignore_ascii_case("race") {
-            self.filters_mut().races = Some(parse_list::<Race>(&value)?.into_iter().collect());
+            self.filters_mut().races = Some(parse_into_iter::<Race, _>(&value)?);
         } else if attr_name.eq_ignore_ascii_case("specialization") {
-            self.filters_mut().specializations = Some(list_into(parse_list(&value)?));
+            self.filters_mut().specializations = Some(parse_into_iter::<keys::Specialization, _>(&value)?);
         } else if attr_name.eq_ignore_ascii_case("maptype") {
-            self.filters_mut().map_types = Some(list_into(parse_list(&value)?));
+            self.filters_mut().map_types = Some(parse_into_iter::<MapType, _>(&value)?);
         } else if attr_name.eq_ignore_ascii_case("schedule") {
             self.filters_mut().schedule = Some(string_into(value));
         } else if attr_name.eq_ignore_ascii_case("schedule-duration") {
             self.filters_mut().schedule_duration = Some(value.parse()?);
         } else if attr_name.eq_ignore_ascii_case("raid") {
-            self.filters_mut().raids = Some(list_into(parse_list(&value)?));
+            self.filters_mut().raids = Some(parse_into_iter::<keys::Raid, _>(&value)?);
         } else if attr_name.eq_ignore_ascii_case("achievementid") {
             self.filters_mut().achievement_id = parse_opt(&value)?;
         } else if attr_name.eq_ignore_ascii_case("achievementbit") {
@@ -244,10 +244,7 @@ impl MarkerAttributes {
         {
             self.interaction_mut().toggle_category = Some(value.into());
         } else if attr_name.eq_ignore_ascii_case("resetguid") {
-            let guids = value
-                .split(',')
-                .map(|g| keys::Guid::decode_or_hash(g.as_bytes().trim_ascii()).into());
-            self.interaction_mut().reset_guids = Some(list_into(guids.collect::<Box<[_]>>()));
+            self.interaction_mut().reset_guids = Some(parse_into_iter::<keys::Guid, _>(&value)?);
         } else if attr_name.eq_ignore_ascii_case("show") {
             self.interaction_mut().show_category = Some(value.into());
         } else if attr_name.eq_ignore_ascii_case("hide") {
@@ -345,6 +342,13 @@ impl MarkerAttributes {
     }
     pub fn poi_mut(&mut self) -> &mut PoiAttributes {
         self.render_mut().poi.get_or_insert_default()
+    }
+
+    pub fn tip_name(&self) -> Option<&str> {
+        self.tip_name.as_ref().and_then(|s| str_opt_ref(&**s))
+    }
+    pub fn tip_description(&self) -> Option<&str> {
+        self.tip_description.as_ref().and_then(|s| str_opt_ref(&**s))
     }
 }
 impl AsMut<TrailAttributes> for MarkerAttributes {
@@ -665,7 +669,7 @@ pub struct InteractionAttributes {
     pub copy_value: Option<AttrString>,
     pub copy_message: Option<AttrString>,
     pub toggle_category: Option<IdNameBox>,
-    pub reset_guids: Option<AttrList<Uuid>>,
+    pub reset_guids: Option<keys::ResetGuid>,
     pub show_category: Option<IdNameBox>,
     pub hide_category: Option<IdNameBox>,
     /// Taco Behaviors.
@@ -736,6 +740,7 @@ impl GetAttrDyn for InteractionAttributes {
         cell::pack_attr!(=id_is_in(key, [
             keys::Info,
             keys::InfoRange,
+            keys::TriggerRange,
             keys::Bounce,
             keys::BounceDelay,
             keys::BounceHeight,
@@ -755,6 +760,7 @@ impl GetAttrDyn for InteractionAttributes {
         cell::pack_attr! { imp GetAttrDyn::has_attr_dyn(self, key) in [
             keys::Info,
             keys::InfoRange,
+            keys::TriggerRange,
             keys::Bounce,
             keys::BounceDelay,
             keys::BounceHeight,
@@ -775,6 +781,7 @@ impl GetAttrDyn for InteractionAttributes {
         cell::pack_attr! { imp GetAttrDyn::get_attr_dyn_ref(self, key) in [
             keys::Info,
             keys::InfoRange,
+            keys::TriggerRange,
             keys::Bounce,
             keys::BounceDelay,
             keys::BounceHeight,
@@ -806,6 +813,7 @@ impl GetAttrDyn for InteractionAttributes {
         cell::pack_attr! { imp GetAttrDyn::iter_attrs_dyn(self) in [
             keys::Info,
             keys::InfoRange,
+            keys::TriggerRange,
             keys::Bounce,
             keys::BounceDelay,
             keys::BounceHeight,
@@ -827,6 +835,7 @@ impl cell::SetAttrDyn for InteractionAttributes {
         cell::pack_attr! { imp SetAttrDyn::set_attr_dyn(self, value) in [
             keys::Info,
             keys::InfoRange,
+            keys::TriggerRange,
             keys::Bounce,
             keys::BounceDelay,
             keys::BounceHeight,
@@ -846,6 +855,8 @@ impl cell::SetAttrDyn for InteractionAttributes {
 cell::pack_attr! {
     impl Attr{keys::Info} for &struct{InteractionAttributes}.info? {}
     impl Attr{keys::InfoRange} for &struct{InteractionAttributes}.info_range? {}
+    // TODO: separate field
+    impl Attr{keys::TriggerRange} for &struct{InteractionAttributes}.info_range? {}
     impl Attr{keys::Bounce} for &struct{InteractionAttributes}.bounce_behavior? {}
     impl Attr{keys::BounceDelay} for &struct{InteractionAttributes}.bounce_delay? {}
     impl Attr{keys::BounceHeight} for &struct{InteractionAttributes}.bounce_height? {}
@@ -856,10 +867,12 @@ cell::pack_attr! {
     impl Attr{keys::ShowCategory} for &struct{InteractionAttributes}.show_category? {}
     impl Attr{keys::HideCategory} for &struct{InteractionAttributes}.hide_category? {}
     impl Attr{keys::ResetLength} for &struct{InteractionAttributes}.reset_length? {}
+    impl Attr{keys::ResetGuid} for &struct{InteractionAttributes}.reset_guids? {}
     impl Attr{keys::AutoTrigger} for &struct{InteractionAttributes}.auto_trigger? {}
 
     impl Attr{keys::Info} in Internal{InteractionAttributes} {}
     impl Attr{keys::InfoRange} in Internal{InteractionAttributes} {}
+    impl Attr{keys::TriggerRange} in Internal{InteractionAttributes} {}
     impl Attr{keys::Bounce} in Internal{InteractionAttributes} {}
     impl Attr{keys::BounceDelay} in Internal{InteractionAttributes} {}
     impl Attr{keys::BounceHeight} in Internal{InteractionAttributes} {}
@@ -892,28 +905,6 @@ impl keys::SetAttr<keys::Behaviour> for InteractionAttributes {
         self.taco_behavior = None;
     }
 }
-impl keys::GetAttr<keys::ResetGuid> for InteractionAttributes {
-    fn has_attr(&self) -> bool {
-        self.reset_guids.is_some()
-    }
-    fn get_attr(&self) -> Option<Cow<'_, keys::ResetGuid>> {
-        self.reset_guids
-            .as_ref()
-            .map(|g| Cow::Owned(g[..].iter().map(|g| keys::Guid::from(g.clone())).collect()))
-    }
-    #[cfg(todo)]
-    fn get_attr_ref(&self) -> Option<&keys::ResetGuid> {}
-}
-impl keys::SetAttr<keys::ResetGuid> for InteractionAttributes {
-    fn set_attr(&mut self, value: keys::ResetGuid) {
-        self.reset_guids = Some(Arc::new(
-            value.into_iter().map(|g| g.into()).collect::<Box<[_]>>(),
-        ));
-    }
-    fn unset_attr(&mut self) {
-        self.reset_guids = None;
-    }
-}
 
 /// Filters.
 #[derive(Debug, Clone, Default)]
@@ -922,11 +913,11 @@ pub struct FilterAttributes {
     pub mounts: Option<Mounts>,
     pub professions: Option<Professions>,
     pub races: Option<Races>,
-    pub specializations: Option<AttrList<i32>>,
-    pub map_types: Option<AttrList<MapType>>,
+    pub specializations: Option<keys::Specializations>,
+    pub map_types: Option<keys::MapTypes>,
     pub schedule: Option<AttrString>,
     pub schedule_duration: Option<f32>,
-    pub raids: Option<AttrList<String>>,
+    pub raids: Option<keys::Raids>,
     pub achievement_id: Option<i32>,
     pub achievement_bit: Option<i32>,
     pub invert_behavior: Option<bool>,
@@ -980,7 +971,9 @@ impl GetAttrDyn for FilterAttributes {
             keys::InvertBehaviour,
             keys::ScheduleStart,
             keys::ScheduleDuration,
-            // TODO: flag sets
+            keys::Festivals, keys::Mounts, keys::Races, keys::Professions,
+            keys::Specializations, keys::Raids, keys::MapTypes,
+            // TODO? Festival, Mount, Race, Profession, keys::Specialization, keys::Raid, MapType,
         ]))
     }
     fn has_attr_dyn(&self, key: cell::PackKeyId) -> bool {
@@ -990,7 +983,9 @@ impl GetAttrDyn for FilterAttributes {
             keys::InvertBehaviour,
             keys::ScheduleStart,
             keys::ScheduleDuration,
-            // TODO: flag sets
+            keys::Festivals, keys::Mounts, keys::Races, keys::Professions,
+            keys::Specializations, keys::Raids, keys::MapTypes,
+            // TODO? Festival, Mount, Race, Profession, keys::Specialization, keys::Raid, MapType,
         ] }
         .unwrap_or(false)
     }
@@ -1001,17 +996,22 @@ impl GetAttrDyn for FilterAttributes {
             keys::InvertBehaviour,
             keys::ScheduleStart,
             keys::ScheduleDuration,
-            // TODO: flag sets
+            keys::Festivals, keys::Mounts, keys::Races, keys::Professions,
+            keys::Specializations, keys::Raids, keys::MapTypes,
+            // TODO? Festival, Mount, Race, Profession, keys::Specialization, keys::Raid, MapType,
         ] }
         .flatten()
     }
     /// TODO: flag sets
+    #[cfg(todo)]
     fn get_attr_dyn(&self, key: cell::PackKeyId) -> Option<Cow<'_, dyn cell::AttrKeyValue>> {
-        self.get_attr_dyn_ref(key).map(Cow::Borrowed).or_else(|| {
-            log::debug!("TODO: FilterAttributes::get_attr_dyn({key})");
-            None
-        })
+        cell::pack_attr! { imp GetAttrDyn::get_attr_dyn(self, key) in [
+            // TODO? Festival, Mount, Race, Profession, keys::Specialization, keys::Raid, MapType,
+        ] }
+        .map(Cow::Owned)
+        .or_else(|| self.get_attr_dyn_ref(key).map(Cow::Borrowed))
     }
+    /// TODO? chain individual flags?
     fn iter_attrs_dyn(&self) -> impl Iterator<Item = Cow<'_, dyn cell::AttrKeyValue>> + '_ {
         cell::pack_attr! { imp GetAttrDyn::iter_attrs_dyn(self) in [
             keys::AchievementId,
@@ -1019,7 +1019,8 @@ impl GetAttrDyn for FilterAttributes {
             keys::InvertBehaviour,
             keys::ScheduleStart,
             keys::ScheduleDuration,
-            // TODO: flag sets
+            keys::Festivals, keys::Mounts, keys::Races, keys::Professions,
+            keys::Specializations, keys::Raids, keys::MapTypes,
         ] }
     }
 }
@@ -1032,8 +1033,12 @@ impl cell::SetAttrDyn for FilterAttributes {
                 keys::InvertBehaviour,
                 keys::ScheduleStart,
                 keys::ScheduleDuration,
+                keys::Festivals, keys::Mounts, keys::Races, keys::Professions,
+                keys::Specializations, keys::Raids, keys::MapTypes,
+                //Festival, Mount, Race, Profession, keys::Specialization, keys::Raid, MapType,
             ],
             _ => {
+                #[cfg(taimi_debug)]
                 log::debug!("TODO: FilterAttributes::set_attr_dyn({})", value.id());
                 false
             },
@@ -1046,12 +1051,26 @@ cell::pack_attr! {
     impl Attr{keys::InvertBehaviour} for &struct{FilterAttributes}.invert_behavior? {}
     impl Attr{keys::ScheduleStart} for &struct{FilterAttributes}.schedule? {}
     impl Attr{keys::ScheduleDuration} for &struct{FilterAttributes}.schedule_duration? {}
+    impl Attr{keys::Festivals} for &struct{FilterAttributes}.festivals? {}
+    impl Attr{keys::Mounts} for &struct{FilterAttributes}.mounts? {}
+    impl Attr{keys::Races} for &struct{FilterAttributes}.races? {}
+    impl Attr{keys::Professions} for &struct{FilterAttributes}.professions? {}
+    impl Attr{keys::Specializations} for &struct{FilterAttributes}.specializations? {}
+    impl Attr{keys::Raids} for &struct{FilterAttributes}.raids? {}
+    impl Attr{keys::MapTypes} for &struct{FilterAttributes}.map_types? {}
 
     impl Attr{keys::AchievementId} in Internal{FilterAttributes} {}
     impl Attr{keys::AchievementBit} in Internal{FilterAttributes} {}
     impl Attr{keys::InvertBehaviour} in Internal{FilterAttributes} {}
     impl Attr{keys::ScheduleStart} in Internal{FilterAttributes} {}
     impl Attr{keys::ScheduleDuration} in Internal{FilterAttributes} {}
+    impl Attr{keys::Festivals} in Internal{FilterAttributes} {}
+    impl Attr{keys::Mounts} in Internal{FilterAttributes} {}
+    impl Attr{keys::Races} in Internal{FilterAttributes} {}
+    impl Attr{keys::Professions} in Internal{FilterAttributes} {}
+    impl Attr{keys::Specializations} in Internal{FilterAttributes} {}
+    impl Attr{keys::Raids} in Internal{FilterAttributes} {}
+    impl Attr{keys::MapTypes} in Internal{FilterAttributes} {}
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -1495,7 +1514,12 @@ cell::pack_attr! {
 }
 impl keys::GetAttr<keys::RotateX> for PoiAttributes {
     fn has_attr(&self) -> bool {
-        self.rotate.is_some()
+        match self.rotate {
+            None => false,
+            #[cfg(todo)]
+            Some(r) if vec32_eq(r, Self::ROTATE_UNSET) => false,
+            Some(..) => true,
+        }
     }
     fn get_attr_ref(&self) -> Option<&keys::RotateX> {
         self.rotate.as_ref().map(|rot| keys::RotateX::from_ref(&rot.x))
@@ -1507,8 +1531,8 @@ impl keys::SetAttr<keys::RotateX> for PoiAttributes {
     }
     fn unset_attr(&mut self) {
         let is_empty = if let Some(rot) = &mut self.rotate {
-            rot.x = Default::default();
-            *rot == Vec3::ZERO
+            rot.x = Self::ROTATE_UNSET_AXIS;
+            vec32_eq(*rot, Self::ROTATE_UNSET)
         } else {
             false
         };
@@ -1531,8 +1555,8 @@ impl keys::SetAttr<keys::RotateY> for PoiAttributes {
     }
     fn unset_attr(&mut self) {
         let is_empty = if let Some(rot) = &mut self.rotate {
-            rot.y = Default::default();
-            *rot == Vec3::ZERO
+            rot.y = Self::ROTATE_UNSET_AXIS;
+            vec32_eq(*rot, Self::ROTATE_UNSET)
         } else {
             false
         };
@@ -1555,8 +1579,8 @@ impl keys::SetAttr<keys::RotateZ> for PoiAttributes {
     }
     fn unset_attr(&mut self) {
         let is_empty = if let Some(rot) = &mut self.rotate {
-            rot.z = Default::default();
-            *rot == Vec3::ZERO
+            rot.z = Self::ROTATE_UNSET_AXIS;
+            vec32_eq(*rot, Self::ROTATE_UNSET)
         } else {
             false
         };
@@ -1604,6 +1628,7 @@ fn parse_color(value: &str) -> anyhow::Result<Vec4> {
     ))
 }
 
+#[cfg(todo = "unused")]
 fn parse_list<T: FromStr>(value: &str) -> anyhow::Result<Vec<T>>
 where
     <T as FromStr>::Err: fmt::Display + Into<anyhow::Error>,
@@ -1629,6 +1654,7 @@ where
     }
 }
 
+#[cfg(todo = "unused")]
 fn parse_array<const N: usize, T: FromStr>(value: &str) -> anyhow::Result<[T; N]>
 where
     T: Default + Copy,
@@ -1649,6 +1675,19 @@ where
     }
 
     Ok(())
+}
+fn parse_into_iter<T, O>(value: &str) -> anyhow::Result<O>
+where
+    T: FromStr,
+    <T as FromStr>::Err: Into<anyhow::Error>,
+    O: FromIterator<T>,
+{
+    value
+        .split(',')
+        .map(|f| f.trim_ascii())
+        .map(|f| f.parse::<T>().map_err(Into::into))
+        .collect::<anyhow::Result<O>>()
+        .with_context(|| format!("parsing list `{value}`"))
 }
 
 #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
