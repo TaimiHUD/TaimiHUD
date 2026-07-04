@@ -86,6 +86,12 @@ pub struct SpaceSettings {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camera_source: Option<CameraSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub toggle_granularity_space: Option<ToggleGranularity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub toggle_granularity_map: Option<ToggleGranularity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub toggle_group_orientation: Option<bool>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub visible_space: Option<bool>,
@@ -152,6 +158,9 @@ pub struct SpaceSettings {
 
 impl SpaceSettings {
     pub const DEFAULT_CAMERA_SOURCE: CameraSource = CameraSource::MumbleLink;
+    pub const DEFAULT_TOGGLE_GRANULARITY_MAP: ToggleGranularity = ToggleGranularity::Individual;
+    pub const DEFAULT_TOGGLE_GROUP_ORIENTATION: bool = false;
+    pub const DEFAULT_TOGGLE_GRANULARITY_SPACE: ToggleGranularity = ToggleGranularity::Individual;
     pub const DEFAULT_VISIBLE: bool = true;
     pub const DEFAULT_VISIBLE_MAP: bool = true;
     pub const DEFAULT_TRAIL_TEXTURED: bool = true;
@@ -196,6 +205,9 @@ impl SpaceSettings {
         match self {
             Self {
                 camera_source: None | Some(Self::DEFAULT_CAMERA_SOURCE),
+                toggle_granularity_space: None | Some(Self::DEFAULT_TOGGLE_GRANULARITY_SPACE),
+                toggle_granularity_map: None | Some(Self::DEFAULT_TOGGLE_GRANULARITY_MAP),
+                toggle_group_orientation: None | Some(Self::DEFAULT_TOGGLE_GROUP_ORIENTATION),
                 visible_space: None | Some(Self::DEFAULT_VISIBLE),
                 visible_map_world: None | Some(Self::DEFAULT_VISIBLE_MAP),
                 visible_map_mini: None | Some(Self::DEFAULT_VISIBLE_MAP),
@@ -230,6 +242,18 @@ impl SpaceSettings {
 
     pub fn camera_source(&self) -> CameraSource {
         self.camera_source.unwrap_or(Self::DEFAULT_CAMERA_SOURCE)
+    }
+    pub fn toggle_granularity_space(&self) -> ToggleGranularity {
+        self.toggle_granularity_space
+            .unwrap_or(Self::DEFAULT_TOGGLE_GRANULARITY_SPACE)
+    }
+    pub fn toggle_granularity_map(&self) -> ToggleGranularity {
+        self.toggle_granularity_map
+            .unwrap_or(Self::DEFAULT_TOGGLE_GRANULARITY_MAP)
+    }
+    pub fn toggle_group_orientation(&self) -> bool {
+        self.toggle_group_orientation
+            .unwrap_or(Self::DEFAULT_TOGGLE_GROUP_ORIENTATION)
     }
 
     pub fn visible_space(&self) -> bool {
@@ -374,6 +398,54 @@ impl SpaceSettings {
     }
     pub fn trail_width(&self) -> f32 {
         self.trail_width.unwrap_or(Self::DEFAULT_TRAIL_WIDTH)
+    }
+}
+
+#[derive(
+    Default,
+    Debug,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Deserialize,
+    Serialize,
+    VariantArray,
+    IntoStaticStr,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum ToggleGranularity {
+    #[default]
+    #[strum(serialize = "individual")]
+    Individual,
+    #[strum(serialize = "group")]
+    Group,
+    #[strum(serialize = "adaptive")]
+    Adaptive,
+}
+impl ToggleGranularity {
+    pub fn name_id_space(self) -> &'static str {
+        match self {
+            Self::Group => "config-paths-toggle-mode-space-group",
+            Self::Adaptive => "config-paths-toggle-mode-space-on",
+            Self::Individual => "config-paths-toggle-mode-space-off",
+        }
+    }
+    pub fn name_id_map(self) -> &'static str {
+        match self {
+            Self::Group => "config-paths-toggle-mode-map-group",
+            Self::Adaptive => "config-paths-toggle-mode-map-on",
+            Self::Individual => "config-paths-toggle-mode-map-off",
+        }
+    }
+    pub fn index(self) -> u8 {
+        Self::VARIANTS.iter().position(|&v| v == self).unwrap_or_default() as _
+    }
+    pub fn from_index(idx: u8) -> Option<Self> {
+        Self::VARIANTS.get(idx as usize).copied()
     }
 }
 

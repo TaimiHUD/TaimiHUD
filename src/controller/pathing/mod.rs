@@ -13,7 +13,12 @@ use {
             CONTROLS,
         },
         render::machine::RenderTaskPriority,
-        settings::{Settings, SettingsLock, SourceKind},
+        settings::{
+            pathing::{PathingSettings, ToggleGranularity},
+            Settings,
+            SettingsLock,
+            SourceKind,
+        },
         space::{
             engine::SpaceEvent,
             pack::{LoaderBox, UnloadedReason},
@@ -48,7 +53,11 @@ pub type ExternalFilterState = (Festivals, Arc<RaidState>, Arc<AchievementState>
 #[cfg(feature = "space")]
 #[derive(Debug, Clone, Display)]
 pub(crate) enum PathingEvent {
-    VisibleToggle { context: Option<MapContext>, set: Option<bool> },
+    VisibleToggle {
+        context: Option<MapContext>,
+        set: Option<bool>,
+        ui: bool,
+    },
     ReloadAll(bool),
     LoadAll,
     UnloadAll,
@@ -120,8 +129,7 @@ impl PathingController {
         let mut settings_lock = Settings::async_write()
             .await
             .expect("Settings unitialized, impossible");
-        crate::settings::PathingSettings::pathing_state_update(&mut settings_lock, path.into(), state)
-            .await;
+        PathingSettings::pathing_state_update(&mut settings_lock, path.into(), state).await;
         drop(settings_lock);
     }
 
@@ -368,48 +376,94 @@ impl PathingController {
             PathingStateUpdate(p, s) => self.pathing_state_update(p, s).await,
             ToggleKatRender => self.toggle_katrender().await,
             ApiBypass(set) => self.toggle_api_bypass(set),
-            VisibleToggle { context, set } => self.set_visible(context, set).await,
+            VisibleToggle { context, set, ui } => self.set_visible_with(context, set, ui).await,
         }
         None
     }
 
-    pub(crate) async fn set_visible(&mut self, context: Option<MapContext>, set: Option<bool>) {
+    pub(crate) async fn set_visible_with(
+        &mut self,
+        context: Option<MapContext>,
+        set: Option<bool>,
+        ui: bool,
+    ) {
+        let gp_map = ui
+            .then(|| self.rx.gameplay.borrow().gameplay_map())
+            .flatten()
+            .map(drop);
+        const GROUP_SPACE: TaimiControls = TaimiControls::PATHING_TOGGLES;
+        const GROUP_MAP: TaimiControls = TaimiControls::from_bits_retain(
+            TaimiControls::PATHING_MAP.bits() | TaimiControls::PATHING_MINIMAP.bits(),
+        );
         let Ok(mut settings) = Settings::async_write().await else { return };
-
         let pathing = settings.pathing_mut().into_mut();
-        let (_control, is_visible, out) = match context {
-            Some(MapContext::Global) => (
-                TaimiControls::PATHING_MAP,
-                pathing.space.visible_worldmap(),
-                &mut pathing.space.visible_map_world,
-            ),
-            Some(MapContext::Minimap) => (
-                TaimiControls::PATHING_MINIMAP,
-                pathing.space.visible_minimap(),
-                &mut pathing.space.visible_map_mini,
-            ),
-            None => (
-                TaimiControls::PATHING_SPACE,
-                pathing.space.visible_space(),
-                &mut pathing.space.visible_space,
-            ),
+        let control = match context {
+            None => TaimiControls::PATHING_SPACE,
+            Some(MapContext::Minimap) => TaimiControls::PATHING_MINIMAP,
+            Some(MapContext::Global) => TaimiControls::PATHING_MAP,
         };
-        let set = set.unwrap_or(!is_visible);
-        *out = Some(set);
+        let (granularity, mask) = match (context, ui) {
+            (_, false) | (Some(MapContext::Minimap), true) =>
+                (ToggleGranularity::Individual, TaimiControls::empty()),
+            (None, true) => (pathing.space.toggle_granularity_space(), GROUP_SPACE),
+            (Some(MapContext::Global), true) => (pathing.space.toggle_granularity_map(), GROUP_MAP),
+        };
+        let (_dirty, _set) = if mask.is_empty() | matches!(granularity, ToggleGranularity::Individual) {
+            let set = Self::set_visible(pathing, control, set);
+            (control, set)
+        } else {
+            use crate::exports::runtime as rt;
+            let map_visible = gp_map.and_then(|()| {
+                rt::mumble_link_ptr()
+                    .ok()
+                    .map(|ml| ml.read_ui_state().contains(rt::UiState::IS_MAP_OPEN))
+            });
+            let visible_candidates = match map_visible {
+                None => TaimiControls::empty(),
+                Some(true) => TaimiControls::PATHING_MAP,
+                Some(false) => TaimiControls::PATHING_SPACE | TaimiControls::PATHING_MINIMAP,
+            };
+            let mask_read = match mask & visible_candidates {
+                m_r if m_r.is_empty() => mask,
+                m => m,
+            };
+            let mask_write = match granularity {
+                ToggleGranularity::Adaptive => mask_read,
+                _ => mask,
+            };
+            let space = &pathing.space;
+            let on = IntoIterator::into_iter([
+                space.visible_worldmap().then_some(TaimiControls::PATHING_MAP),
+                space.visible_minimap().then_some(TaimiControls::PATHING_MINIMAP),
+                space.visible_space().then_some(TaimiControls::PATHING_SPACE),
+            ])
+            .flatten()
+            .collect::<TaimiControls>();
+            let new_state = match space.toggle_group_orientation() {
+                true => !on.contains(mask_read),
+                false => !on.intersects(mask_read),
+            };
+            for c in mask_write.into_iter() {
+                Self::set_visible(pathing, c, Some(new_state));
+            }
+            (mask_write, new_state)
+        };
         drop(settings);
 
         #[cfg(feature = "extension-nexus")]
         crate::QUICK_ACCESS_STATE.send_if_modified(|state| {
-            if state.contains(_control) != set {
-                state.toggle(_control);
-                true
-            } else {
-                false
+            let mut changed = false;
+            for control in _dirty {
+                if state.contains(control) != _set {
+                    state.toggle(control);
+                    changed = true;
+                }
             }
+            changed
         });
 
         #[cfg(feature = "goggles")]
-        match (context, set) {
+        match (context, _set) {
             (None, true) =>
                 Engine::try_send(SpaceEvent::GogglesRefreshLens { force: false, delay_override: Some(2) }),
             (None, false) => Engine::try_send(SpaceEvent::GogglesClearLens),
@@ -417,20 +471,38 @@ impl PathingController {
         }
         Engine::try_send(SpaceEvent::SettingsDirty);
     }
+    fn set_visible(pathing: &mut PathingSettings, control: TaimiControls, set: Option<bool>) -> bool {
+        let (is_visible, out) = match control {
+            TaimiControls::PATHING_MAP => (
+                pathing.space.visible_worldmap(),
+                &mut pathing.space.visible_map_world,
+            ),
+            TaimiControls::PATHING_MINIMAP => (
+                pathing.space.visible_minimap(),
+                &mut pathing.space.visible_map_mini,
+            ),
+            TaimiControls::PATHING_SPACE | _ =>
+                (pathing.space.visible_space(), &mut pathing.space.visible_space),
+        };
+        let set = set.unwrap_or(!is_visible);
+        *out = Some(set);
+
+        set
+    }
 
     async fn handle_keybinds(&mut self, state: TaimiControls, changed: TaimiControls) {
         let pressed = state & changed;
         if pressed.intersects(TaimiControls::PATHING_SPACE) {
             CONTROLS.notify_handled(TaimiControls::PATHING_SPACE);
-            self.set_visible(None, None).await;
+            self.set_visible_with(None, None, true).await;
         }
         if pressed.intersects(TaimiControls::PATHING_MAP) {
             CONTROLS.notify_handled(TaimiControls::PATHING_MAP);
-            self.set_visible(Some(MapContext::Global), None).await;
+            self.set_visible_with(Some(MapContext::Global), None, true).await;
         }
         if pressed.intersects(TaimiControls::PATHING_MINIMAP) {
             CONTROLS.notify_handled(TaimiControls::PATHING_MINIMAP);
-            self.set_visible(Some(MapContext::Minimap), None).await;
+            self.set_visible_with(Some(MapContext::Minimap), None, true).await;
         }
     }
 
@@ -477,9 +549,16 @@ impl PathingEvent {
         let _ = PathingController::try_send(self);
     }
 
-    pub const VISIBLE_TOGGLE_SPACE: Self = Self::VisibleToggle { context: None, set: None };
+    pub const VISIBLE_TOGGLE_SPACE: Self = Self::VisibleToggle { context: None, set: None, ui: true };
     pub const fn visible_toggle(context: MapContext) -> Self {
-        Self::VisibleToggle { context: Some(context), set: None }
+        Self::VisibleToggle {
+            context: Some(context),
+            set: None,
+            ui: true,
+        }
+    }
+    pub const fn visible_toggle_manual(context: Option<MapContext>, set: Option<bool>) -> Self {
+        Self::VisibleToggle { context, set, ui: false }
     }
 }
 impl InterruptionSignal for PathingEvent {
