@@ -334,6 +334,10 @@ poi = POI
 space = KatRender
 reload-packs = Reload
 unload-packs = Unload All
+
+paths-menu-packs = { controls }
+#paths-menu-packs = Category Toggles
+
 filter-options = Filter Options
 search = Search
 pathing-search = { search }
