@@ -494,6 +494,19 @@ impl ConfigTabState {
             }
             BootstrapState::write_with(|state| state.language = language_id.map(|l| l.to_string()));
         }
+
+        {
+            let _font = ui.push_font(NexusLinkFont::Ui);
+            ui.text_wrapped(fl!("language-help"));
+        }
+        ui.text_wrapped(fl!("language-help-calltoaction"));
+        if ui.button(im_fmt!(i18n: "language-help-info")) {
+            ControllerEvent::OpenOpenable(
+                fl!("language-help-info").into(),
+                fl!("language-help-link").into(),
+            )
+            .try_send();
+        }
     }
 
     pub fn draw_gamebinds<'ui, U>(&mut self, ui: &mut U)
