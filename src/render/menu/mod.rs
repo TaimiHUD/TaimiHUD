@@ -220,6 +220,11 @@ impl RenderState {
         let has_engine = engine.is_some();
         let submenu_id = "context-popup-pathing";
         let mut submenu = Some(|ui: &mut U| {
+            if let Some(engine) = engine {
+                if let Some(_menu) = ui.begin_menu(fl!("paths-menu-packs")) {
+                    self.pathing_window.draw_context_menu(ui, engine);
+                }
+            }
             if with_i18n!("reload-packs", |msg| ui.pressable(msg)) {
                 PathingEvent::ReloadAll(true).try_send();
             }
@@ -228,14 +233,6 @@ impl RenderState {
             }
             if with_i18n!("toggle", |msg| ui.pressable(msg)) {
                 PathingEvent::ToggleKatRender.try_send();
-            }
-            if let Some(_menu) = ui.begin_menu(c"some") {
-                if let Some(engine) = engine {
-                    ui.menu_item_enabled(c"body", false, false);
-                    self.pathing_window.draw_context_menu(ui, engine);
-                } else {
-                    ui.menu_item_enabled(c"where", false, false);
-                }
             }
         });
         if !inline {
