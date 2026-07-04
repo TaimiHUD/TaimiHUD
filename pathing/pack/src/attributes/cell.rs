@@ -1,5 +1,8 @@
 use {
-    crate::{attributes::keys::AttrKey, category::id::IdCmpRelaxed},
+    crate::{
+        attributes::keys::{AttrKey, GetAttr, SetAttr},
+        category::id::IdCmpRelaxed,
+    },
     core::{
         borrow::{Borrow, BorrowMut},
         cmp,
@@ -33,8 +36,11 @@ impl PackKeyId {
         self.id
     }
 
-    #[inline(never)]
-    pub fn for_type<T: AttrKeyValue>() -> Option<Self> {
+    #[inline]
+    pub fn for_type<T: AttrKeyValue>() -> Self {
+        Self::try_for_type::<T>().expect("pack key registry oom")
+    }
+    pub fn try_for_type<T: AttrKeyValue>() -> Option<Self> {
         let reg = PackKeyRegistration::for_type::<T>();
         PackKeyRegistry::registry_register(reg)
     }
@@ -304,7 +310,12 @@ where
     where
         Self: Sized,
     {
-        PackKeyId::for_type::<Self>().expect("pack key registry oom")
+        // allow "specialization" despite this being a blanket impl
+        match () {
+            #[cfg(todo = "unnecessary")]
+            _ => PackKeyId::for_type::<Self>(),
+            _ => Self::__pack_key_of(),
+        }
     }
     fn clone_dyn(&self) -> Option<Box<dyn AttrKeyValue>> {
         Some(Box::new(self.clone()) as Box<_>)
@@ -675,6 +686,27 @@ where
     #[inline]
     pub fn into_dyn(self) -> PackValueDyn {
         unsafe { PackValueDyn::new_unchecked(self.into_inner()) }
+    }
+    #[inline(always)]
+    pub unsafe fn downcast_ref_unchecked<A>(&self) -> &PackValueOf<A>
+    where
+        A: ?Sized + AttrKeyValue,
+    {
+        PackValueOf::from_ref_unchecked(self.inner())
+    }
+    #[inline(always)]
+    pub unsafe fn downcast_mut_unchecked<A>(&mut self) -> &mut PackValueOf<A>
+    where
+        A: ?Sized + AttrKeyValue,
+    {
+        PackValueOf::from_mut_unchecked(self.inner_mut())
+    }
+    #[inline(always)]
+    pub unsafe fn downcast_unchecked<A>(self) -> PackValueOf<A>
+    where
+        A: ?Sized + AttrKeyValue,
+    {
+        PackValueOf::new_unchecked(self.into_inner())
     }
 }
 impl PackValueDyn {
@@ -1078,7 +1110,24 @@ impl SetAttrDyn for PackValueSet {
         true
     }
 }
-impl<A: AttrKey + AttrKeyValue> super::keys::GetAttr<A> for PackValueSet {
+impl<A: AttrKey + AttrKeyValue> GetAttr<A> for dyn GetAttrDyn {
+    fn has_attr(&self) -> bool {
+        self.has_attr_dyn(A::pack_key_of())
+    }
+    fn get_attr_ref(&self) -> Option<&A> {
+        self.get_attr_dyn_ref(A::pack_key_of())
+            .map(|v| unsafe { <dyn AttrKeyValue>::downcast_ref_unchecked(v) })
+    }
+}
+impl<A: AttrKey + AttrKeyValue> SetAttr<A> for dyn SetAttrDyn {
+    fn set_attr(&mut self, v: A) {
+        self.set_attr_dyn(PackValueOf::new_boxed(v).into_inner());
+    }
+    fn unset_attr(&mut self) {
+        self.set_attr_dyn(PackValueCell::new_empty(A::pack_key_of()));
+    }
+}
+impl<A: AttrKey + AttrKeyValue> GetAttr<A> for PackValueSet {
     fn has_attr(&self) -> bool {
         self.contains(&A::pack_key_of())
     }
@@ -1088,7 +1137,7 @@ impl<A: AttrKey + AttrKeyValue> super::keys::GetAttr<A> for PackValueSet {
             .map(PackValueOf::get)
     }
 }
-impl<A: AttrKey + AttrKeyValue> super::keys::SetAttr<A> for PackValueSet {
+impl<A: AttrKey + AttrKeyValue> SetAttr<A> for PackValueSet {
     fn set_attr(&mut self, v: A) {
         self.replace(PackValueOf::new_boxed(v).into_inner());
     }
@@ -1153,7 +1202,7 @@ impl dyn GetAttrDyn {
     pub fn imp_get_attr_dyn<A, T>(container: &T) -> Option<Cow<'_, dyn AttrKeyValue>>
     where
         A: AttrKey + AttrKeyValue,
-        T: super::keys::GetAttr<A>,
+        T: GetAttr<A>,
     {
         container.get_attr().map(|v| match v {
             Cow::Owned(v) => Cow::Owned(PackValueDyn::new_boxed_dyn(v)),
@@ -1162,23 +1211,147 @@ impl dyn GetAttrDyn {
     }
 }
 pub trait GetAttrDynExt {
+    fn holds_attr_dyn_of<A: AttrKeyValue>() -> bool
+    where
+        Self: Sized;
     fn get_attr_dyn_ref_of<A: AttrKeyValue>(&self) -> Option<&A>;
+    fn get_attr_of_dyn<A: AttrKeyValue>(&self) -> Option<Cow<'_, A>>
+    where
+        A: Clone,
+    {
+        match self.get_attr_dyn_of::<A>() {
+            None => None,
+            Some(Cow::Borrowed(v)) => Some(Cow::Borrowed(&*v)),
+            Some(Cow::Owned(v)) => match v.to_value() {
+                #[cfg(debug_assertions)]
+                None => {
+                    log::warn!("attempted to clone {}", A::pack_key_of());
+                    None
+                },
+                v => v.map(Cow::Owned),
+            },
+        }
+    }
+    fn get_attr_dyn_of<A: AttrKeyValue>(&self) -> Option<Cow<'_, PackValueRef<A>>>
+    where
+        // TODO: A: ToOwned
+        A: Clone;
     fn clone_attr_dyn_of<A: AttrKeyValue>(&self) -> Option<PackValueOf<A>>;
     fn has_attr_dyn_of<A: AttrKeyValue>(&self) -> bool;
+    #[inline]
+    fn attr_dyn_or_default<A: AttrKeyValue>(&self) -> A
+    where
+        A: Default,
+    {
+        self.clone_attr_dyn_of::<A>()
+            .and_then(|v| v.into_value())
+            .unwrap_or_default()
+    }
+    #[inline]
+    fn attr_dyn_or_default_into<A: AttrKeyValue, T>(&self) -> T
+    where
+        A: Default + Into<T>,
+    {
+        self.attr_dyn_or_default::<A>().into()
+    }
+
+    // these could be GetAttrExt but idk if there's a good marker trait for that...
+    #[inline]
+    fn has_attr_of<A>(&self) -> bool
+    where
+        Self: GetAttr<A>,
+    {
+        GetAttr::<A>::has_attr(self)
+    }
+    #[inline]
+    fn get_attr_ref_of<A>(&self) -> Option<&A>
+    where
+        Self: GetAttr<A>,
+    {
+        GetAttr::<A>::get_attr_ref(self)
+    }
+    #[inline]
+    fn get_attr_of<A>(&self) -> Option<Cow<'_, A>>
+    where
+        Self: GetAttr<A>,
+        A: ToOwned,
+    {
+        GetAttr::<A>::get_attr(self)
+    }
+    #[inline]
+    fn clone_attr_of<A>(&self) -> Option<A::Owned>
+    where
+        Self: GetAttr<A>,
+        A: ToOwned,
+    {
+        GetAttr::<A>::get_attr(self).map(Cow::into_owned)
+    }
+    #[inline]
+    fn attr_or_default<A>(&self) -> A::Owned
+    where
+        Self: GetAttr<A>,
+        A: ToOwned,
+        A::Owned: Default,
+    {
+        GetAttr::<A>::get_attr_or_default(self).into_owned()
+    }
+    #[inline]
+    fn attr_or_default_into<A, T>(&self) -> T
+    where
+        Self: GetAttr<A>,
+        A: ToOwned,
+        A::Owned: Default + Into<T>,
+    {
+        self.attr_or_default::<A>().into()
+    }
+
+    #[inline]
+    fn set_attr_dyn_of<A: AttrKeyValue>(&mut self, v: A) -> bool
+    where
+        Self: SetAttrDyn,
+    {
+        self.set_attr_dyn(unsafe { PackValueCell::new_boxed_unchecked(v) })
+    }
+    #[inline]
+    fn unset_attr_dyn_of<A: AttrKeyValue>(&mut self)
+    where
+        Self: SetAttrDyn,
+    {
+        self.set_attr_dyn(PackValueCell::new_empty(A::pack_key_of()));
+    }
 }
 impl<T> GetAttrDynExt for T
 where
     T: ?Sized + GetAttrDyn,
 {
     #[inline]
+    fn holds_attr_dyn_of<A: AttrKeyValue>() -> bool
+    where
+        Self: Sized,
+    {
+        Self::holds_attr_dyn(A::pack_key_of())
+    }
+    #[inline]
     fn get_attr_dyn_ref_of<A: AttrKeyValue>(&self) -> Option<&A> {
         self.get_attr_dyn_ref(A::pack_key_of())
             .map(|v| unsafe { <dyn AttrKeyValue>::downcast_ref_unchecked(v) })
     }
     #[inline]
+    fn get_attr_dyn_of<A>(&self) -> Option<Cow<'_, PackValueRef<A>>>
+    where
+        A: AttrKeyValue + Clone,
+    {
+        self.get_attr_dyn(A::pack_key_of()).map(|v| match v {
+            Cow::Borrowed(v) => Cow::Borrowed(unsafe {
+                PackValueRef::from_ref(<dyn AttrKeyValue>::downcast_ref_unchecked(v))
+            }),
+            Cow::Owned(v) => Cow::Owned(unsafe { v.downcast_unchecked() }),
+        })
+    }
+    #[inline]
     fn clone_attr_dyn_of<A: AttrKeyValue>(&self) -> Option<PackValueOf<A>> {
         self.clone_attr_dyn(A::pack_key_of())
-            .map(|v| unsafe { PackValueOf::new_unchecked(v.into()) })
+            .map(|v| unsafe { v.downcast_unchecked() })
     }
     #[inline]
     fn has_attr_dyn_of<A: AttrKeyValue>(&self) -> bool {
@@ -1547,12 +1720,9 @@ macro_rules! pack_attr {
         'packkeymatch: loop {
             let pack_id = $id;
             $(
-                let exp_id = {
-                    /// TODO: switch to single array here and index into it?
-                    /// if captures aren't needed could use dyn dispatch for the branches too...
-                    static PACK_ID_OF: ::std::sync::LazyLock<$crate::attributes::cell::PackKeyId> = ::std::sync::LazyLock::new(<$attr as $crate::attributes::cell::AttrKeyValue>::pack_key_of);
-                    *PACK_ID_OF
-                };
+                // TODO: switch to single array here and index into it?
+                // if captures aren't needed could use dyn dispatch for the branches too...
+                let exp_id = <$attr as $crate::attributes::cell::AttrKeyValue>::pack_key_of();
                 if pack_id == exp_id {
                     break 'packkeymatch ($v)
                 }
@@ -1572,10 +1742,7 @@ macro_rules! pack_attr {
             if false { unsafe { ::core::hint::unreachable_unchecked() } }
             $(
                 else if ({
-                    let exp_id = {
-                        static PACK_ID_OF: ::std::sync::LazyLock<$crate::attributes::cell::PackKeyId> = ::std::sync::LazyLock::new(<$attr as $crate::attributes::cell::AttrKeyValue>::pack_key_of);
-                        *PACK_ID_OF
-                    };
+                    let exp_id = <$attr as $crate::attributes::cell::AttrKeyValue>::pack_key_of();
                     pack_id == exp_id
                 }) {
                     let $bind = unsafe { $crate::attributes::cell::PackValueOf::<$attr>::new_unchecked($bind) };

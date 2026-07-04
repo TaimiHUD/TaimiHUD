@@ -1,5 +1,5 @@
 use {
-    super::{AttrList, TacoBehavior},
+    super::{AttrList, MapType, TacoBehavior},
     crate::{
         attributes::{AttrString, BounceBehavior, CullDirection},
         category::id,
@@ -36,6 +36,16 @@ pub trait AttrKey: fmt::Debug + Clone {
         Self::ATTR_NAMES
             .iter()
             .any(|alias| attr.eq_ignore_ascii_case(alias))
+    }
+    /// hack to allow "specialization" of the blanket impl for [super::cell::AttrKeyValue::pack_key_of]
+    ///
+    /// implement using a static lazy lock or something to avoid more expensive typeid lookups
+    #[doc(hidden)]
+    fn __pack_key_of() -> super::cell::PackKeyId
+    where
+        Self: Sized + super::cell::AttrKeyValue,
+    {
+        super::cell::PackKeyId::for_type::<Self>()
     }
 }
 
@@ -234,11 +244,21 @@ impl<T: FromStr> FromStr for Opt<T> {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct List<T>(pub Box<[T]>);
 impl<T> List<T> {
+    #[inline]
     pub fn iter(&self) -> slice::Iter<'_, T> {
         self.0.iter()
+    }
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+impl<T> Default for List<T> {
+    fn default() -> Self {
+        Self(Default::default())
     }
 }
 
@@ -390,6 +410,10 @@ impl Default for MapVisibility {
 }
 impl FadeNear {
     pub const DEFAULT: Self = Self(-1.0);
+    #[inline(always)]
+    pub const fn inches(&self) -> f32 {
+        self.0
+    }
 }
 impl Default for FadeNear {
     fn default() -> Self {
@@ -398,6 +422,10 @@ impl Default for FadeNear {
 }
 impl FadeFar {
     pub const DEFAULT: Self = Self(-1.0);
+    #[inline(always)]
+    pub fn inches(&self) -> f32 {
+        self.0
+    }
 }
 impl Default for FadeFar {
     fn default() -> Self {
@@ -562,7 +590,7 @@ pack_key! {
     #[pack(attr = "specialization")]
     pub struct Specializations(pub List<Specialization>);
     #[pack(attr = "maptype")]
-    pub struct MapTypes(pub List<super::MapType>);
+    pub struct MapTypes(pub List<MapType>);
     #[pack(attr = "raid")]
     pub struct Raids(pub List<Raid>);
 }
@@ -593,8 +621,8 @@ impl Specializations {
 }
 impl MapTypes {
     #[inline]
-    pub fn from_attrlist(v: &AttrList<super::MapType>) -> &Self {
-        let list: &Box<[super::MapType]> = &**v;
+    pub fn from_attrlist(v: &AttrList<MapType>) -> &Self {
+        let list: &Box<[MapType]> = &**v;
         unsafe { mem::transmute(list) }
     }
 }
@@ -665,7 +693,49 @@ impl Raids {
         unsafe { mem::transmute(list) }
     }
 }
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Festivals(pub super::Festivals);
+impl AttrKey for Festivals {
+    type Storage = super::Festivals;
+    const ATTR: &'static str = "festival";
+    const ATTR_NAMES: &'static [&'static str] = &[Self::ATTR];
+}
+impl FromStr for Festivals {
+    type Err = <List<super::Festival> as FromStr>::Err;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        List::<super::Festival>::from_str(value).map(|festivals| Self(festivals.into_iter().collect()))
+    }
+}
+impl Festivals {
+    #[inline]
+    pub const fn from_ref(v: &super::Festivals) -> &Self {
+        unsafe { mem::transmute(v) }
+    }
+}
+impl From<super::Festivals> for Festivals {
+    fn from(v: super::Festivals) -> Self {
+        Self(v)
+    }
+}
+impl From<Festivals> for super::Festivals {
+    fn from(v: Festivals) -> Self {
+        v.0
+    }
+}
+impl Borrow<Festivals> for super::Festivals {
+    fn borrow(&self) -> &Festivals {
+        Festivals::from_ref(self)
+    }
+}
+impl Borrow<super::Festivals> for Festivals {
+    fn borrow(&self) -> &super::Festivals {
+        &self.0
+    }
+}
+
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Mounts(pub super::Mounts);
 impl AttrKey for Mounts {
     type Storage = super::Mounts;
@@ -679,8 +749,34 @@ impl FromStr for Mounts {
         List::<super::Mount>::from_str(value).map(|mounts| Self(mounts.into_iter().collect()))
     }
 }
+impl Mounts {
+    #[inline]
+    pub const fn from_ref(v: &super::Mounts) -> &Self {
+        unsafe { mem::transmute(v) }
+    }
+}
+impl From<super::Mounts> for Mounts {
+    fn from(v: super::Mounts) -> Self {
+        Self(v)
+    }
+}
+impl From<Mounts> for super::Mounts {
+    fn from(v: Mounts) -> Self {
+        v.0
+    }
+}
+impl Borrow<Mounts> for super::Mounts {
+    fn borrow(&self) -> &Mounts {
+        Mounts::from_ref(self)
+    }
+}
+impl Borrow<super::Mounts> for Mounts {
+    fn borrow(&self) -> &super::Mounts {
+        &self.0
+    }
+}
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Professions(pub super::Professions);
 impl AttrKey for Professions {
     type Storage = super::Professions;
@@ -694,8 +790,34 @@ impl FromStr for Professions {
         List::<super::Profession>::from_str(value).map(|mounts| Self(mounts.into_iter().collect()))
     }
 }
+impl Professions {
+    #[inline]
+    pub const fn from_ref(v: &super::Professions) -> &Self {
+        unsafe { mem::transmute(v) }
+    }
+}
+impl From<super::Professions> for Professions {
+    fn from(v: super::Professions) -> Self {
+        Self(v)
+    }
+}
+impl From<Professions> for super::Professions {
+    fn from(v: Professions) -> Self {
+        v.0
+    }
+}
+impl Borrow<Professions> for super::Professions {
+    fn borrow(&self) -> &Professions {
+        Professions::from_ref(self)
+    }
+}
+impl Borrow<super::Professions> for Professions {
+    fn borrow(&self) -> &super::Professions {
+        &self.0
+    }
+}
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Races(pub super::Races);
 impl AttrKey for Races {
     type Storage = super::Races;
@@ -709,8 +831,32 @@ impl FromStr for Races {
         List::<super::Race>::from_str(value).map(|mounts| Self(mounts.into_iter().collect()))
     }
 }
-
-// TODO: more attrs are on the category/trail/etc structs, some optional and some required
+impl Races {
+    #[inline]
+    pub const fn from_ref(v: &super::Races) -> &Self {
+        unsafe { mem::transmute(v) }
+    }
+}
+impl From<super::Races> for Races {
+    fn from(v: super::Races) -> Self {
+        Self(v)
+    }
+}
+impl From<Races> for super::Races {
+    fn from(v: Races) -> Self {
+        v.0
+    }
+}
+impl Borrow<Races> for super::Races {
+    fn borrow(&self) -> &Races {
+        Races::from_ref(self)
+    }
+}
+impl Borrow<super::Races> for Races {
+    fn borrow(&self) -> &super::Races {
+        &self.0
+    }
+}
 
 // POI
 pack_key! {
@@ -850,6 +996,11 @@ impl Rotate {
     pub const fn from_ref(v: &Vec3) -> &Self {
         unsafe { mem::transmute(v) }
     }
+
+    #[inline]
+    pub fn radians(&self) -> Vec3 {
+        self.0.map(f32::to_radians)
+    }
 }
 impl AttrKey for Rotate {
     type Storage = Vec3;
@@ -898,6 +1049,42 @@ impl Borrow<Rotate> for Vec3 {
         Rotate::from_ref(self)
     }
 }
+impl Borrow<RotateX> for Rotate {
+    #[inline]
+    fn borrow(&self) -> &RotateX {
+        RotateX::from_ref(&self.0.x)
+    }
+}
+impl Borrow<RotateY> for Rotate {
+    #[inline]
+    fn borrow(&self) -> &RotateY {
+        RotateY::from_ref(&self.0.y)
+    }
+}
+impl Borrow<RotateZ> for Rotate {
+    #[inline]
+    fn borrow(&self) -> &RotateZ {
+        RotateZ::from_ref(&self.0.z)
+    }
+}
+impl RotateX {
+    #[inline]
+    pub const fn radians(&self) -> f32 {
+        self.0.to_radians()
+    }
+}
+impl RotateY {
+    #[inline]
+    pub const fn radians(&self) -> f32 {
+        self.0.to_radians()
+    }
+}
+impl RotateZ {
+    #[inline]
+    pub const fn radians(&self) -> f32 {
+        self.0.to_radians()
+    }
+}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ShowHideAction {
@@ -919,6 +1106,37 @@ impl ShowHideAction {
             Self::Hide => "hide",
             Self::Toggle => "toggle",
         }
+    }
+
+    pub fn iter_in_attrs<A>(attrs: &A) -> impl Iterator<Item = (Cow<'_, AttrString>, Self)>
+    where
+        A: ?Sized + GetAttr<ShowCategory> + GetAttr<HideCategory> + GetAttr<ToggleCategory>,
+    {
+        fn borrow_str<'a, C>(cat: Cow<'a, C>) -> Cow<'a, AttrString>
+        where
+            C: Borrow<AttrString> + ToOwned,
+            C::Owned: Into<AttrString>,
+        {
+            match cat {
+                Cow::Borrowed(b) => Cow::Borrowed(b.borrow()),
+                Cow::Owned(b) => Cow::Owned(b.into()),
+            }
+        }
+        IntoIterator::into_iter([
+            (
+                GetAttr::<ShowCategory>::get_attr(attrs).map(borrow_str),
+                Self::Show,
+            ),
+            (
+                GetAttr::<HideCategory>::get_attr(attrs).map(borrow_str),
+                Self::Hide,
+            ),
+            (
+                GetAttr::<ToggleCategory>::get_attr(attrs).map(borrow_str),
+                Self::Toggle,
+            ),
+        ])
+        .filter_map(|(v, t)| v.map(|v| (v, t)))
     }
 }
 impl fmt::Display for ShowHideAction {
@@ -1212,7 +1430,7 @@ pack_key! {
     #[pack(attr = "name")]
     pub struct NameId(pub AttrString);
     #[pack(attr = "mapid")]
-    #[derive(Copy)]
+    #[derive(Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct GameMap(pub u32);
     #[pack(attr = "info")]
     pub struct Info(pub AttrString);
@@ -1349,6 +1567,12 @@ impl From<i32> for GameMap {
         Self(id as _)
     }
 }
+impl From<NonZero<u32>> for GameMap {
+    #[inline]
+    fn from(id: NonZero<u32>) -> Self {
+        Self(id.get() as _)
+    }
+}
 impl From<GameMap> for i32 {
     #[inline]
     fn from(id: GameMap) -> Self {
@@ -1418,19 +1642,6 @@ impl Borrow<AchievementBit> for i32 {
             &[unexpected_endianness, _, _, ref b] => b,
         };
         AchievementBit::from_ref(byte)
-    }
-}
-
-impl IntoIterator for ResetGuid {
-    type Item = Guid;
-    type IntoIter = <List<Guid> as IntoIterator>::IntoIter;
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
-impl<G: Into<Guid>> FromIterator<G> for ResetGuid {
-    fn from_iter<I: IntoIterator<Item = G>>(iter: I) -> Self {
-        Self(iter.into_iter().map(Into::into).collect())
     }
 }
 
@@ -1628,7 +1839,7 @@ impl serde::Serialize for Guid {
     }
 }
 
-pub trait GetAttr<A: ?Sized + AttrKey> {
+pub trait GetAttr<A: ?Sized> {
     #[inline]
     fn has_attr(&self) -> bool {
         self.get_attr_ref().is_some()
@@ -1640,18 +1851,22 @@ pub trait GetAttr<A: ?Sized + AttrKey> {
     #[cfg(todo)]
     fn get_attr_storage(&self) -> Option<&A::Storage>;
     #[inline]
-    fn get_attr(&self) -> Option<Cow<'_, A>> {
+    fn get_attr(&self) -> Option<Cow<'_, A>>
+    where
+        A: ToOwned,
+    {
         self.get_attr_ref().map(Cow::Borrowed)
     }
     #[inline]
     fn get_attr_or_default(&self) -> Cow<'_, A>
     where
-        A: Default,
+        A: ToOwned,
+        A::Owned: Default,
     {
         self.get_attr().unwrap_or_default()
     }
 }
-pub trait SetAttr<A: ?Sized + AttrKey> {
+pub trait SetAttr<A: ?Sized> {
     #[cfg(todo)]
     fn get_attr_mut(&mut self) -> Option<&mut A>;
     fn set_attr(&mut self, value: A);
@@ -1761,6 +1976,24 @@ macro_rules! pack_key {
                 fmt::Display::fmt(&self[..], f)
             }
         }
+        impl AsRef<str> for $ident {
+            #[inline]
+            fn as_ref(&self) -> &str {
+                &self.0[..]
+            }
+        }
+        impl AsRef<Box<str>> for $ident {
+            #[inline]
+            fn as_ref(&self) -> &Box<str> {
+                &*self.0
+            }
+        }
+        impl Borrow<str> for $ident {
+            #[inline]
+            fn borrow(&self) -> &str {
+                &self.0[..]
+            }
+        }
         impl FromStr for $ident {
             type Err = Infallible;
 
@@ -1834,17 +2067,55 @@ macro_rules! pack_key {
                 $ident::from_ref(&self.name)
             }
         }
-        impl core::borrow::Borrow<$ident> for AttrString {
+        impl Borrow<$ident> for AttrString {
             #[inline]
             fn borrow(&self) -> &$ident {
                 $ident::from_ref(core::borrow::Borrow::borrow(self))
             }
         }
-        impl core::borrow::Borrow<AttrString> for $ident {
+        impl Borrow<AttrString> for $ident {
             #[inline]
             fn borrow(&self) -> &AttrString {
                 core::borrow::Borrow::borrow(&self.0)
             }
+        }
+    };
+    (@fromstr
+        $vis:vis struct $ident:ident(
+            $vis_field:vis List<$elem:ty>
+        );
+    ) => {
+        pack_key! {
+            @fromstr
+            struct $ident(
+                $vis_field, {List<$elem>}
+            );
+        }
+        impl<E: Into<$elem>> FromIterator<E> for $ident {
+            #[inline]
+            fn from_iter<I: IntoIterator<Item = E>>(iter: I) -> Self {
+                Self(FromIterator::from_iter(iter.into_iter().map(Into::into)))
+            }
+        }
+        impl IntoIterator for $ident {
+            type Item = $elem;
+            type IntoIter = <List<$elem> as IntoIterator>::IntoIter;
+            #[inline]
+            fn into_iter(self) -> Self::IntoIter {
+                self.0.into_iter()
+            }
+        }
+        impl From<$elem> for $ident {
+            #[inline]
+            fn from(e: $elem) -> Self { FromIterator::from_iter([e]) }
+        }
+        impl From<Box<[$elem]>> for $ident {
+            #[inline]
+            fn from(e: Box<[$elem]>) -> Self { Self(List(e)) }
+        }
+        impl From<Vec<$elem>> for $ident {
+            #[inline]
+            fn from(e: Vec<$elem>) -> Self { Self(List(e.into_boxed_slice())) }
         }
     };
     (@fromstr
@@ -2167,6 +2438,16 @@ macro_rules! pack_key {
             type Storage = $ty;
             const ATTR: &'static str = $attr;
             const ATTR_NAMES: &'static [&'static str] = &[$attr $(, $($attr_alias),*)?];
+
+            fn __pack_key_of() -> $crate::attributes::cell::PackKeyId
+            where
+                $ident: $crate::attributes::cell::AttrKeyValue,
+            {
+                static KEY: ::std::sync::LazyLock<$crate::attributes::cell::PackKeyId> = ::std::sync::LazyLock::new(
+                    $crate::attributes::cell::PackKeyId::for_type::<$ident>
+                );
+                *KEY
+            }
         }
 
         $(crate::attributes::keys::pack_key! {
@@ -2192,6 +2473,7 @@ super::cell::pack_attr! {
     impl !Default for ScriptFilter {}
     impl !Default for ScriptOnce {}
     impl !Default for Title {}
+    impl !Default for Text {}
     impl !Default for TitleColour {}
     impl !Default for Info {}
     impl !Default for CopyValue {}
@@ -2201,6 +2483,117 @@ super::cell::pack_attr! {
     impl !Default for ShowCategory {}
     impl !Default for HideCategory {}
     impl !Default for ToggleCategory {}
+    impl !Default for Specializations {}
+    impl !Default for Raids {}
+    impl !Default for MapTypes {}
+    // TODO: do these impl AttrKey or no?
+    impl !Default for Specialization {}
+    impl !Default for Raid {}
     // TODO: unclear exactly how this interacts? there is a default bounce mode, but I don't think markers always bounce by default?
     // impl !Default for Bounce {}
+}
+
+// collection elements that aren't keys themselves...
+// (see also: Festival, Mount, Race, Profession)
+impl<T> GetAttr<Raid> for T
+where
+    T: ?Sized + GetAttr<Raids>,
+    // TODO: dumb hack to avoid blanket impl havoc
+    T: Borrow<crate::attributes::FilterAttributes>,
+{
+    fn has_attr(&self) -> bool {
+        GetAttr::<Raids>::get_attr(self)
+            .map(|f| !f.0.is_empty())
+            .unwrap_or(false)
+    }
+    fn get_attr(&self) -> Option<Cow<'_, Raid>> {
+        GetAttr::<Raids>::get_attr(self).and_then(|f| match f {
+            Cow::Borrowed(r) => r.iter().next().map(Cow::Borrowed),
+            Cow::Owned(r) => r.iter().next().cloned().map(Cow::Owned),
+        })
+    }
+}
+impl<T> SetAttr<Raid> for T
+where
+    T: ?Sized + SetAttr<Raids> + GetAttr<Raids>,
+    T: Borrow<crate::attributes::FilterAttributes>,
+{
+    fn set_attr(&mut self, value: Raid) {
+        let r = match GetAttr::<Raids>::get_attr(self) {
+            Some(s) => s.iter().cloned().chain([value]).collect::<List<_>>(),
+            None => List(vec![value].into()),
+        };
+        SetAttr::<Raids>::set_attr(self, r.into())
+    }
+    fn unset_attr(&mut self) {
+        SetAttr::<Raids>::unset_attr(self)
+    }
+}
+impl<T> GetAttr<Specialization> for T
+where
+    T: ?Sized + GetAttr<Specializations>,
+    // TODO: dumb hack to avoid blanket impl havoc
+    T: Borrow<crate::attributes::FilterAttributes>,
+{
+    fn has_attr(&self) -> bool {
+        GetAttr::<Specializations>::get_attr(self)
+            .map(|f| !f.0.is_empty())
+            .unwrap_or(false)
+    }
+    fn get_attr(&self) -> Option<Cow<'_, Specialization>> {
+        GetAttr::<Specializations>::get_attr(self).and_then(|f| match f {
+            Cow::Borrowed(r) => r.iter().next().map(Cow::Borrowed),
+            Cow::Owned(r) => r.iter().next().cloned().map(Cow::Owned),
+        })
+    }
+}
+impl<T> SetAttr<Specialization> for T
+where
+    T: ?Sized + SetAttr<Specializations> + GetAttr<Specializations>,
+    T: Borrow<crate::attributes::FilterAttributes>,
+{
+    fn set_attr(&mut self, value: Specialization) {
+        let s = match GetAttr::<Specializations>::get_attr(self) {
+            Some(s) => s.iter().cloned().chain([value]).collect::<List<_>>(),
+            None => List(slice::from_ref(&value).into()),
+        };
+        SetAttr::<Specializations>::set_attr(self, s.into())
+    }
+    fn unset_attr(&mut self) {
+        SetAttr::<Specializations>::unset_attr(self)
+    }
+}
+impl<T> GetAttr<MapType> for T
+where
+    T: ?Sized + GetAttr<MapTypes>,
+    // TODO: dumb hack to avoid blanket impl havoc
+    T: Borrow<crate::attributes::FilterAttributes>,
+{
+    fn has_attr(&self) -> bool {
+        GetAttr::<MapTypes>::get_attr(self)
+            .map(|f| !f.0.is_empty())
+            .unwrap_or(false)
+    }
+    fn get_attr(&self) -> Option<Cow<'_, MapType>> {
+        GetAttr::<MapTypes>::get_attr(self).and_then(|f| match f {
+            Cow::Borrowed(r) => r.iter().next().map(Cow::Borrowed),
+            Cow::Owned(r) => r.iter().next().cloned().map(Cow::Owned),
+        })
+    }
+}
+impl<T> SetAttr<MapType> for T
+where
+    T: ?Sized + SetAttr<MapTypes> + GetAttr<MapTypes>,
+    T: Borrow<crate::attributes::FilterAttributes>,
+{
+    fn set_attr(&mut self, value: MapType) {
+        let s = match GetAttr::<MapTypes>::get_attr(self) {
+            Some(s) => s.iter().cloned().chain([value]).collect::<List<_>>(),
+            None => List(slice::from_ref(&value).into()),
+        };
+        SetAttr::<MapTypes>::set_attr(self, s.into())
+    }
+    fn unset_attr(&mut self) {
+        SetAttr::<MapTypes>::unset_attr(self)
+    }
 }

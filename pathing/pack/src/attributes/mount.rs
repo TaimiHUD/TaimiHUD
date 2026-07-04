@@ -1,4 +1,5 @@
 use {
+    crate::attributes::keys::{self, GetAttr, SetAttr},
     anyhow::anyhow,
     bitflags::bitflags,
     std::{mem, str::FromStr},
@@ -24,13 +25,16 @@ pub enum Mount {
 impl Mount {
     pub const REPR_MIN: u8 = Self::None as u8;
     pub const REPR_MAX: u8 = Self::SiegeTurtle as u8;
-    pub const INDEX_MAX: u8 = Self::REPR_MAX - 1;
+    pub const INDEX_MAX: u8 = Self::REPR_MAX;
 
     pub const fn repr(self) -> u8 {
         self as u8
     }
     pub const fn index(self) -> u8 {
-        self.repr() - 1
+        self.repr()
+    }
+    pub const fn from_repr(repr: u8) -> Option<Self> {
+        Self::from_index(repr)
     }
     pub const fn from_index(index: u8) -> Option<Self> {
         match index {
@@ -105,6 +109,7 @@ impl FromStr for Mount {
 bitflags! {
     #[derive(Debug, Copy, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct Mounts: u16 {
+        const NONE = 1 << Mount::None.index();
         const JACKAL = 1 << Mount::Jackal.index();
         const GRIFFON = 1 << Mount::Griffon.index();
         const SPRINGER = 1 << Mount::Springer.index();
@@ -121,7 +126,6 @@ bitflags! {
 impl Mounts {
     pub const fn for_mount(mount: Mount) -> Self {
         match mount {
-            Mount::None => Self::empty(),
             mount => Self::from_bits_retain(1u16 << mount.index()),
         }
     }
@@ -157,5 +161,37 @@ impl FromIterator<Mount> for Mounts {
 impl<'a> FromIterator<&'a Mount> for Mounts {
     fn from_iter<T: IntoIterator<Item = &'a Mount>>(iter: T) -> Self {
         iter.into_iter().map(|&f| Self::from(f)).collect()
+    }
+}
+
+impl<T> GetAttr<Mount> for T
+where
+    T: ?Sized + GetAttr<keys::Mounts>,
+    // TODO: dumb hack to avoid blanket impl havoc
+    T: core::borrow::Borrow<crate::attributes::FilterAttributes>,
+{
+    fn has_attr(&self) -> bool {
+        GetAttr::<keys::Mounts>::get_attr(self)
+            .map(|f| !f.0.is_empty())
+            .unwrap_or(false)
+    }
+    fn get_attr(&self) -> Option<std::borrow::Cow<'_, Mount>> {
+        GetAttr::<keys::Mounts>::get_attr(self)
+            .and_then(|f| f.0.iter_mounts().next())
+            .map(std::borrow::Cow::Owned)
+    }
+}
+impl<T> SetAttr<Mount> for T
+where
+    T: ?Sized + SetAttr<keys::Mounts> + GetAttr<keys::Mounts>,
+    T: core::borrow::Borrow<crate::attributes::FilterAttributes>,
+{
+    fn set_attr(&mut self, value: Mount) {
+        let mut f = GetAttr::<keys::Mounts>::get_attr_or_default(self).into_owned();
+        f.0.insert(value.into());
+        SetAttr::<keys::Mounts>::set_attr(self, f)
+    }
+    fn unset_attr(&mut self) {
+        SetAttr::<keys::Mounts>::unset_attr(self)
     }
 }
