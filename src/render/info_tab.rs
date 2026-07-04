@@ -120,6 +120,14 @@ impl InfoTabState {
         {
             ui.text_wrapped(im_fmt!("Built from {git_head_ref}@{git_hash}{}.", fmt_opt(in_ci)));
         }
+        #[allow(unreachable_patterns)]
+        match () {
+            #[cfg(taimi_debug)]
+            _ => ui.text("debug variant"),
+            #[cfg(taimi_dev)]
+            _ => ui.text("test variant"),
+            _ => (),
+        }
         ui.dummy([4.0, 4.0]);
         ui.text_wrapped(im_fmt!(i18n: "having-issues"));
         ui.dummy([4.0, 4.0]);
