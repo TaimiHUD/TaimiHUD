@@ -138,6 +138,11 @@ gh-api-token = GitHub API Token
 gh-api-token-notice = Rate limit errors when updating datasources may be avoided by configuring a personalized token - only provide if you understand the implications of doing so!
 language = Language
 language-unsupported = No translation
+language-help = Do you speak a language we're missing support for?
+language-help-calltoaction = If you're interested in helping translate TaimiHUD into other languages for your countryfolk and those in your sprachraum, please get in contact!
+language-help-info = TaimiHUD Internationalisation
+language-help-link = "https://taimihud.com/docs/i18n/"
+
 addonbinds = Shortcuts
 gamebinds = Game Bindings
 keybind = Keybind
