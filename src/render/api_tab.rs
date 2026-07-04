@@ -194,6 +194,11 @@ impl ApiTabState {
             let _ = rt::send_alert(ui, "clearing all tokens...");
             ApiMessage::TokenClear.try_send();
         }
+
+        ui.spacing();
+        ui.separator();
+        ui.spacing();
+        ui.text_wrapped(fl!("experimental-notice"));
     }
 
     pub fn sync_boot(&mut self) {
