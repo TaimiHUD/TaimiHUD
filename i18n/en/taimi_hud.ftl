@@ -141,6 +141,19 @@ gamebind-notice = Set these to match your Controls settings in-game. These may b
 precise-markers = Precise Markers
 bind = Bind
 press-key = press a key
+config-paths = Pathing Controls
+config-paths-toggle-mode = Visibility Toggle Granularity
+config-paths-toggle-mode-notice = These modes apply to your configured keybind shortcut as well clicking on the associated quick access icons from Nexus, but will not change how the right-click menu toggles work.
+config-paths-toggle-mode-space = The pathing toggle can be set to control both maps as well, or adapt to whichever views you can currently see - space and minimap switch together while in-game, but while looking at the world map it will control that instead.
+config-paths-toggle-mode-map = Set the world map toggle to control minimap display as well, or only whichever you're currently looking at
+config-paths-toggle-mode-space-group = Primary Toggle
+config-paths-toggle-mode-space-on = Adaptive
+config-paths-toggle-mode-space-off = Separate (Classic)
+config-paths-toggle-mode-map-group = Combined
+config-paths-toggle-mode-map-on = { config-paths-toggle-mode-space-on }
+config-paths-toggle-mode-map-off = { config-paths-toggle-mode-space-off }
+#config-paths-toggle-mode-orientation = Direction
+config-paths-toggle-mode-orientation = Orientation
 
 ## API Config
 

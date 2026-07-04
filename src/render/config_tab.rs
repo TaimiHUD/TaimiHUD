@@ -39,6 +39,8 @@ use {
     strum::VariantArray,
 };
 
+#[cfg(feature = "paths")]
+use crate::settings::pathing::{SpaceSettings, ToggleGranularity};
 #[cfg(feature = "updates")]
 use crate::{
     exports::runtime::update::ResolvedVersion,
@@ -59,6 +61,12 @@ pub struct ConfigTabState {
     pub quick_access_icons_visible: TaimiControls,
     #[cfg(feature = "updates")]
     pub update_state: ConfigUpdateState,
+    #[cfg(feature = "paths")]
+    toggle_granularity_space: ToggleGranularity,
+    #[cfg(feature = "paths")]
+    toggle_granularity_map: ToggleGranularity,
+    #[cfg(feature = "paths")]
+    toggle_group_orientation: bool,
 }
 
 impl ConfigTabState {
@@ -77,6 +85,12 @@ impl ConfigTabState {
             quick_access_icons_visible: TaimiControls::default_quick_access(),
             #[cfg(feature = "updates")]
             update_state: ConfigUpdateState::new(),
+            #[cfg(feature = "paths")]
+            toggle_granularity_space: SpaceSettings::DEFAULT_TOGGLE_GRANULARITY_SPACE,
+            #[cfg(feature = "paths")]
+            toggle_granularity_map: SpaceSettings::DEFAULT_TOGGLE_GRANULARITY_MAP,
+            #[cfg(feature = "paths")]
+            toggle_group_orientation: SpaceSettings::DEFAULT_TOGGLE_GROUP_ORIENTATION,
         }
     }
 
@@ -126,6 +140,18 @@ impl ConfigTabState {
         #[cfg(feature = "updates")]
         if let Some(_tree) = update {
             self.update_state.draw(ui);
+        }
+
+        #[cfg(feature = "paths")]
+        let paths = ui.begin_tree_node_framed(
+            ImCondition::initial(false),
+            c"config-paths",
+            fl!("config-paths"),
+            false,
+        );
+        #[cfg(feature = "paths")]
+        if let Some(_tree) = paths {
+            self.draw_paths_controls(ui, machine)
         }
 
         let timers_window = with_i18n!("timer-window", |msg| ui.begin_tree_node_framed(
@@ -232,6 +258,84 @@ impl ConfigTabState {
                     quick_access_add(icon, state, self.quick_access_style);
                 }
             }
+        }
+    }
+
+    #[cfg(feature = "paths")]
+    fn draw_paths_controls<'ui, U>(&mut self, ui: &mut U, machine: &mut RenderMachine)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        if let Some(settings) = Settings::try_read() {
+            if let Some(p) = &settings.pathing {
+                self.toggle_granularity_space = p.space.toggle_granularity_space();
+                self.toggle_granularity_map = p.space.toggle_granularity_map();
+                self.toggle_group_orientation = p.space.toggle_group_orientation();
+            }
+        }
+        let toggle_mode = ui.begin_tree_node_framed(
+            ImCondition::APPEAR,
+            c"config-paths-toggle-mode",
+            fl!("config-paths-toggle-mode"),
+            false,
+        );
+        #[cfg(todo)]
+        if ui.is_item_hovered() {
+            ui.tooltip_text_wrapped(fl!("config-paths-toggle-mode-notice"));
+        }
+        if let Some(_tree) = toggle_mode {
+            ui.text_wrapped(fl!("config-paths-toggle-mode-notice"));
+            let mut space_idx = self.toggle_granularity_space.index() as usize;
+            let space_names = ToggleGranularity::VARIANTS.iter().map(|v| fl!(v.name_id_space()));
+            let space_set = ui.combo(fl!("pathing-render-toggle"), &mut space_idx, space_names);
+            let space_set = match space_set {
+                false if ui.is_item_right_clicked() => Some(None),
+                false => None,
+                true => ToggleGranularity::from_index(space_idx as _).map(Some),
+            };
+            if let Some(set) = space_set {
+                let _ = Settings::write_with_blocking(|s| {
+                    s.pathing_mut().space.toggle_granularity_space = set;
+                });
+            } else if ui.is_item_hovered() {
+                ui.tooltip_text_wrapped(fl!("config-paths-toggle-mode-space"));
+            }
+            let map_names = ToggleGranularity::VARIANTS.iter().map(|v| fl!(v.name_id_map()));
+            let mut map_idx = self.toggle_granularity_map.index() as usize;
+            let map_set = ui.combo(fl!("pathing-render-map-toggle"), &mut map_idx, map_names);
+            let map_set = match map_set {
+                false if ui.is_item_right_clicked() => Some(None),
+                false => None,
+                true => ToggleGranularity::from_index(map_idx as _).map(Some),
+            };
+            if let Some(set) = map_set {
+                let _ = Settings::write_with_blocking(|s| {
+                    s.pathing_mut().space.toggle_granularity_map = set;
+                });
+            } else if ui.is_item_hovered() {
+                ui.tooltip_text_wrapped(fl!("config-paths-toggle-mode-map"));
+            }
+            if ui.checkbox(
+                fl!("config-paths-toggle-mode-orientation"),
+                &mut self.toggle_group_orientation,
+            ) {
+                let _ = Settings::write_with_blocking(|s| {
+                    s.pathing_mut().space.toggle_group_orientation = Some(self.toggle_group_orientation);
+                });
+            }
+        }
+
+        #[cfg(todo)]
+        if ui.checkbox(fl!("config-paths-hide-ui")) {
+            // TODO: show/hide ui settings
+        }
+        #[cfg(todo)]
+        if ui.checkbox(fl!("config-paths-hide-screenshot")) {
+            // TODO: screenshot visibility settings
+        }
+        #[cfg(todo)]
+        if ui.checkbox(fl!("config-paths-hide-combat")) {
+            // TODO: fade while in combat?
         }
     }
 

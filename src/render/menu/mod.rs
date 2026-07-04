@@ -211,7 +211,7 @@ impl RenderState {
         }
         match toggled {
             Some((ctx, set)) => {
-                PathingEvent::VisibleToggle { context: ctx.into(), set }.try_send();
+                PathingEvent::visible_toggle_manual(ctx.into(), set).try_send();
             },
             None => (),
         }
