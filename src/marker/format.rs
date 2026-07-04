@@ -208,12 +208,17 @@ impl RuntimeMarkers {
             MarkerFormats::Community(f) => {
                 let category =
                     category.ok_or(anyhow!("Category not provided, required for File format"))?;
-                let category = f
+                let category_idx = f
                     .categories
-                    .iter_mut()
-                    .find(|c| c.name == category)
+                    .iter()
+                    .position(|c| c.name == category)
                     .ok_or(anyhow!("Couldn't find category {}", category))?;
-                Ok(category.marker_sets.remove(idx))
+                let cat = &mut f.categories[category_idx];
+                let ms = cat.marker_sets.remove(idx);
+                if cat.marker_sets.is_empty() {
+                    f.categories.remove(category_idx);
+                }
+                Ok(ms)
             },
             MarkerFormats::Taimi(t) => Ok(t.remove(idx)),
             MarkerFormats::Integrated(c) => Ok(c.squad_marker_preset.remove(idx)),
