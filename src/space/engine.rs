@@ -418,7 +418,7 @@ impl Engine {
     pub fn remove_phase(&mut self, timer: Arc<TimerFile>) -> anyhow::Result<()> {
         if let Some(entry) = self.associated_entities.remove(&timer.name) {
             entry.iter().for_each(|entity| {
-                log::debug!("Despawning {entity} from timer {} markers", timer.name());
+                log::trace!("Despawning {entity} from timer {} markers", timer.name());
                 self.world.despawn(*entity);
             });
         }
