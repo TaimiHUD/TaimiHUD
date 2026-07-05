@@ -24,7 +24,8 @@ use {
         settings::ui::UiConfig,
     },
     core::fmt,
-    std::{borrow::Cow, collections::BTreeMap, sync::Arc},
+    std::{borrow::Cow, sync::Arc},
+    taimi_hoard::collections::FlatMap,
     taimi_ui::im::{
         self,
         image::ImTexture,
@@ -402,7 +403,7 @@ impl ImTexture for ImguiTexture {
 }
 
 pub struct ImTextDisplay<'r, T: ?Sized = String> {
-    pub replacements: &'r BTreeMap<char, &'static str>,
+    pub replacements: &'r FlatMap<char, &'static str>,
     pub inner: T,
 }
 impl<'r, T: ?Sized> ImTextDisplay<'r, T> {
@@ -463,15 +464,15 @@ impl<'r> ImTextDisplay<'r> {
     pub const IMGUI_ZEROWIDTH_ASCII: u8 = b'\r';
 
     /// TODO
-    pub fn replacements_for<U>(_ui: &mut U) -> &'r BTreeMap<char, &'static str>
+    pub fn replacements_for<U>(_ui: &mut U) -> &'r FlatMap<char, &'static str>
     where
         U: ?Sized + ImDrawWindow<'r>,
     {
         ImTextDisplay::placeholder_nexus_replacements()
     }
-    pub fn placeholder_nexus_replacements() -> &'static BTreeMap<char, &'static str> {
+    pub fn placeholder_nexus_replacements() -> &'static FlatMap<char, &'static str> {
         use std::sync::LazyLock;
-        static REPLACEMENTS: LazyLock<BTreeMap<char, &'static str>> = LazyLock::new(|| {
+        static REPLACEMENTS: LazyLock<FlatMap<char, &'static str>> = LazyLock::new(|| {
             IntoIterator::into_iter([('’', "\u{b4}")])
                 .map(Into::into)
                 .collect()
@@ -515,7 +516,7 @@ where
                 break Ok(())
             }
 
-            let replacement = chars.find_map(|(o, c)| self.replacements.get(&c).map(|r| (o, c, r)));
+            let replacement = chars.find_map(|(o, c)| self.replacements.find(&c).map(|r| (o, c, r)));
             let (ok, replacement) = match replacement {
                 Some((o, _, r)) => unsafe { (uni.get_unchecked(..o - start), Some(r)) },
                 None => (uni, None),
@@ -526,7 +527,7 @@ where
         }
     }
     fn write_char(&mut self, c: char) -> std::fmt::Result {
-        if let Some(r) = self.replacements.get(&c) {
+        if let Some(r) = self.replacements.find(&c) {
             self.inner.write_str(&*r)
         } else {
             self.inner.write_char(c)
