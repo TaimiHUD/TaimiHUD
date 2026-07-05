@@ -51,10 +51,11 @@ impl ComboInput {
                 self.entry = Some(selection);
             }
         }
-        let maked = match self.make_entry {
-            false => with_i18n!("create-arg", |label| ui.button(label)),
-            true => with_i18n!("not-create-arg", |label| ui.button(label)),
+        let label = match self.make_entry {
+            false => *fl!("create-arg").id_name(),
+            true => *fl!("not-create-arg").id_name(),
         };
+        let maked = ui.button(im_fmt!(i18n: label => arg = &self.label));
         if maked {
             self.make_entry = !self.make_entry;
         }
