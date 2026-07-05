@@ -7,7 +7,15 @@ Have questions? Reach out on IRC or Discord.
 
 ## LLM Policy
 
-We accept external contributions, so as long as they are not made with any use of LLMs or AI tooling in any way (e.g. Copilot and many other such tools).
+We accept external contributions, so as long as they are not made with the use of LLMs or AI tooling in any way. We additionally consider their use in drafting communications with other people or the maintainers to be disrespectful to the reader, so please clearly delineate and quote the source if AI summaries were necessary for purposes such as translation or explanation (in issues, PRs, documentation, commit descriptions, etc).
+
+<details><summary>We ask that you and your tools respect our policy.</summary>
+Since we've received requests about relaxing this policy, here's some additional context on the stance:
+
+We primarily aim to exclude the output of models in our project due to the source being of ambiguous origin, typically produced from the works of countless people who did not consent to their inclusion. Aside from the dubious legality around licensing concerns and authorship, these services are often provided by organizations that profiteer and exploit others off the backs of their works<!-- all the while enabling customers to pollute various industries and communities with disingenuine "slop" -->. We do not wish to engage with or encourage the use of these products, and simply believe that our time would not be well spent on carving out exceptions or distinguishing between "vibes" and "assistance" or "tool use" and so on.
+
+There are many other ways to contribute to our project and/or community if you're unwilling or unable to work on the source code without the help of such tools!
+</details>
 
 ## References
 
