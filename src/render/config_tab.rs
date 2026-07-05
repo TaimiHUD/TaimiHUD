@@ -144,7 +144,7 @@ impl ConfigTabState {
 
         #[cfg(feature = "paths")]
         let paths = ui.begin_tree_node_framed(
-            ImCondition::initial(false),
+            ImCondition::initial(true),
             c"config-paths",
             fl!("config-paths"),
             false,
@@ -274,7 +274,7 @@ impl ConfigTabState {
             }
         }
         let toggle_mode = ui.begin_tree_node_framed(
-            ImCondition::APPEAR,
+            ImCondition::initial(true),
             c"config-paths-toggle-mode",
             fl!("config-paths-toggle-mode"),
             false,
