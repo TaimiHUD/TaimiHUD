@@ -55,7 +55,8 @@ impl PathingConfig {
         self.draw_header(ui);
 
         let mut available = None;
-        if let Some(_active) = ui.begin_mainbar(c"pathing_main") {
+        {
+            let _id = ui.push_id(c"pathing_main");
             let available = *available.insert(Engine::is_available());
             if !available && self.katrender() {
                 Self::draw_space_error(ui, machine, None);
@@ -73,7 +74,8 @@ impl PathingConfig {
 
         ui.next_column();
 
-        if let Some(_container) = ui.begin_sidebar(c"pathing_secondary") {
+        {
+            let _id = ui.push_id(c"pathing_secondary");
             self.draw_map_opts(ui);
 
             #[cfg(feature = "goggles")]
