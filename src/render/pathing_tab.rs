@@ -64,7 +64,12 @@ impl PathingConfig {
 
             self.draw_pathing_opts(ui, machine);
             if available && self.katrender() {
-                ui.separator();
+                #[cfg(todo)]
+                {
+                    // columns don't mix well with separators, needs to be in a child window
+                    ui.separator();
+                }
+                ui.spacing();
                 let label = fl!("pathing-window");
                 if ui.button(&label) {
                     crate::control_window(crate::WINDOW_PATHING, None);
