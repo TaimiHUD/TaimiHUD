@@ -2318,12 +2318,8 @@ impl PackCollection {
                     if trail.filtered || !bool::from(trail.attr_vis_space) {
                         continue
                     }
-                    if shader_state != ShaderState::Trail {
-                        shader_state = ShaderState::Trail;
-                        backend.shaders.set_named(device_context, "trail");
-                    }
-                    let colour = match (trail_colour, trail.tint_map()) {
-                        (None, Some(tint)) => Some(tint),
+                    let colour = match (trail_colour, trail.tint()) {
+                        (_, Some(tint)) => Some(tint),
                         (Some(..), None) => Some(glam::Vec4::ONE),
                         _ => None,
                     };
@@ -2336,6 +2332,14 @@ impl PackCollection {
                             c if c == glam::Vec4::ONE => None,
                             c => Some(c),
                         };
+                    }
+                    if shader_state == ShaderState::None {
+                        poi_common.set_instance(device_context, LocalContext::World);
+                        poi_common.set_primitive(device_context);
+                    }
+                    if shader_state != ShaderState::Trail {
+                        shader_state = ShaderState::Trail;
+                        backend.shaders.set_named(device_context, "trail");
                     }
                     trail.draw_section(device_context, section, LocalContext::World);
                 },
@@ -2438,12 +2442,12 @@ impl PackCollection {
                         poi_common.set_primitive(device_context);
                         poi_common.set_instance(device_context, ctx);
                     }
-                    let colour = match (trail_colour, trail.tint()) {
-                        (None, Some(tint)) => Some(tint),
+                    let colour = match (trail_colour, trail.tint_map()) {
+                        (_, Some(tint)) => Some(tint),
                         (Some(..), None) => Some(glam::Vec4::ONE),
                         _ => None,
                     };
-                    if let (Some(colour), Some(ib)) = (colour, poi_common.world_ib.as_ref()) {
+                    if let (Some(colour), Some(ib)) = (colour, poi_common.map_ib.as_ref()) {
                         let coloured = InstanceBufferData { colour, ..InstanceBufferData::IDENTITY };
                         unsafe {
                             ib.update_element_at(device_context, &coloured, 0, 0);
@@ -2492,7 +2496,7 @@ impl PackCollection {
         STATS_ENTITY_DRAW_MAP.store(num_drawn, Ordering::Relaxed);
         if trail_colour.is_some() {
             // reset back to default...
-            if let Some(ib) = poi_common.world_ib.as_ref() {
+            if let Some(ib) = poi_common.map_ib.as_ref() {
                 unsafe {
                     ib.update_element_at(device_context, &InstanceBufferData::IDENTITY, 0, 0);
                 }
