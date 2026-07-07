@@ -1475,13 +1475,27 @@ impl Guid {
         }
     }
     /// invalid GUIDs from hand-made XMLs will be hashed instead
+    ///
+    /// Generates version 3 UUIDs, and is not yet guaranteed to be stable.
+    /// Future versions may introduce a seed or namespace for scope.
+    /// TODO: switch to sha1 if this is the only use of md5?
+    ///
+    /// Blish HUD's Pathing module also uses MD5 as a fallback, but may encode the
+    /// raw digest bytes directly as the GUID? in which case save data such as
+    /// expiry timestamps likely cannot be seamlessly migrated across without
+    /// the use of some sort of lookup table
     pub fn hash_guidlike(s: &[u8]) -> Self {
-        use md5::{Digest, Md5};
+        use {
+            md5::{Digest, Md5},
+            uuid::Builder,
+        };
         #[cfg(todo)]
         if s.is_empty() {
             return Self::EMPTY
         }
-        Self(Uuid::from_bytes_le(Md5::digest(s).into()))
+        let digest = Md5::digest(s);
+        let guid = Builder::from_md5_bytes(digest.into());
+        Self(guid.into_uuid())
     }
     pub fn decode_or_hash(s: &[u8]) -> Self {
         Self::decode(s).unwrap_or_else(|_| Self::hash_guidlike(s))

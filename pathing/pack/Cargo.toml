@@ -56,7 +56,7 @@ indexmap = { workspace = true }
 relative-path = "1"
 xml-rs = "0.8"
 regex = "1"
-uuid = { version = "1", features = ["v4"] }
+uuid = "1"
 md-5 = "0.10"
 base64 = "0.22"
 rustc-hash = "2"
