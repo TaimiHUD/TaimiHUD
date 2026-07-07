@@ -134,7 +134,27 @@ impl ImVersion18000 {
 }
 impl imw::ChildWindow {
     /// reuse an unassigned [sys::ImGuiWindowFlags_]
-    pub const IM180_BORDER_FLAG: u32 = 1u32 << 30;
+    pub const IM180_BORDER_FLAG: u32 = 1u32 << Self::IM180_WINDOW_FLAGS_OFFSET;
+    pub const IM180_NAV_FLATTENED_FLAG: u32 = 1u32 << 23;
+
+    pub const fn args_child180(
+        flags: sys::ImGuiWindowFlags,
+        border: bool,
+        size: Option<ImSize2>,
+    ) -> imw::DynArgsChildWindow {
+        let border = match border {
+            true => Self::IM180_BORDER_FLAG,
+            false => 0,
+        };
+        let f = flags as u32 | border;
+        imw::DynArgsChildWindow::new(Some(f), size)
+    }
+    pub const IM180_WINDOW_FLAGS_OFFSET: u32 = match () {
+        #[cfg(todo)]
+        _ => 30,
+        // matches im192
+        _ => 22,
+    };
 }
 impl imw::PopupModal {
     pub const IM180_FLAGS_PRESET: sys::ImGuiWindowFlags_ = sys::ImGuiWindowFlags_AlwaysAutoResize;

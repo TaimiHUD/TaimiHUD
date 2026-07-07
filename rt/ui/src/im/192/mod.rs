@@ -133,8 +133,31 @@ impl ImVersion19200 {
     }
 }
 impl imw::ChildWindow {
-    /// reuse an unassigned [sys::ImGuiWindowFlags_]
-    pub const IM192_BORDER_FLAG: u32 = 1u32 << 30;
+    /// prefer `Self::args_child192(sys::ImGuiChildFlags_Borders)` over this
+    pub const IM192_BORDER_FLAG: u32 = 1u32 << Self::IM192_WINDOW_FLAGS_OFFSET;
+
+    pub const fn args_child192(
+        flags: sys::ImGuiChildFlags,
+        window: sys::ImGuiWindowFlags,
+        size: Option<ImSize2>,
+    ) -> imw::DynArgsChildWindow {
+        let w = window & Self::IM192_WINDOW_FLAGS_MASK;
+        let f = Self::child192_flags_to(flags) | w;
+        imw::DynArgsChildWindow::new(Some(f as u32), size)
+    }
+    /// reuse unassigned [sys::ImGuiWindowFlags_]
+    pub const IM192_WINDOW_FLAGS_OFFSET: u32 = 22;
+    pub const IM192_WINDOW_FLAGS_MASK: sys::ImGuiWindowFlags = !Self::IM192_CHILD_FLAGS_MASK;
+    pub const IM192_CHILD_FLAGS_MASK: sys::ImGuiWindowFlags = 0x1f << Self::IM192_WINDOW_FLAGS_OFFSET;
+    #[inline]
+    pub const fn child192_flags_to(flags: sys::ImGuiChildFlags) -> sys::ImGuiWindowFlags {
+        flags >> Self::IM192_WINDOW_FLAGS_OFFSET
+    }
+    #[inline]
+    pub const fn child192_flags_from(flags: sys::ImGuiWindowFlags) -> sys::ImGuiChildFlags {
+        let flags = (flags & Self::IM192_CHILD_FLAGS_MASK) as u32;
+        (flags << Self::IM192_WINDOW_FLAGS_OFFSET) as _
+    }
 }
 impl imw::PopupModal {
     pub const IM192_FLAGS_PRESET: sys::ImGuiWindowFlags_ = sys::ImGuiWindowFlags_AlwaysAutoResize;
@@ -2105,17 +2128,16 @@ impl
         sys::ImVec2,
         sys::ImGuiChildFlags,
     ) {
-        let flags = self.untyped_flags().unwrap_or(0);
-        let border = flags & imw::ChildWindow::IM192_BORDER_FLAG != 0;
-        let mut child_flags = sys::ImGuiChildFlags_::default();
-        if border {
-            child_flags |= sys::ImGuiChildFlags_Borders;
-        }
+        let flags = self
+            .untyped_flags()
+            .map(|f| f as sys::ImGuiWindowFlags)
+            .unwrap_or(0);
+        let child_flags = imw::ChildWindow::child192_flags_from(flags);
         (
             Default::default(),
-            (flags & !imw::ChildWindow::IM192_BORDER_FLAG) as sys::ImGuiWindowFlags,
+            flags & imw::ChildWindow::IM192_WINDOW_FLAGS_MASK,
             ImSpaces(self.size().unwrap_or(ImSize2::ZERO)).into(),
-            child_flags as sys::ImGuiChildFlags,
+            child_flags,
         )
     }
 }
