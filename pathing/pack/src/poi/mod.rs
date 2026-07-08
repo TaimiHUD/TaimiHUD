@@ -1,12 +1,25 @@
 use {
     crate::{
-        attributes::{AttrString, MarkerAttributes},
+        attributes::{
+            cell::{
+                pack_attr,
+                AttrKeyValue,
+                GetAttrDyn,
+                PackKeyId,
+                PackValueCell,
+                PackValueDyn,
+                SetAttrDyn,
+            },
+            keys::{self, GetAttr, SetAttr},
+            AttrString,
+            MarkerAttributes,
+        },
         category::id::IdNameBox,
         pack::{taco_safe_name, taco_xml_to_guid, PackBuilderMarkerWarnings},
     },
     anyhow::Context,
     glamour::Point3,
-    std::fmt,
+    std::{borrow::Cow, fmt},
     uuid::Uuid,
 };
 
@@ -75,14 +88,22 @@ impl Poi {
             }
         }
 
-        let Some(map_id) = map_id else {
+        let map_id = map_id.unwrap_or(0i32);
+        #[cfg(todo)]
+        let Some(map_id) = map_id
+        else {
             anyhow::bail!("POI must have MapID");
         };
 
+        #[cfg(todo)]
         let (Some(pos_x), Some(pos_y), Some(pos_z)) = (pos_x, pos_y, pos_z) else {
             anyhow::bail!("POI must have xpos, ypos, and zpos");
         };
-        let position = Point3::new(pos_x, pos_y, pos_z);
+        let position = Point3::new(
+            pos_x.unwrap_or_default(),
+            pos_y.unwrap_or_default(),
+            pos_z.unwrap_or_default(),
+        );
 
         let guid = guid.unwrap_or_default();
 
@@ -132,5 +153,144 @@ impl fmt::Display for Poi {
             Some(parent) => write!(f, "{parent}{category}/{guid}"),
             None => write!(f, "{category}/{guid}"),
         }
+    }
+}
+impl Poi {
+    fn holds_attr_dyn_inherent(key: PackKeyId) -> bool {
+        pack_attr!(=id_is_in(key, [
+            keys::CategoryRef,
+            keys::Guid,
+            keys::GameMap,
+            keys::PositionX,
+            keys::PositionY,
+            keys::PositionZ,
+            // keys::Position,
+        ]))
+    }
+}
+
+impl GetAttrDyn for Poi {
+    fn holds_attr_dyn(key: PackKeyId) -> bool {
+        Self::holds_attr_dyn_inherent(key) || MarkerAttributes::holds_attr_dyn(key)
+    }
+    fn has_attr_dyn(&self, key: PackKeyId) -> bool {
+        Self::holds_attr_dyn_inherent(key) || self.attributes.has_attr_dyn(key)
+    }
+    #[inline]
+    fn get_attr_dyn_ref(&self, key: PackKeyId) -> Option<&dyn AttrKeyValue> {
+        let v = pack_attr! { imp GetAttrDyn::get_attr_dyn_ref(self, key) in [
+            keys::CategoryRef,
+            keys::Guid,
+            keys::GameMap,
+            keys::PositionX,
+            keys::PositionY,
+            keys::PositionZ,
+            // keys::Position,
+        ] };
+        if let Some(v) = v {
+            v
+        } else {
+            self.attributes.get_attr_dyn_ref(key)
+        }
+    }
+    #[inline]
+    fn get_attr_dyn(&self, key: PackKeyId) -> Option<Cow<'_, dyn AttrKeyValue>> {
+        if Self::holds_attr_dyn_inherent(key) {
+            self.get_attr_dyn_ref(key).map(Cow::Borrowed)
+        } else {
+            self.attributes.get_attr_dyn(key)
+        }
+    }
+    #[inline]
+    fn clone_attr_dyn(&self, key: PackKeyId) -> Option<PackValueDyn> {
+        let v = pack_attr! { imp GetAttrDyn::clone_attr_dyn(self, key) in [
+            keys::CategoryRef,
+            keys::Guid,
+            keys::GameMap,
+            keys::PositionX,
+            keys::PositionY,
+            keys::PositionZ,
+            // keys::Position,
+        ] };
+        if let Some(v) = v {
+            v
+        } else {
+            self.attributes.clone_attr_dyn(key)
+        }
+    }
+    fn iter_attrs_dyn(&self) -> impl Iterator<Item = Cow<'_, dyn AttrKeyValue>> + '_ {
+        pack_attr! { imp GetAttrDyn::iter_attrs_dyn(self) in [
+            keys::CategoryRef,
+            keys::Guid,
+            keys::GameMap,
+            keys::PositionX,
+            keys::PositionY,
+            keys::PositionZ,
+            // keys::Position,
+        ] }
+        .chain(self.attributes.iter_attrs_dyn())
+    }
+}
+impl SetAttrDyn for Poi {
+    #[inline]
+    fn set_attr_dyn(&mut self, value: PackValueCell) -> bool {
+        pack_attr! { imp SetAttrDyn::set_attr_dyn(self, value) in
+            [
+                keys::CategoryRef,
+                keys::Guid,
+                keys::GameMap,
+                keys::PositionX,
+                keys::PositionY,
+                keys::PositionZ,
+                // keys::Position,
+            ],
+            _ =>
+                self.attributes.set_attr_dyn(value),
+        }
+    }
+}
+pack_attr! {
+    impl Attr{keys::CategoryRef} for &struct{Poi}.category {}
+    impl Attr{keys::Guid} for &struct{Poi}.guid {}
+    impl Attr{keys::GameMap} for &struct{Poi}.map_id {}
+    //impl Attr{keys::PositionX} for &struct{Poi}.position.x {}
+}
+impl GetAttr<keys::PositionX> for Poi {
+    fn has_attr(&self) -> bool {
+        true
+    }
+    fn get_attr_ref(&self) -> Option<&keys::PositionX> {
+        Some(keys::PositionX::from_ref(&self.position.x))
+    }
+}
+impl GetAttr<keys::PositionY> for Poi {
+    fn has_attr(&self) -> bool {
+        true
+    }
+    fn get_attr_ref(&self) -> Option<&keys::PositionY> {
+        Some(keys::PositionY::from_ref(&self.position.y))
+    }
+}
+impl GetAttr<keys::PositionZ> for Poi {
+    fn has_attr(&self) -> bool {
+        true
+    }
+    fn get_attr_ref(&self) -> Option<&keys::PositionZ> {
+        Some(keys::PositionZ::from_ref(&self.position.z))
+    }
+}
+impl SetAttr<keys::PositionX> for Poi {
+    fn set_attr(&mut self, value: keys::PositionX) {
+        self.position.x = value.0;
+    }
+}
+impl SetAttr<keys::PositionY> for Poi {
+    fn set_attr(&mut self, value: keys::PositionY) {
+        self.position.y = value.0;
+    }
+}
+impl SetAttr<keys::PositionZ> for Poi {
+    fn set_attr(&mut self, value: keys::PositionZ) {
+        self.position.z = value.0;
     }
 }

@@ -1,12 +1,33 @@
 use {
     self::id::IdNameSeg,
     crate::{
-        attributes::{parse_bool, MarkerAttributes},
+        attributes::{
+            cell::{
+                pack_attr,
+                AttrKeyValue,
+                GetAttrDyn,
+                PackKeyId,
+                PackValueCell,
+                PackValueDyn,
+                SetAttrDyn,
+            },
+            keys::{self, GetAttr, SetAttr},
+            parse_bool,
+            MarkerAttributes,
+        },
         pack::PackBuilderCategoryWarnings,
     },
     anyhow::{anyhow, Context},
     bitflags::bitflags,
-    std::{mem, sync::Arc},
+    core::{mem, ops},
+    std::{borrow::Cow, sync::Arc},
+    taimi_hoard::flags::{
+        set::{BitFlagForSet, FlagSet},
+        BitSlice,
+        BitVec,
+        BitView,
+        BitsNative,
+    },
 };
 
 pub use self::id::CategoryId;
@@ -18,6 +39,7 @@ pub struct Category {
     pub full_id: CategoryId,
     pub display_name: Option<Arc<str>>,
     pub flags: CategoryFlags,
+    pub map_id: i32,
     // Map of local to global name.
     pub sub_categories: Box<[CategoryId]>,
     /// Attributes for markers attached to this category.
@@ -42,6 +64,7 @@ impl Category {
         let mut bh_is_hidden = None;
         let mut default_toggle = None;
         let mut bh_default_toggle = None;
+        let mut map_id = 0;
 
         for attr in attrs {
             let attr_name = &attr.name.local_name;
@@ -63,6 +86,9 @@ impl Category {
                 parse_bool(&attr.value)
                     .map(|val| default_toggle = Some(val))
                     .map_err(From::from)
+            } else if attr_name.eq_ignore_ascii_case("mapid") {
+                map_id = attr.value.parse().ok().unwrap_or(0);
+                Ok(())
             } else if let Some(attr_name) = attr_name.strip_prefix("bh-") {
                 if attr_name.eq_ignore_ascii_case("name") {
                     bh_id = Some(attr.value);
@@ -140,6 +166,7 @@ impl Category {
             flags,
             sub_categories: Default::default(),
             marker_attributes,
+            map_id,
         })
     }
 
@@ -155,6 +182,9 @@ impl Category {
         new.attributes_mut().merge(&self.marker_attributes, false);
         if self.display_name.is_none() {
             self.display_name = new.display_name;
+        }
+        if new.map_id == 0 {
+            new.map_id = self.map_id;
         }
         self.append_children(new.sub_categories);
     }
@@ -225,6 +255,140 @@ impl Category {
             // separator categories are an exception that can be directly copied,
             // so avoid clearing those...
             let _ = attrs.interaction.take();
+        }
+    }
+}
+impl GetAttr<keys::CategoryRef> for Category {
+    #[inline]
+    fn has_attr(&self) -> bool {
+        !self.flags.is(CategoryFlag::Root)
+        //&& self.full_id.parent().is_some()
+    }
+    #[inline]
+    fn get_attr(&self) -> Option<Cow<'_, keys::CategoryRef>> {
+        (!self.flags.is(CategoryFlag::Root))
+            .then(|| self.full_id.parent())
+            .flatten()
+            .map(|p| Cow::Owned(p.into()))
+    }
+}
+#[cfg(todo)]
+impl SetAttr<keys::CategoryRef> for Category {}
+impl GetAttr<keys::NameId> for Category {
+    #[inline]
+    fn has_attr(&self) -> bool {
+        true
+    }
+    #[inline]
+    fn get_attr(&self) -> Option<Cow<'_, keys::NameId>> {
+        let id = match self.flags.is(CategoryFlag::Root) {
+            false => self.id().into(),
+            true => self.full_id[..].into(),
+        };
+        Some(Cow::Owned(id))
+    }
+}
+#[cfg(todo)]
+impl SetAttr<keys::NameId> for Category {}
+impl GetAttr<keys::DisplayName> for Category {
+    #[inline]
+    fn has_attr(&self) -> bool {
+        self.display_name.is_some()
+    }
+    #[inline]
+    fn get_attr(&self) -> Option<Cow<'_, keys::DisplayName>> {
+        self.display_name.as_ref().map(|n| Cow::Owned(n.into()))
+    }
+}
+impl SetAttr<keys::DisplayName> for Category {
+    #[inline]
+    fn set_attr(&mut self, v: keys::DisplayName) {
+        self.display_name = (!v[..].is_empty()).then_some(v[..].into());
+    }
+}
+impl Category {
+    fn holds_attr_dyn_inherent(key: PackKeyId) -> bool {
+        pack_attr!(=id_is_in(key, [
+            keys::DisplayName,
+            keys::NameId,
+            keys::CategoryRef,
+        ]))
+    }
+}
+impl GetAttrDyn for Category {
+    fn holds_attr_dyn(key: PackKeyId) -> bool {
+        Self::holds_attr_dyn_inherent(key)
+            || CategoryFlags::holds_attr_dyn(key)
+            || MarkerAttributes::holds_attr_dyn(key)
+    }
+    fn has_attr_dyn(&self, key: PackKeyId) -> bool {
+        let has = pack_attr!(imp GetAttrDyn::has_attr_dyn(self, key) in [
+            keys::CategoryRef,
+        ]);
+        let has = match has {
+            Some(has) => return has,
+            #[cfg(todo)]
+            _ => pack_attr!(=id_is_in(key, [
+                keys::DisplayName,
+                keys::NameId,
+            ])),
+            _ => Self::holds_attr_dyn_inherent(key),
+        };
+        has || self.flags.has_attr_dyn(key) || self.marker_attributes.has_attr_dyn(key)
+    }
+    #[inline]
+    fn get_attr_dyn_ref(&self, key: PackKeyId) -> Option<&dyn AttrKeyValue> {
+        self.marker_attributes.get_attr_dyn_ref(key)
+    }
+    #[inline]
+    fn get_attr_dyn(&self, key: PackKeyId) -> Option<Cow<'_, dyn AttrKeyValue>> {
+        if Self::holds_attr_dyn_inherent(key) {
+            self.clone_attr_dyn(key).map(Cow::Owned)
+        } else if CategoryFlags::holds_attr_dyn(key) {
+            self.flags.get_attr_dyn(key)
+        } else {
+            self.marker_attributes.get_attr_dyn(key)
+        }
+    }
+    #[inline]
+    fn clone_attr_dyn(&self, key: PackKeyId) -> Option<PackValueDyn> {
+        let v = pack_attr! { imp GetAttrDyn::clone_attr_dyn(self, key) in [
+            keys::DisplayName,
+            keys::NameId,
+            keys::CategoryRef,
+        ] };
+        if let Some(v) = v {
+            v
+        } else if CategoryFlags::holds_attr_dyn(key) {
+            self.flags.clone_attr_dyn(key)
+        } else {
+            self.marker_attributes.clone_attr_dyn(key)
+        }
+    }
+    fn iter_attrs_dyn(&self) -> impl Iterator<Item = Cow<'_, dyn AttrKeyValue>> + '_ {
+        pack_attr! { imp GetAttrDyn::iter_attrs_dyn(self) in [
+            keys::DisplayName,
+            keys::NameId,
+            keys::CategoryRef,
+        ] }
+        .chain(self.flags.iter_attrs_dyn())
+        .chain(self.marker_attributes.iter_attrs_dyn())
+    }
+}
+impl SetAttrDyn for Category {
+    #[inline]
+    fn set_attr_dyn(&mut self, value: PackValueCell) -> bool {
+        pack_attr! { imp SetAttrDyn::set_attr_dyn(self, value) in
+            [
+                keys::DisplayName,
+                //keys::NameId,
+                //keys::CategoryRef,
+            ],
+            _ => if CategoryFlags::holds_attr_dyn(value.id()) {
+                self.flags.set_attr_dyn(value)
+            } else {
+                self.marker_attributes.set_attr_dyn(value)
+            },
         }
     }
 }
@@ -328,5 +492,129 @@ impl FromIterator<CategoryFlag> for CategoryFlags {
 impl Extend<CategoryFlag> for CategoryFlags {
     fn extend<I: IntoIterator<Item = CategoryFlag>>(&mut self, iter: I) {
         self.extend(iter.into_iter().map(Self::from))
+    }
+}
+
+pub type CategoryFlagSet<V = BitVec<u8>> = FlagSet<CategoryFlags, V>;
+impl BitFlagForSet for CategoryFlags {
+    type Repr = u8;
+    const BIT_WIDTH: usize = CategoryFlag::INDEX_MAX as usize + 1;
+
+    fn as_bits(&self) -> &Self::Repr {
+        unsafe { &*(self as *const Self as *const u8) }
+    }
+    fn as_bits_mut(&mut self) -> &mut Self::Repr {
+        unsafe { &mut *(self as *mut Self as *mut u8) }
+    }
+    fn as_bitslice(&self) -> &BitSlice<Self::Repr, BitsNative> {
+        unsafe { self.as_bits().view_bits().get_unchecked(..Self::BIT_WIDTH) }
+    }
+    fn as_bitslice_mut(&mut self) -> &mut BitSlice<Self::Repr, BitsNative> {
+        unsafe {
+            self.as_bits_mut()
+                .view_bits_mut()
+                .get_unchecked_mut(..Self::BIT_WIDTH)
+        }
+    }
+
+    fn range_for(index: usize) -> ops::Range<usize> {
+        let start = index << 2;
+        let end = start + Self::BIT_WIDTH;
+        start..end
+    }
+}
+
+impl GetAttr<keys::IsSeparator> for CategoryFlags {
+    #[inline]
+    fn has_attr(&self) -> bool {
+        true
+    }
+    #[inline]
+    fn get_attr(&self) -> Option<Cow<'_, keys::IsSeparator>> {
+        Some(Cow::Owned(self.contains(CategoryFlags::SEPARATOR).into()))
+    }
+}
+impl SetAttr<keys::IsSeparator> for CategoryFlags {
+    #[inline]
+    fn set_attr(&mut self, v: keys::IsSeparator) {
+        self.set(CategoryFlags::SEPARATOR, v.into())
+    }
+}
+impl GetAttr<keys::IsHidden> for CategoryFlags {
+    #[inline]
+    fn has_attr(&self) -> bool {
+        true
+    }
+    #[inline]
+    fn get_attr(&self) -> Option<Cow<'_, keys::IsHidden>> {
+        Some(Cow::Owned(self.contains(CategoryFlags::HIDDEN).into()))
+    }
+}
+impl SetAttr<keys::IsHidden> for CategoryFlags {
+    #[inline]
+    fn set_attr(&mut self, v: keys::IsHidden) {
+        self.set(CategoryFlags::HIDDEN, v.into())
+    }
+}
+impl GetAttr<keys::DefaultToggle> for CategoryFlags {
+    #[inline]
+    fn has_attr(&self) -> bool {
+        true
+    }
+    #[inline]
+    fn get_attr(&self) -> Option<Cow<'_, keys::DefaultToggle>> {
+        Some(Cow::Owned(keys::DefaultToggle::from(
+            !self.contains(CategoryFlags::DISABLED),
+        )))
+    }
+}
+impl SetAttr<keys::DefaultToggle> for CategoryFlags {
+    #[inline]
+    fn set_attr(&mut self, v: keys::DefaultToggle) {
+        self.set(CategoryFlags::DISABLED, !bool::from(v))
+    }
+}
+impl GetAttrDyn for CategoryFlags {
+    fn holds_attr_dyn(key: PackKeyId) -> bool {
+        pack_attr!(=id_is_in(key, [
+            keys::DefaultToggle,
+            keys::IsSeparator,
+            keys::IsHidden,
+        ]))
+    }
+    #[inline]
+    fn has_attr_dyn(&self, key: PackKeyId) -> bool {
+        Self::holds_attr_dyn(key)
+    }
+    #[inline]
+    fn get_attr_dyn(&self, key: PackKeyId) -> Option<Cow<'_, dyn AttrKeyValue>> {
+        self.clone_attr_dyn(key).map(Cow::Owned)
+    }
+    #[inline]
+    fn clone_attr_dyn(&self, key: PackKeyId) -> Option<PackValueDyn> {
+        pack_attr! { imp GetAttrDyn::clone_attr_dyn(self, key) in [
+            keys::DefaultToggle,
+            keys::IsSeparator,
+            keys::IsHidden,
+        ] }
+        .flatten()
+    }
+
+    fn iter_attrs_dyn(&self) -> impl Iterator<Item = Cow<'_, dyn AttrKeyValue>> + '_ {
+        pack_attr! { imp GetAttrDyn::iter_attrs_dyn(self) in [
+            keys::DefaultToggle,
+            keys::IsSeparator,
+            keys::IsHidden,
+        ] }
+    }
+}
+impl SetAttrDyn for CategoryFlags {
+    #[inline]
+    fn set_attr_dyn(&mut self, value: PackValueCell) -> bool {
+        pack_attr! { imp SetAttrDyn::set_attr_dyn(self, value) in [
+            keys::DefaultToggle,
+            keys::IsSeparator,
+            keys::IsHidden,
+        ] }
     }
 }

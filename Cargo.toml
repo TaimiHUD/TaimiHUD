@@ -38,7 +38,8 @@ default = [
   "markers",
   "markers-edit",
   "meta-cache",
-  "space",
+  "paths",
+  "paths-lua",
   "statistics",
   "extension-arcdps",
   "extension-nexus",
@@ -71,16 +72,9 @@ space = [
   "dep:tobj",
   "dep:bevy_ecs",
   "dep:bevy_utils",
-  "dep:arc-atomic",
-  "windows/Win32_UI_WindowsAndMessaging",
-  "windows/Win32_UI_Input_KeyboardAndMouse",
-  "windows/Win32_Graphics_Direct3D11",
-  "windows/Win32_Graphics_Dxgi",
-  "windows/Win32_Graphics_Dxgi_Common",
   "windows/Win32_Graphics_Direct3D_Fxc",
   "windows/Win32_Graphics_Hlsl",
   "texture-loader",
-  "paths",
   "goggles",
   "space-list",
   #"space-ecs",
@@ -104,26 +98,33 @@ timers = [
 
 markers = [
   "dep:itertools",
-  "dep:arc-atomic",
   "dep:taimi_meta",
   "dep:taimi_input",
-  "dep:arcloader-mumblelink",
-  "arcloader-mumblelink/gw2_mumble",
-  "taimi_meta/mumblelink-arcloader",
   "windows",
   "windows/System",
   "windows/Foundation",
   "windows/Win32_UI_WindowsAndMessaging",
   "windows/Win32_UI_Input_KeyboardAndMouse",
   "windows/Win32_Graphics_Gdi",
-  # used too often for keybinds, replace!
-  "taimi_input/arcdps-extras",
 ]
 markers-edit = [
   "markers",
 ]
 
 paths = [
+  "space",
+]
+paths-lua = [
+  "scripts-lua",
+  "scripts",
+  "taimi_pack/script",
+]
+
+scripts = [
+]
+scripts-lua = [
+  "dep:mlua",
+  "taimi_pack?/script-lua",
 ]
 
 meta-cache = [
@@ -233,7 +234,7 @@ check-cfg = [
   'cfg(todo)',
   'cfg(taimi_has, values("author", "title", "version", "url-github", "url-update-base", "url-update-direct"))',
   'cfg(taimi_update, values("direct", "github", "manual", "none"))',
-  'cfg(taimi_debug)', 'cfg(taimi_debug, values("debug"))',
+  'cfg(taimi_debug)', 'cfg(taimi_debug, values("debug", "wip"))',
   'cfg(taimi_dev)', 'cfg(taimi_dev, values("debug", "drv", "ci", "branch"))',
   'cfg(taimi_release)', 'cfg(taimi_release, values("tag", "rc", "pre", "release"))',
 ]
@@ -289,7 +290,7 @@ itertools = { optional = true, version = "0.14.0" }
 tobj = { optional = true, version = "4.0.3", features = [ "reordering" ] }
 bevy_ecs = { optional = true, version = "0.16.0" }
 bevy_utils = { optional = true, version = "0.16.0" }
-arc-atomic = { optional = true, version = "0.1.0" }
+mlua = { workspace = true, optional = true }
 url = { version = "2.5.4", features = ["serde"] }
 lininterp = "0.1.3"
 webpki-root-certs = "0.26.10"
@@ -301,7 +302,7 @@ serde_repr = "0.1.20"
 i18n-embed = { version = "0.15.4", features = ["autoreload", "fluent-system"] }
 fluent = "0.16.1"
 fluent-syntax = "0.11"
-rust-embed = { version = "8.7.1", features = [ "debug-embed" ] }
+rust-embed = { version = "8.7.1", features = [ "debug-embed", "include-exclude" ] }
 i18n-embed-fl = "0.9.4"
 tinystr = "0.8"
 unic-langid-impl = "0.9.6"
@@ -379,6 +380,7 @@ indexmap = "2.9"
 bitvec = "1"
 bitflags = "2"
 macro_rules_attribute = "0.2"
+mlua = { version = "0.11", default-features = false, features = ["luajit", "error-send"] }
 
 # unsure how many of these changes can be contributed back upstream?
 #[patch."https://github.com/zerthox/arcdps-rs"]

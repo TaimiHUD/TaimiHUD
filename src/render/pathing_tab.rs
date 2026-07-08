@@ -49,7 +49,7 @@ impl PathingConfig {
     ) where
         U: ?Sized + ImDrawWindow<'ui>,
     {
-        let _ = self.enables.get_mut();
+        let _ = self.enables.read_mut();
         ui.columns(2, "pathing_tab_start", true);
 
         self.draw_header(ui);
@@ -153,7 +153,7 @@ impl PathingConfig {
     {
         {
             let _font = (!self.katrender()).then(|| NexusLinkFont::Big.push_font(ui));
-            let enables = self.enables.borrow_mut();
+            let enables = self.enables.get_mut();
             if ui.checkbox_flags(fl!("pathing-config-enable"), enables, PathingEnables::KATRENDER) {
                 PathingController::try_send(PathingEvent::ToggleKatRender);
             }
@@ -477,7 +477,7 @@ impl PathingConfig {
             false,
         ));
         if let Some(_tree) = filters_tree {
-            let enables = self.enables.borrow_mut();
+            let enables = self.enables.get_mut();
             if with_i18n!("pathing-config-api-bypass", |label| ui.checkbox_flags(
                 &label,
                 enables,
@@ -527,6 +527,48 @@ impl PathingConfig {
                 Self::slider_setting(ui, fl!("pathing-config-trail-width"), trail_width, (0.01, 25.0))
             {
                 Self::set_pathing(|s| s.space.trail_width = value);
+            }
+            #[cfg(feature = "paths-lua")]
+            {
+                let enables = self.enables.get_mut();
+                if ui.checkbox_flags("scripts", enables, PathingEnables::SCRIPTING_LUA) {
+                    Self::set_pathing(|s| {
+                        s.scripting_enable = enables.contains(PathingEnables::SCRIPTING_LUA)
+                    });
+                    PathingEvent::ScriptsEnable(Some(enables.contains(PathingEnables::SCRIPTING_LUA)))
+                        .try_send();
+                }
+                let mut hovered = ui.item_is_hovered();
+                if enables.contains(PathingEnables::SCRIPTING_LUA) {
+                    let (mut _tick_rate, mut autostart) =
+                        Self::get_pathing(|s| (s.scripting_tick_rate, s.scripting_auto))?;
+                    ui.same_line();
+                    if ui.checkbox("autostart", &mut autostart) {
+                        Self::set_pathing(|s| s.scripting_auto = autostart);
+                    }
+                    #[cfg(todo)]
+                    {
+                        ui.same_line();
+                        if ui.checkbox_flags("unsecured", enables, PathingEnables::SCRIPTING_UNSECURED) {
+                            Self::set_pathing(|s| {
+                                s.scripting_unsecured =
+                                    enables.contains(PathingEnables::SCRIPTING_UNSECURED)
+                            });
+                        }
+                    }
+                    #[cfg(todo)]
+                    if ui.slider("tickrate", &mut tick_rate, 0.0f32..=2.0f32, IM_STR_NONE) {
+                        Self::set_pathing(|s| s.scripting_tick_rate = tick_rate);
+                    }
+                    ui.text(c"EXPERIMENTAL AND PROBABLY BROKEN");
+                    hovered |= ui.item_is_hovered();
+                }
+                if hovered {
+                    ui.tooltip_text_wrapped(im_fmt!(
+                        "(restart after turning on or off)\n{}",
+                        fl!("experimental-notice-alpha")
+                    ));
+                }
             }
         }
 

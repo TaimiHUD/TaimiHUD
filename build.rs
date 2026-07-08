@@ -47,6 +47,9 @@ const ADDON_VERSION: &'static str = "ADDON_VERSION";
 const ADDON_VERSION_NEXUS: &'static str = "ADDONAPI_VERSION";
 const ADDON_URL: &'static str = "ADDON_URL";
 
+/// opt in to the mess that is `cfg(taimi_debug = "wip")` as needed
+const TAIMI_DEBUG_WIP: &'static str = "TAIMI_DEBUG_WIP";
+
 fn apply_built_info() {
     println!("cargo::rustc-cfg=taimi_has={:?}", "title");
     let addon_title = "TaimiHUD";
@@ -475,6 +478,9 @@ fn apply_built_info() {
             },
             _ => (),
         }
+    }
+    if env::var_os(TAIMI_DEBUG_WIP).is_some() {
+        println!("cargo::rustc-cfg=taimi_debug={:?}", "wip");
     }
     match ci_str {
         _ if a_release => (),

@@ -1,3 +1,9 @@
+#[cfg(feature = "paths-lua")]
+use {
+    crate::controller::script::PackPlugShared,
+    std::collections::BTreeSet,
+    taimi_pack::{attributes::cell::PackKeyId, script::pathing::imp::MarkerLoc},
+};
 use {
     crate::{
         controller::{pathing::PathingEvent, Controller},
@@ -97,6 +103,33 @@ pub enum SpaceEvent {
     GogglesClearLens,
     #[cfg(feature = "goggles")]
     RefreshEdgeScale,
+    #[cfg(feature = "paths-lua")]
+    ScriptStart {
+        generation: usize,
+        pack_idx: usize,
+        shared: Arc<PackPlugShared>,
+    },
+    #[cfg(feature = "paths-lua")]
+    ScriptOverrideUpdate {
+        generation: usize,
+        pack_idx: usize,
+        marker_path: MarkerLoc,
+        #[cfg(todo)]
+        overrides: MarkerOverridesShared,
+        changed: (Option<PackKeyId>, BTreeSet<PackKeyId>),
+    },
+    #[cfg(feature = "paths-lua")]
+    ScriptCreate {
+        generation: usize,
+        pack_idx: usize,
+        marker_path: MarkerLoc,
+    },
+    #[cfg(feature = "paths-lua")]
+    ScriptMask {
+        generation: usize,
+        pack_idx: usize,
+        marker_path: MarkerLoc,
+    },
 }
 impl SpaceEvent {
     #[inline]
@@ -256,6 +289,10 @@ impl Engine {
         Ok(engine)
     }
 
+    #[cfg(not(feature = "paths-lua"))]
+    const SPACE_QUEUE_LEN: usize = 64;
+    #[cfg(feature = "paths-lua")]
+    const SPACE_QUEUE_LEN: usize = 512;
     pub fn init_mut<F>(
         machine: &mut RenderMachine,
         slot: &mut Option<anyhow::Result<Self>>,
@@ -277,7 +314,7 @@ impl Engine {
         let mut res = None;
         let engine = engine.get_or_insert_with(|| {
             log::debug!("setting up space engine...");
-            let (tx, rx) = tokio::sync::mpsc::channel::<SpaceEvent>(64);
+            let (tx, rx) = tokio::sync::mpsc::channel::<SpaceEvent>(Self::SPACE_QUEUE_LEN);
             #[cfg(feature = "goggles")]
             let _ = tx.try_send(SpaceEvent::RefreshEdgeScale);
             match crate::SPACE_SENDER
@@ -441,7 +478,7 @@ impl Engine {
         self.packs.clear();
     }
 
-    pub fn process_event(&mut self, machine: &mut RenderMachine) -> anyhow::Result<bool> {
+    pub fn process_event(&mut self, machine: &mut RenderMachine) -> anyhow::Result<Option<bool>> {
         let ev = self.receiver.try_recv();
         if let Ok(ev) = &ev {
             log::trace!("recv SpaceEvent::{}", <&str>::from(ev));
@@ -491,10 +528,57 @@ impl Engine {
                     },
                     MarkerFeed(phase_state) => self.new_phase(phase_state).context("marker new phase")?,
                     MarkerReset(timer) => self.remove_phase(timer).context("marker remove phase")?,
+                    #[cfg(feature = "paths-lua")]
+                    ScriptStart { generation, pack_idx, shared } => {
+                        self.packs.script_start(
+                            &self.render_backend.device,
+                            machine,
+                            (generation, pack_idx),
+                            shared,
+                        );
+                        return Ok(Some(false))
+                    },
+                    #[cfg(feature = "paths-lua")]
+                    ScriptOverrideUpdate {
+                        generation,
+                        pack_idx,
+                        marker_path,
+                        changed: (changed, changed_rest),
+                    } => {
+                        let mut changed = changed.into_iter().chain(changed_rest);
+                        self.packs.script_update_marker(
+                            &self.render_backend.device,
+                            machine,
+                            (generation, pack_idx),
+                            marker_path,
+                            &mut changed,
+                        );
+                        return Ok(Some(false))
+                    },
+                    #[cfg(feature = "paths-lua")]
+                    ScriptCreate { generation, pack_idx, marker_path } => {
+                        self.packs.script_create(
+                            &self.render_backend.device,
+                            machine,
+                            (generation, pack_idx),
+                            marker_path,
+                        );
+                        return Ok(Some(false))
+                    },
+                    #[cfg(feature = "paths-lua")]
+                    ScriptMask { generation, pack_idx, marker_path } => {
+                        self.packs.script_mask(
+                            &self.render_backend.device,
+                            machine,
+                            (generation, pack_idx),
+                            marker_path,
+                        );
+                        return Ok(Some(false))
+                    },
                 }
-                Ok(true)
+                Ok(Some(true))
             },
-            Err(_error) => Ok(false),
+            Err(_error) => Ok(None),
         }
     }
     fn process_gameplay_event(
@@ -586,7 +670,7 @@ impl Engine {
         });
         let gameplay_prev = self.gameplay.cached.clone().unwrap_or(GameplayState::INITIAL);
         if self.gameplay.watch.has_changed() {
-            let gameplay = *self.gameplay.get_mut();
+            let gameplay = *self.gameplay.read_mut();
             let trans = gameplay.latest_transition_from(gameplay_prev);
             let res = self
                 .process_gameplay_event(gameplay, trans)
@@ -595,14 +679,20 @@ impl Engine {
                 log::error!("{e:#}");
             }
         }
-        for _ in 0..5 {
+        let mut ev_rem = 5u32;
+        while ev_rem > 0 {
+            ev_rem -= 1;
             // try to get a couple events out of the way at a time
             // (would be nice to batch pack loads)
             let processed = self
                 .process_event(machine)
                 .context("render engine event processing failure")?;
-            if !processed {
-                break
+            match processed {
+                None => break,
+                Some(false) => {
+                    ev_rem += 1;
+                },
+                Some(true) => (),
             }
         }
         self.schedule.run(&mut self.world);
@@ -618,8 +708,9 @@ impl Engine {
         self.packs.trail_params.resolution = Some(trail_resolution);
         self.packs.trail_params.width = trail_width;
 
+        self.packs
+            .update(machine, &self.render_backend.device, &device_context);
         self.packs.prepare(&self.render_backend.device, machine)?;
-        self.packs.update();
 
         let render_map = match visible_map {
             Some(true) =>
