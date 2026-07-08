@@ -4,7 +4,6 @@ use {
         render::{
             element::prelude::*,
             machine::{RenderMachine, RenderSlot},
-            ApiTabState,
             ConfigTabState,
             DataSourceTabState,
             InfoTabState,
@@ -22,11 +21,14 @@ use {
 use super::MarkerTabState;
 #[cfg(feature = "markers")]
 use super::PathingConfig;
+#[cfg(feature = "api")]
+use crate::render::api_tab::ApiTabState;
 #[cfg(feature = "scripts")]
 use crate::render::plug::{PlugConfig, PlugConfigCache, PlugConfigDesc, PlugConfigState};
 
 pub struct PrimaryWindowState {
     pub config_tab: ConfigTabState,
+    #[cfg(feature = "api")]
     pub api_tab: ApiTabState,
     pub timer_tab: TimerTabState,
     pub data_sources_tab: DataSourceTabState,
@@ -51,6 +53,7 @@ impl PrimaryWindowState {
     pub fn new() -> Self {
         Self {
             config_tab: ConfigTabState::new(),
+            #[cfg(feature = "api")]
             api_tab: ApiTabState::new(),
             timer_tab: TimerTabState::new(),
             data_sources_tab: DataSourceTabState::new(),
@@ -176,6 +179,7 @@ impl PrimaryWindowState {
                 }
                 .draw_on_window(ui, context);
             }
+            #[cfg(feature = "api")]
             if let Some(_token) = ui.tab_item(fl!("api-tab")) {
                 self.api_tab.draw(ui, state_errors);
             }
@@ -209,6 +213,7 @@ impl PrimaryWindowState {
                 }
                 .draw_on_window(ui, context);
             }
+            #[cfg(feature = "api")]
             if let Some(_token) = ui.tab_item(fl!("api-tab")) {
                 self.api_tab.draw(ui, state_errors);
             }

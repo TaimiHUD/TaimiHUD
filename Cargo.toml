@@ -67,7 +67,6 @@ api = [
 ]
 
 space = [
-  "api",
   "dep:itertools",
   "dep:tobj",
   "dep:bevy_ecs",
@@ -122,6 +121,7 @@ paths = [
   "space",
   "paths-interact",
   "paths-edit",
+  "api",
 ]
 paths-edit = [
   "paths-dyn",

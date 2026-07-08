@@ -1,7 +1,6 @@
 #![allow(irrefutable_let_patterns)]
 
 use {
-    self::api::{ApiController, ApiMessage, ApiReceiver, ApiSender},
     crate::{
         exports::runtime::{
             self as rt,
@@ -74,7 +73,11 @@ pub(crate) mod script;
 #[cfg(feature = "scripts")]
 use script::{ScriptController, ScriptMessage, ScriptReceiver, ScriptSender};
 
+#[cfg(feature = "api")]
 pub(crate) mod api;
+#[cfg(feature = "api")]
+use self::api::{ApiController, ApiMessage, ApiReceiver, ApiSender};
+
 pub(crate) mod runtime;
 
 pub(crate) type MapId = Option<u32>;
@@ -181,6 +184,7 @@ impl Controller {
                         let _ = rt::log::error_ok(res);
                     });
                 };
+                #[cfg(feature = "api")]
                 if let Some(rx) = receiver.api.take() {
                     let mut api = ApiController::new(rx, settings.clone());
                     controllers.spawn(async move {
@@ -1073,6 +1077,7 @@ pub struct ControllerSender {
     #[cfg(any(feature = "markers", feature = "space"))]
     pub mumble_identity: Option<watch::Sender<Option<MumbleIdentityUpdate>>>,
     pub generic: Option<Sender<ControllerEvent>>,
+    #[cfg(feature = "api")]
     pub api: Option<ApiSender>,
     #[cfg(feature = "scripts")]
     pub scripting: Option<ScriptSender>,
@@ -1087,6 +1092,7 @@ impl ControllerSender {
         #[cfg(any(feature = "markers", feature = "space"))]
         mumble_identity: None,
         generic: None,
+        #[cfg(feature = "api")]
         api: None,
         #[cfg(feature = "scripts")]
         scripting: None,
@@ -1097,6 +1103,7 @@ impl ControllerSender {
     pub fn new() -> (Self, ControllerReceiver) {
         let (generic, generic_rx) = mpsc::channel(64);
         let gameplay = watch::Sender::new(GameplayState::INITIAL);
+        #[cfg(feature = "api")]
         let (api, api_rx) = ApiSender::new(&gameplay);
         #[cfg(any(feature = "markers", feature = "space"))]
         let (mumble_identity_tx, mumble_identity_rx) = watch::channel(None);
@@ -1104,8 +1111,11 @@ impl ControllerSender {
         let (pathing, pathing_rx) = PathingSender::new(
             &gameplay,
             &mumble_identity_tx,
+            #[cfg(feature = "api")]
             &api.festivals,
+            #[cfg(feature = "api")]
             &api.achievements,
+            #[cfg(feature = "api")]
             &api.raids,
         );
         #[cfg(feature = "scripts")]
@@ -1119,6 +1129,7 @@ impl ControllerSender {
             #[cfg(any(feature = "markers", feature = "space"))]
             mumble_identity: Some(mumble_identity_rx),
             generic: Some(generic_rx),
+            #[cfg(feature = "api")]
             api: Some(api_rx),
             #[cfg(feature = "scripts")]
             scripting: Some(scripting_rx),
@@ -1131,6 +1142,7 @@ impl ControllerSender {
             #[cfg(any(feature = "markers", feature = "space"))]
             mumble_identity: Some(mumble_identity_tx),
             generic: Some(generic),
+            #[cfg(feature = "api")]
             api: Some(api),
             #[cfg(feature = "scripts")]
             scripting: Some(scripting),
@@ -1150,6 +1162,7 @@ impl ControllerSender {
         if let Some(sender) = self.scripting.take() {
             let _ = sender.command.try_send(ScriptMessage::Exit(reason));
         }
+        #[cfg(feature = "api")]
         if let Some(sender) = self.api.take() {
             let _ = sender.command.try_send(ApiMessage::Exit(reason));
         }
@@ -1188,6 +1201,7 @@ impl ControllerSender {
             .and_then(move |sender| sender.try_send(message).ok())
             .is_some()
     }
+    #[cfg(feature = "api")]
     pub fn api_try_send(&self, message: ApiMessage) -> bool {
         self.api
             .as_ref()
@@ -1232,6 +1246,7 @@ pub struct ControllerReceiver {
     #[cfg(any(feature = "markers", feature = "space"))]
     pub mumble_identity: Option<watch::Receiver<Option<MumbleIdentityUpdate>>>,
     pub generic: Option<Receiver<ControllerEvent>>,
+    #[cfg(feature = "api")]
     pub api: Option<ApiReceiver>,
     #[cfg(feature = "space")]
     pub pathing: Option<PathingReceiver>,

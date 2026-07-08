@@ -111,6 +111,7 @@ impl PathingSettings {
                 festival_filter.insert(festival.into(), pref);
             },
         }
+        #[cfg(feature = "api")]
         Controller::with_sender(|s| {
             if let Some(a) = &s.api {
                 a.festivals.send_if_modified(|festivals| {

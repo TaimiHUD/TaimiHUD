@@ -1,9 +1,6 @@
 use {
     crate::{
-        controller::{
-            api::{AchievementState as ApiAchievementState, SharedAchievementState, SharedRaidState},
-            pathing::registry::PackInfoSignature,
-        },
+        controller::pathing::registry::PackInfoSignature,
         exports::runtime as rt,
         render::machine::MumbleIdentityUpdate,
     },
@@ -31,6 +28,12 @@ use {
     std::{fmt, time::Duration},
 };
 
+#[cfg(feature = "api")]
+use crate::controller::api::{
+    AchievementState as ApiAchievementState,
+    SharedAchievementState,
+    SharedRaidState,
+};
 #[cfg(feature = "paths-filter")]
 use crate::controller::pathing::state::hidden::MarkerState;
 
@@ -97,6 +100,7 @@ impl FilterConfig {
         }
         true
     }
+    #[cfg(feature = "api")]
     fn filters_achievement(filters: &FilterAttributes) -> Option<AchievementConfig> {
         filters
             .clone_attr_of::<keys::AchievementId>()
@@ -140,12 +144,16 @@ impl FilterConfig {
         .flatten()
     }
     pub fn filters_is_visible(filters: &FilterAttributes, state: &FilterState) -> FilterAllow {
+        #[cfg(feature = "api")]
         let achievement = Self::filters_achievement(filters);
-        let mut filters = Self::filters_from::<FilterState>(filters).chain(
+        let filters = Self::filters_from::<FilterState>(filters);
+        #[cfg(feature = "api")]
+        let filters = filters.chain(
             achievement
                 .as_ref()
                 .map(FilterFor::<_, FilterState>::dyn_from_ref),
         );
+        let mut filters = filters;
 
         match filters.all(|f| f.is_visible(state) != FILTER_HIDDEN) {
             true => FILTER_ALLOWED,
@@ -176,6 +184,7 @@ impl RaidState {
         }
     }
 
+    #[cfg(feature = "api")]
     pub fn update_with(&mut self, raids: &SharedRaidState) -> bool {
         let mut dirty = false;
         self.completed.retain(|raid| {
@@ -198,11 +207,13 @@ impl RaidState {
 }
 
 /// TODO: consider more than just a dumb clone
+#[cfg(feature = "api")]
 #[derive(Debug, Clone, Default)]
 pub struct AchievementState {
     pub status: SharedAchievementState,
     pub hash: u32,
 }
+#[cfg(feature = "api")]
 impl AchievementState {
     pub fn new(status: impl Into<SharedAchievementState>) -> Self {
         Self {
@@ -211,6 +222,7 @@ impl AchievementState {
         }
     }
 
+    #[cfg(feature = "api")]
     pub fn update_with(&mut self, new: &SharedAchievementState) -> bool {
         if Arc::ptr_eq(&self.status, new) {
             return false
@@ -222,15 +234,18 @@ impl AchievementState {
         prev_hash == 0 || prev_hash != self.hash
     }
 
+    #[cfg(feature = "api")]
     fn hash_state(status: &ApiAchievementState) -> u32 {
         PackInfoSignature::hash_with(|h| status.hash(h)).hash
     }
 }
+#[cfg(feature = "api")]
 #[derive(Debug, Clone)]
 pub struct AchievementConfig {
     pub id: keys::AchievementId,
     pub bit: Option<keys::AchievementBit>,
 }
+#[cfg(feature = "api")]
 impl AchievementConfig {
     pub fn from_attributes(attrs: &FilterAttributes) -> Option<Self> {
         attrs.achievement_id.map(|id| Self {
@@ -245,6 +260,7 @@ impl AchievementConfig {
             .unwrap_or_else(|| state.status.is_complete(self.id.0))
     }
 }
+#[cfg(feature = "api")]
 impl MarkerFilter for AchievementConfig {
     type State = AchievementState;
 
@@ -693,6 +709,7 @@ impl CharacterMetadata {
 
 #[derive(Debug, Clone, Default)]
 pub struct FilterState {
+    #[cfg(feature = "api")]
     pub achievements: AchievementState,
     pub raids: RaidState,
     pub festival: Festivals,
@@ -767,6 +784,7 @@ where
         self.filter.is_visible(state.as_ref())
     }
 }
+#[cfg(feature = "api")]
 impl AsRef<AchievementState> for FilterState {
     fn as_ref(&self) -> &AchievementState {
         &self.achievements
