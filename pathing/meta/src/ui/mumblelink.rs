@@ -1,12 +1,7 @@
+#[cfg(all(feature = "mumblelink-arcloader", feature = "nexus"))]
+pub use self::arcloader::NexusIdentity;
 #[cfg(feature = "mumblelink-arcloader")]
-pub use self::arcloader::{
-    gw2_mumble,
-    LinkedMem as MumbleLink,
-    MumblePtr,
-    NexusIdentity,
-    UIScaling,
-    UIState,
-};
+pub use self::arcloader::{gw2_mumble, LinkedMem as MumbleLink, MumblePtr, UIScaling, UIState};
 #[cfg(all(
     feature = "mumblelink-nexus",
     feature = "nexus",

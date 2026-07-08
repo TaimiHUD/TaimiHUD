@@ -969,6 +969,7 @@ impl PathingController {
                     #[cfg(taimi_debug)]
                     for cat in map.categories.iter() {
                         let _ = writeln!(report, "cat vis={:?}", cat.visibility);
+                        #[cfg(feature = "paths-dyn")]
                         for attr in cat.attrs.iter() {
                             let _ = writeln!(report, "\tattr {}={:?}", attr.id(), attr);
                         }

@@ -44,7 +44,7 @@ with lib; let
       } =
         false;
     };
-    enableLua =
+    enableExperimentalFeatures =
       hasPrefix "refs/heads/arc/" (toString env.git-ref)
       || (tag.success && tag.pre != null);
   });

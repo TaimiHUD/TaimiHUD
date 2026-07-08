@@ -26,6 +26,7 @@ impl Race {
     pub const fn index(self) -> u8 {
         self.repr() - 1
     }
+    /// mumblelink id
     pub const fn from_index(index: u8) -> Option<Self> {
         match index {
             0..=Self::INDEX_MAX => Some(unsafe { Self::from_index_unchecked(index) }),
@@ -37,23 +38,47 @@ impl Race {
     }
 }
 
-impl TryFrom<i32> for Race {
+impl TryFrom<usize> for Race {
     type Error = anyhow::Error;
-
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
-        value
-            .try_into()
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        u8::try_from(value)
             .ok()
             .and_then(Self::from_index)
             .ok_or_else(|| anyhow!("unknown race `{value}`"))
     }
 }
+impl TryFrom<u32> for Race {
+    type Error = <Self as TryFrom<usize>>::Error;
+    #[inline]
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        (value as usize).try_into()
+    }
+}
+/// asura=1 may not be used by anyone but us so idk...
+#[cfg(todo)]
+impl TryFrom<u8> for Race {
+    type Error = anyhow::Error;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        Self::from_repr(value).ok_or_else(|| anyhow!("unknown race `{value}`"))
+    }
+}
+impl TryFrom<i32> for Race {
+    type Error = <Self as TryFrom<u32>>::Error;
+
+    #[inline]
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        (value as u32).try_into()
+    }
+}
+#[cfg(todo)]
+impl TryFrom<i32> for Race {}
 
 impl FromStr for Race {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Ok(i) = s.parse::<i32>() {
+        if let Ok(i) = s.parse::<u32>() {
             i.try_into()
         } else if s.eq_ignore_ascii_case("asura") {
             Ok(Self::Asura)

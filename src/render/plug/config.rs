@@ -668,7 +668,7 @@ where
     fn draw_on_window(&mut self, ui: &mut W, context: &mut C) {
         #[cfg(not(feature = "scripts-lua"))]
         {
-            ui.text("TODO: lua excluded from dll");
+            ui.text(fl!("feature-unsupported"));
         }
         if !self.state.plugs.is_watching() {
             let subscribed = Controller::with_sender(|s| {

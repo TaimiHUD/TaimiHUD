@@ -88,6 +88,7 @@ experimental-notice = Hi! This feature is (mostly) experimental.
  - Kat
 experimental-notice-alpha = This feature is (quite) experimental. If you're willing to help us with testing there's a more functional (and probably unstable!) preview available as part of our ongoing alpha test.
  Visit taimihud.com/testers for more info.
+feature-unsupported = Excluded from .dll
 name-empty = Name empty.
 no-trigger = No trigger position provided.
 no-category = No category provided.

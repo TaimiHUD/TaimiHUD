@@ -836,7 +836,10 @@ impl RenderState {
                     .pre_draw(visibility.within(visibility));
                 if interact_visibility.is_visible() {
                     let player_pos = self.machine.get_player_pos().map(|(pos, _)| pos);
-                    self.machine.pack_ui_state.pack_edit.env.latest_pos = player_pos;
+                    #[cfg(feature = "paths-edit")]
+                    {
+                        self.machine.pack_ui_state.pack_edit.env.latest_pos = player_pos;
+                    }
                     let interact = &mut self.machine.pack_ui_state.interact;
                     if interact.wants_static {
                         let wants_all = interact.wants_static_all();
@@ -1036,7 +1039,7 @@ impl RenderState {
         }
     }
     #[cfg(not(feature = "extension-arcdps"))]
-    pub fn render_options_fallback<'ui, U>(ui: &mut U, host: AddonHostName)
+    pub fn render_options_fallback<'ui, U>(ui: &mut U, context: DrawContextInput<'ui>, host: AddonHostName)
     where
         U: ?Sized + ImDrawWindow<'ui>,
     {

@@ -98,6 +98,7 @@ impl PathingWindowTab {
         match self {
             Self { packs: true, .. } => 0,
             Self { pois: true, .. } => 1,
+            #[cfg(feature = "paths-edit")]
             Self { edit: true, .. } => 2,
             _ => 0,
         }

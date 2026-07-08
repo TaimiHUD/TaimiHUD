@@ -582,11 +582,6 @@ fn report_eye_acc(machine: &super::machine::RenderMachine) {
     let dir_m2_game = LocalSpace::norm_to_game(dir_m2.into()).to_raw();
     let eye_m2_frameskip = machine.mumblelink_frame_skip;
 
-    let (eye_rt, dir_rt, ..) = machine.rtapi_state.camera;
-    let eye_rt = eye_rt.to_raw();
-    let eye_rt_game = LocalSpace::to_game(eye_rt.into()).to_raw();
-    let dir_rt = dir_rt.to_raw();
-    let dir_rt_game = LocalSpace::norm_to_game(dir_rt.into()).to_raw();
     let cam = goggles::FerretResource::snatch_camera();
 
     let (eye_cam_raw, dir_cam_raw, ..) = cam.get_as_look_raw();
@@ -607,8 +602,6 @@ fn report_eye_acc(machine: &super::machine::RenderMachine) {
             eye_game / eye_ref
         )
     };
-    log::debug!("ACC EYE\nEYE(ML): {} loc={eye_ml:?} game={eye_ml_game:?}\nEYE(M2): {} loc={eye_m2:?} game={eye_m2_game:?} skip={eye_m2_frameskip}\nEYE(RT): {} loc={eye_rt:?} game={eye_rt_game:?}\nEYE(SP): {} loc={eye_persp:?} read={eye_persp_raw:?}\nEYE(SC)={eye_cam:?} read={eye_cam_raw:?}", cmp(eye_ml_game), cmp(eye_m2_game), cmp(eye_rt_game), cmp(eye_persp_raw));
-
     let cmpdir = |dir_game: glam::Vec3| {
         let dir_ref = match cam.is_empty() {
             true => dir_persp_raw,
@@ -621,21 +614,48 @@ fn report_eye_acc(machine: &super::machine::RenderMachine) {
             dir_game / dir_ref
         )
     };
-    log::debug!("ACC DIR\nDIR(ML): {} loc={dir_ml:?} game={dir_ml_game:?}\nDIR(M2): {} loc={dir_m2:?} game={dir_m2_game:?} skip={eye_m2_frameskip}\nDIR(RT): {} loc={dir_rt:?} game={dir_rt_game:?}\nDIR(SP): {} loc={dir_persp:?} read={dir_persp_raw:?}\nDIR(SC)={dir_cam:?} read={dir_cam_raw:?}", cmpdir(dir_ml_game), cmpdir(dir_m2_game), cmpdir(dir_rt_game), cmpdir(dir_persp_raw));
 
     let h_persp = persp.get_as_perspective().0;
     let fov_persp = h_persp.recip().atan() * 2.0;
-    let fov_rt = machine.rtapi_state.camera_fov_y;
     let fov_ml = machine.fov_y().map(|v| v.to_radians()).unwrap_or(0.0f32);
     let cmpfov = |fov: f32| {
         let fov_ref = fov_persp;
         let delta = fov - fov_ref;
         format!("delta={delta:?} mult={:?}", fov / fov_ref)
     };
+
+    let (eye_rt, dir_rt, fov_rt) = match () {
+        #[cfg(feature = "extension-nexus")]
+        () => {
+            let (eye_rt, dir_rt, ..) = machine.rtapi_state.camera;
+            let eye_rt = eye_rt.to_raw();
+            let eye_rt_game = LocalSpace::to_game(eye_rt.into()).to_raw();
+            let dir_rt = dir_rt.to_raw();
+            let dir_rt_game = LocalSpace::norm_to_game(dir_rt.into()).to_raw();
+            let eye = lazyfmt::fmt_args!(move
+                "\nEYE(RT): {} loc={eye_rt:?} game={eye_rt_game:?}",
+                cmp(eye_rt_game),
+            );
+            let dir = lazyfmt::fmt_args!(move
+                "\nDIR(RT): {} loc={dir_rt:?} game={dir_rt_game:?}",
+                cmpdir(dir_rt_game),
+            );
+            let fov_rt = machine.rtapi_state.camera_fov_y;
+            let fov = lazyfmt::fmt_args!(move
+                "\nFOV(RT)={fov_rt:?} {}",
+                cmpfov(fov_rt),
+            );
+            (eye, dir, fov)
+        },
+        #[cfg(not(feature = "extension-nexus"))]
+        _ => ("", "", ""),
+    };
+    log::debug!("ACC EYE\nEYE(ML): {} loc={eye_ml:?} game={eye_ml_game:?}\nEYE(M2): {} loc={eye_m2:?} game={eye_m2_game:?} skip={eye_m2_frameskip}{eye_rt}\nEYE(SP): {} loc={eye_persp:?} read={eye_persp_raw:?}\nEYE(SC)={eye_cam:?} read={eye_cam_raw:?}", cmp(eye_ml_game), cmp(eye_m2_game), cmp(eye_persp_raw));
+
+    log::debug!("ACC DIR\nDIR(ML): {} loc={dir_ml:?} game={dir_ml_game:?}\nDIR(M2): {} loc={dir_m2:?} game={dir_m2_game:?} skip={eye_m2_frameskip}{dir_rt}\n\nDIR(SP): {} loc={dir_persp:?} read={dir_persp_raw:?}\nDIR(SC)={dir_cam:?} read={dir_cam_raw:?}", cmpdir(dir_ml_game), cmpdir(dir_m2_game), cmpdir(dir_persp_raw));
     log::debug!(
-        "ACC FOV\nFOV(ML)={fov_ml:?} {}\nFOV(RT)={fov_rt:?} {}\nFOV(SP)={fov_persp:?}",
+        "ACC FOV\nFOV(ML)={fov_ml:?} {}{fov_rt}\nFOV(SP)={fov_persp:?}",
         cmpfov(fov_ml),
-        cmpfov(fov_rt)
     );
     if (fov_persp - fov_ml).abs() > 0.2 {
         let (fov, range) = persp.get_as_perspective();

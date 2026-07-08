@@ -443,6 +443,7 @@ impl PathingController {
                 self.now_loading_timeout.set(future::pending());
                 // TODO: move to a signal and let subsystems subscribe as needed...
                 self.space_pack_rebuild_if_needed().await;
+                #[cfg(feature = "paths-interact")]
                 self.interact_rebuild_if_needed().await;
                 #[cfg(feature = "paths-lua")]
                 script::ScriptMessage::RefreshPacks.try_send();
@@ -561,6 +562,7 @@ impl PathingController {
             Ok(_) = self.space.maps_rx.changed() => {
                 self.space_pack_updates().await;
                 // TODO: give interact its own watcher to use in its poll etc
+                #[cfg(feature = "paths-interact")]
                 self.interact_entity_updates();
             },
             _ = &mut self.gc_timeout => {

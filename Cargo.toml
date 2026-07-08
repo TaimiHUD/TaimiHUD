@@ -35,11 +35,17 @@ default = [
   "windows",
   "built-info",
   "timers",
+  "timers-space",
   "markers",
   "markers-edit",
   "meta-cache",
   "paths",
+  "paths-api",
+  "paths-edit",
+  #"paths-filter", # interact enables filters and they're mostly pointless without it...
+  "paths-interact",
   "paths-lua",
+  "paths-space",
   "statistics",
   "extension-arcdps",
   "extension-nexus",
@@ -67,10 +73,9 @@ api = [
 ]
 
 space = [
+  "dep:arcloader-mumblelink",
   "dep:itertools",
   "dep:tobj",
-  "dep:bevy_ecs",
-  "dep:bevy_utils",
   "texture-loader",
   "goggles",
   "space-list",
@@ -81,6 +86,8 @@ space = [
   "dep:taimi_d3d",
 ]
 space-ecs = [
+  "dep:bevy_ecs",
+  "dep:bevy_utils",
 ]
 space-list = [
   "dep:bvh",
@@ -99,10 +106,17 @@ goggles2-camera = []
 goggles2-project = []
 
 timers = [
+  "dep:arcloader-mumblelink",
+]
+timers-space = [
+  # visual markers and directions
   "space-ecs",
+  # TODO: "space" feature independence from paths
+  #"space",
 ]
 
 markers = [
+  "dep:arcloader-mumblelink",
   "dep:itertools",
   "dep:taimi_meta",
   "dep:taimi_input",
@@ -118,9 +132,8 @@ markers-edit = [
 ]
 
 paths = [
-  "space",
-  "paths-interact",
-  "paths-edit",
+]
+paths-api = [
   "api",
 ]
 paths-edit = [
@@ -132,9 +145,14 @@ paths-filter = [
 ]
 paths-interact = [
   "paths-filter",
+  "dep:taimi_input",
 ]
 paths-schedule = [
   "dep:croner",
+]
+paths-space = [
+  # TODO: separate
+  "space",
 ]
 paths-dyn = []
 paths-lua = [
@@ -161,9 +179,6 @@ extension-arcdps = [
   "extension-arcdps-extern",
   "extension-arcdps-extras",
   "extension-arcdps-imgui",
-  "dep:arcloader-mumblelink",
-  "arcloader-mumblelink/gw2_mumble",
-  "taimi_meta?/mumblelink-arcloader",
   "taimi_input?/arcdps-extras",
   "nexus/arc",
   "windows/Win32_System_LibraryLoader",
@@ -201,6 +216,7 @@ extension-nexus = [
   "nexus/extras",
   "nexus/rtapi",
   "nexus/mumble",
+  "taimi_input?/arcdps-extras",
   "taimi_meta?/nexus",
   "taimi_meta?/nexus-rtapi",
   #"taimi_meta?/mumblelink-nexus",
@@ -342,7 +358,7 @@ bitvec = { workspace = true }
 arcffi = { path = "rt/ffi", package = "taimi_ffi", default-features = false, features = ["serde"] }
 taimi_api_client = { path = "./api/client", optional = true, features = ["reqwest"] }
 taimi_pack = { path = "./pathing/pack", optional = true, features = ["serde"] }
-taimi_meta = { path = "./pathing/meta", optional = true, default-features = false, features = ["serde"] }
+taimi_meta = { path = "./pathing/meta", optional = true, default-features = false, features = ["serde", "mumblelink-arcloader"] }
 taimi_d3d = { path = "./space/d3d", optional = true, default-features = false, features = ["dx11", "serde", "arcffi"] }
 taimi_input = { path = "./rt/input", optional = true, default-features = false, features = ["serde"] }
 taimi_sync = { path = "./rt/sync", default-features = false, features = ["serde"] }
@@ -356,7 +372,7 @@ closure-ffi = { version = "3", default-features = false, features = ["std"], opt
 jit-allocator2 = { version = "0.2", optional = true }
 
 nexus = { workspace = true, features = ["imgui"] }
-arcloader-mumblelink = { workspace = true, optional = true }
+arcloader-mumblelink = { workspace = true, features = ["gw2_mumble"], optional = true }
 dpsapi = { workspace = true, optional = true }
 
 [dependencies.image]

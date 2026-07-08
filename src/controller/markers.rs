@@ -1,9 +1,8 @@
-#[cfg(feature = "extension-nexus")]
-use nexus::rtapi::GroupMemberOwned;
 pub use SquadUpdateType as SquadState;
+#[cfg(feature = "extension-nexus")]
+use {crate::account_name_canon, nexus::rtapi::GroupMemberOwned};
 use {
     crate::{
-        account_name_canon,
         controller::{Controller, MapId, RtSender},
         exports::runtime::{
             self as rt,
@@ -11,14 +10,16 @@ use {
             mouse::{send_input, MouseInput},
         },
         marker::format::{MarkerEntry, MarkerFiletype, MarkerSet, RuntimeMarkers},
-        render::machine::RenderMachine,
+        render::{
+            machine::{MumbleIdentityUpdate, RenderMachine},
+            RenderEvent,
+        },
         settings::{MarkerAutoPlaceSettings, Settings, SettingsLock, SourceKind},
-        MumbleIdentityUpdate,
-        RenderEvent,
         ACCOUNT_NAME_CELL,
     },
     anyhow::{anyhow, Context},
     arcdps::extras::{UserInfoOwned, UserRole},
+    arcloader_mumblelink::identity::MumbleIdentityFields,
     glam::Vec3,
     glamour::{Box2, Point2, Point3, TransformMap},
     rand::Rng,
@@ -212,7 +213,7 @@ impl MarkersController {
         let is_commander = self
             .mumble_identity_rx
             .as_mut()
-            .and_then(|id| id.borrow_and_update().as_ref().map(|id| id.is_commander));
+            .and_then(|id| id.borrow_and_update().as_ref().map(|id| id.is_commander()));
         self.mumble_role = is_commander.map(|comm| match comm {
             true => SquadRank::Commander,
             false => SquadRank::Member,

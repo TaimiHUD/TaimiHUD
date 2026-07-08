@@ -513,7 +513,7 @@ impl MessageWindowState {
             #[cfg(taimi_imgui = "192")]
             Some(im192::VERSION_NUM) => {
                 #[cfg(todo = "unnecessary")]
-                let cflags_s = _size_dirty.then_some(Self::IM180_BODY_RESIZE).unwrap_or(0);
+                let cflags_s = _size_dirty.then_some(Self::IM192_BODY_RESIZE).unwrap_or(0);
                 let cflags_s = 0;
                 let cflags_i = interactive.then_some(Self::IM192_BODY_INTERACT).unwrap_or(0);
                 let flags_i = (!interactive).then_some(Self::IM192_BODY_NOINTERACT);
