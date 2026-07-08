@@ -117,4 +117,5 @@ version = "0.61"
 features = [
   "System",
   "Foundation",
+  "Win32_System_Memory",
 ]
