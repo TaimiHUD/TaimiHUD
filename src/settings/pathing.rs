@@ -183,6 +183,15 @@ impl SpaceSettings {
         }
     }
 
+    /// stub; the large match causes rustc to consume anywhere from 10GB to 60GB
+    /// of memory in the mir_borrowck phase as new settings are added.
+    ///
+    /// I never really wanted this function anyway
+    #[inline(always)]
+    pub fn is_empty(&self) -> bool {
+        false
+    }
+    #[cfg(todo = "unnecessary")]
     pub fn is_empty(&self) -> bool {
         match self {
             Self {
