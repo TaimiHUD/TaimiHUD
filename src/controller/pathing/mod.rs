@@ -164,6 +164,7 @@ pub(crate) enum PathingEvent {
     #[strum(to_string = "InteractControl {0}")]
     InteractControl(interact::InteractMessage),
     ToggleKatRender,
+    #[cfg(feature = "api")]
     ApiBypass(Option<bool>),
     #[cfg(feature = "paths-lua")]
     ScriptsEnable(Option<bool>),
@@ -348,6 +349,20 @@ impl PathingController {
             #[cfg(not(feature = "paths-filter"))]
             _ => (future::pending::<Option<((), ())>>(), future::pending::<()>()),
         };
+        let (filter_festivals, filter_achievements, filter_raids) = match () {
+            #[cfg(feature = "api")]
+            _ => (
+                self.rx.festivals.changed(),
+                self.rx.achievements.changed(),
+                self.rx.raids.changed(),
+            ),
+            #[cfg(not(feature = "api"))]
+            _ => (
+                future::pending::<()>(),
+                future::pending::<()>(),
+                future::pending::<()>(),
+            ),
+        };
         let interact_rx = match () {
             #[cfg(feature = "paths-interact")]
             _ => self.interact.with_rx(&mut self.rx.interact),
@@ -470,23 +485,32 @@ impl PathingController {
                     }
                 }
             },
-            _ = self.rx.festivals.changed() => {
-                let new = self.rx.festivals.borrow_and_update().get();
-                if new != self.filter_state.festival {
-                    self.filter_state.festival = new;
-                    self.filter_state_signal = Some(true);
+            _ = filter_festivals => {
+                #[cfg(feature = "api")]
+                {
+                    let new = self.rx.festivals.borrow_and_update().get();
+                    if new != self.filter_state.festival {
+                        self.filter_state.festival = new;
+                        self.filter_state_signal = Some(true);
+                    }
                 }
             },
-            _ = self.rx.achievements.changed() => {
-                let new = self.rx.achievements.borrow_and_update();
-                if self.filter_state.achievements.update_with(&*new) {
-                    self.filter_state_signal = Some(true)
+            _ = filter_achievements => {
+                #[cfg(feature = "api")]
+                {
+                    let new = self.rx.achievements.borrow_and_update();
+                    if self.filter_state.achievements.update_with(&*new) {
+                        self.filter_state_signal = Some(true)
+                    }
                 }
             },
-            _ = self.rx.raids.changed() => {
-                let new = self.rx.raids.borrow_and_update();
-                if self.filter_state.raids.update_with(&*new) {
-                    self.filter_state_signal = Some(true)
+            _ = filter_raids => {
+                #[cfg(feature = "api")]
+                {
+                    let new = self.rx.raids.borrow_and_update();
+                    if self.filter_state.raids.update_with(&*new) {
+                        self.filter_state_signal = Some(true)
+                    }
                 }
             },
             Ok(..) = self.rx.mumble_identity.changed() => {
@@ -702,6 +726,7 @@ impl PathingController {
         }
     }
 
+    #[cfg(feature = "api")]
     fn toggle_api_bypass(&mut self, set: Option<bool>) {
         self.rx.enables.write_if(|en| {
             match set {
@@ -843,6 +868,7 @@ impl PathingController {
                 self.spawn_message(followup);
             },
             ToggleKatRender => self.toggle_katrender().await,
+            #[cfg(feature = "api")]
             ApiBypass(set) => self.toggle_api_bypass(set),
             #[cfg(feature = "paths-lua")]
             ScriptsEnable(en) => self.toggle_script_enable(en),

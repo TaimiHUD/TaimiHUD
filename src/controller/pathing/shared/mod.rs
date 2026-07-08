@@ -47,12 +47,9 @@ pub use {
 };
 use {
     crate::{
-        controller::{
-            api::{AchievementState, FestivalState, RaidState},
-            pathing::{
-                registry::{PackLoader, PackPath},
-                PathingEvent,
-            },
+        controller::pathing::{
+            registry::{PackLoader, PackPath},
+            PathingEvent,
         },
         render::machine::MumbleIdentityUpdate,
         settings::{pathing::PathingSettings, SettingsLock},
@@ -66,6 +63,8 @@ use {
 
 #[cfg(feature = "paths-interact")]
 pub use self::interact::{InteractReceiver, InteractSender, InteractShared};
+#[cfg(feature = "api")]
+use crate::controller::api::{AchievementState, FestivalState, RaidState};
 
 mod display;
 #[cfg(feature = "paths-interact")]
@@ -88,9 +87,9 @@ impl PathingSender {
     pub fn new(
         gameplay: &watched::Tx<GameplayState>,
         mumble_identity: &watched::Tx<Option<MumbleIdentityUpdate>>,
-        festivals: &watched::Tx<FestivalState>,
-        achievements: &watched::Tx<Arc<AchievementState>>,
-        raids: &watched::Tx<Arc<RaidState>>,
+        #[cfg(feature = "api")] festivals: &watched::Tx<FestivalState>,
+        #[cfg(feature = "api")] achievements: &watched::Tx<Arc<AchievementState>>,
+        #[cfg(feature = "api")] raids: &watched::Tx<Arc<RaidState>>,
     ) -> (Self, PathingReceiver) {
         let (command, command_rx) = mpsc::channel(Self::EVENT_BUFFER_SIZE);
         let sender = Self {
@@ -102,16 +101,19 @@ impl PathingSender {
         let rx = PathingReceiver {
             shared: sender.shared.clone(),
             command: command_rx,
+            #[cfg(feature = "api")]
             festivals: {
                 let mut festivals = festivals.subscribe();
                 festivals.mark_changed();
                 festivals
             },
+            #[cfg(feature = "api")]
             achievements: {
                 let mut achievements = achievements.subscribe();
                 achievements.mark_changed();
                 achievements
             },
+            #[cfg(feature = "api")]
             raids: {
                 let mut raids = raids.subscribe();
                 raids.mark_changed();
@@ -150,10 +152,12 @@ pub struct PathingReceiver {
     pub command: mpsc::Receiver<PathingEvent>,
     pub enables: Watched<PathingEnables>,
     pub load_throttle: Watched<usize>,
+    /// TODO: fallback when api feature disabled
+    #[cfg(feature = "api")]
     pub festivals: watched::Rx<FestivalState>,
-    /// TODO: cfg(feature = "api")
+    #[cfg(feature = "api")]
     pub achievements: watched::Rx<Arc<AchievementState>>,
-    /// TODO: cfg(feature = "api")
+    #[cfg(feature = "api")]
     pub raids: watched::Rx<Arc<RaidState>>,
     pub gameplay: Watched<GameplayState>,
     pub mumble_identity: watched::Rx<Option<MumbleIdentityUpdate>>,

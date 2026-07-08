@@ -1,7 +1,8 @@
+#[cfg(feature = "api")]
+use {crate::controller::api::ApiController, taimi_pack::attributes::Festival};
 use {
     crate::{
         controller::{
-            api::ApiController,
             pathing::{PathingController, PathingEnables, PathingEvent},
             Controller,
         },
@@ -15,7 +16,6 @@ use {
     anyhow::Context,
     std::collections::HashMap,
     strum::VariantArray,
-    taimi_pack::attributes::Festival,
     taimi_sync::watched::Watched,
 };
 #[cfg(feature = "goggles")]
@@ -651,6 +651,7 @@ impl PathingConfig {
             label,
             false,
         ));
+        #[cfg(feature = "api")]
         if let Some(_tree) = filters_tree {
             let enables = self.enables.get_mut();
             if with_i18n!("pathing-config-api-bypass", |label| ui.checkbox_flags(
@@ -922,6 +923,7 @@ impl PathingConfig {
         Some(())
     }
 
+    #[cfg(feature = "api")]
     fn draw_festival_opts<'ui, U>(&mut self, ui: &mut U)
     where
         U: ?Sized + ImDrawWindow<'ui>,
