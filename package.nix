@@ -26,12 +26,20 @@
   enableLua ? false,
   enableNexus ? true,
   enableArcdps ? true,
+  buildWithDebugInfo ?
+    if stdenv.hostPlatform.isMsvc
+    then true
+    else null,
+  buildWithUnwind ? null,
+  buildWithLto ? null,
   source ? ./.,
   cargoArtifacts ? null,
 }: let
-  inherit (lib.trivial) mapNullable;
+  inherit (lib.trivial) mapNullable defaultTo;
   inherit (lib.lists) optional optionals;
-  inherit (lib.strings) concatStringsSep optionalString;
+  inherit (lib.strings) concatStringsSep optionalString toUpper isStringLike;
+  inherit (stdenv.hostPlatform) isWindows;
+  mkProfileKey = key: "CARGO_PROFILE_${toUpper buildType}_${key}";
   libgit2'build = libgit2.__spliced.buildHost or buildPackages.libgit2 or libgit2;
   #TARGET_CC = "${pkgsCross.stdenv.cc}/bin/${pkgsCross.stdenv.cc.targetPrefix}cc";
   #TARGET_CC = "${stdenv.cc.targetPrefix}cc";
@@ -60,7 +68,7 @@
       "markers"
       "markers-edit"
     ]
-    ++ optional stdenv.hostPlatform.isWindows "windows"
+    ++ optional isWindows "windows"
     ++ optional enableNexus "extension-nexus"
     ++ optional enableArcdps "extension-arcdps"
     ++ optional enableStatistics "statistics"
@@ -141,6 +149,29 @@ in
         toString
         ["--no-default-features" "--features" (concatStringsSep "," (lib.unique cargoBuildFeatures))]
       );
+
+      CARGO_BUILD_INCREMENTAL = "false";
+      ${
+        if buildWithUnwind != null || buildType != "dev"
+        then mkProfileKey "PANIC"
+        else null
+      } =
+        if !defaultTo false buildWithUnwind
+        then "abort"
+        else toString buildWithUnwind;
+      ${mapNullable (_: mkProfileKey "LTO") buildWithLto} = toString buildWithLto;
+      ${mapNullable (_: mkProfileKey "DEBUG") buildWithDebugInfo} =
+        if isStringLike buildWithDebugInfo
+        then toString buildWithDebugInfo
+        else if !buildWithDebugInfo
+        then "off"
+        else if buildType == "dev"
+        then "limited"
+        else "line-tables-only";
+
+      outputs =
+        ["out"]
+        ++ optional (defaultTo false buildWithDebugInfo) "debug";
 
       buildInputs =
         [

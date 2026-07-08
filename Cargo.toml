@@ -267,8 +267,7 @@ check-cfg = [
 opt-level = "z"
 #opt-level = 2
 #codegen-units = 1
-#debug = true
-panic = "abort"
+#panic = "abort"
 #lto = "thin"
 lto = true
 
