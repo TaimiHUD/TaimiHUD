@@ -8,7 +8,9 @@ members = [
   "rt/ffi",
   "rt/input",
   "rt/sync",
-  "space/d3d",
+  "rt/ui",
+  # TODO? "rt/ui/shim/180",
+  # TODO? "rt/ui/shim/192",
   "space/d3d",
 ]
 
@@ -105,12 +107,17 @@ markers = [
   "dep:arc-atomic",
   "dep:taimi_meta",
   "dep:taimi_input",
+  "dep:arcloader-mumblelink",
+  "arcloader-mumblelink/gw2_mumble",
+  "taimi_meta/mumblelink-arcloader",
   "windows",
   "windows/System",
   "windows/Foundation",
   "windows/Win32_UI_WindowsAndMessaging",
   "windows/Win32_UI_Input_KeyboardAndMouse",
   "windows/Win32_Graphics_Gdi",
+  # used too often for keybinds, replace!
+  "taimi_input/arcdps-extras",
 ]
 markers-edit = [
   "markers",
@@ -128,6 +135,7 @@ extension-arcdps = [
   #"extension-arcdps-codegen",
   "extension-arcdps-extern",
   "extension-arcdps-extras",
+  "extension-arcdps-imgui",
   "dep:arcloader-mumblelink",
   "arcloader-mumblelink/gw2_mumble",
   "taimi_meta?/mumblelink-arcloader",
@@ -137,6 +145,7 @@ extension-arcdps = [
   "windows/Win32_System_Memory",
   "windows/Win32_System_Threading",
   "texture-loader",
+  "arcffi/mmap",
 ]
 extension-arcdps-extras = [
   "arcffi/fnalloc",
@@ -148,41 +157,46 @@ extension-arcdps-extras = [
 ]
 extension-arcdps-codegen = [
   "dpsapi",
-  #"dpsapi/arcdps-015",
-  "dpsapi/arcdps",
-  "arcdps/export",
+  "dpsapi/arcdps-023",
+  "arcdps/codegen",
 ]
 extension-arcdps-extern = [
   "dep:sync-unsafe-cell",
   "dpsapi",
   "dpsapi/embed",
-  #"extension-arcdps-extern-cleanup"
 ]
-extension-arcdps-extern-cleanup = [
+extension-arcdps-imgui = [
+  "taimi_ui/imgui-arcdps",
 ]
 extension-nexus = [
   #"extension-nexus-codegen",
   "extension-nexus-extern-todo",
+  "extension-nexus-imgui",
   "nexus/arc",
   "nexus/extras",
   "nexus/rtapi",
   "nexus/mumble",
   "taimi_meta?/nexus",
   "taimi_meta?/nexus-rtapi",
-  "taimi_meta?/mumblelink-nexus",
+  #"taimi_meta?/mumblelink-nexus",
 ]
-extension-nexus-codegen = []
+extension-nexus-codegen = [
+  "nexus/codegen",
+]
 extension-nexus-extern = [
   "dep:sync-unsafe-cell",
 ]
 extension-nexus-extern-todo = [
   # TODO: remove all use of the dep (and __macro)!
-  #"nexus",
+  "nexus/codegen-globals",
   "extension-nexus-extern",
+]
+extension-nexus-imgui = [
+  "taimi_ui/imgui-nexus",
 ]
 dpsapi = [
   "dep:dpsapi",
-  "dpsapi/nexus",
+  "dpsapi/nexus-011",
 ]
 
 image = [
@@ -201,6 +215,9 @@ windows = [
   #"dpsapi?/windows-061",
   "taimi_d3d?/windows",
   "taimi_input?/windows",
+  "taimi_ui/windows",
+  "arcdps/windows",
+  "nexus/windows",
 ]
 
 [lib]
@@ -263,7 +280,11 @@ chrono = { version = "0.4.40", features = [ "serde", "alloc" ] }
 indexmap = { workspace = true }
 relative-path = { version = "1.9.3", features = [ "serde" ] }
 bitflags = { workspace = true }
-mint = "0.5.9"
+mint = { workspace = true }
+num-traits = { workspace = true }
+bytemuck = { workspace = true }
+rustc-hash = { workspace = true }
+macro_rules_attribute = { workspace = true }
 itertools = { optional = true, version = "0.14.0" }
 tobj = { optional = true, version = "4.0.3", features = [ "reordering" ] }
 bevy_ecs = { optional = true, version = "0.16.0" }
@@ -282,6 +303,7 @@ fluent = "0.16.1"
 fluent-syntax = "0.11"
 rust-embed = { version = "8.7.1", features = [ "debug-embed" ] }
 i18n-embed-fl = "0.9.4"
+tinystr = "0.8"
 unic-langid-impl = "0.9.6"
 rand = "0.9.1"
 ordered-float = { version = "5.0.0", features = [ "serde" ] }
@@ -301,6 +323,7 @@ taimi_d3d = { path = "./space/d3d", optional = true, default-features = false, f
 taimi_input = { path = "./rt/input", optional = true, default-features = false, features = ["serde"] }
 taimi_sync = { path = "./rt/sync", default-features = false, features = ["serde"] }
 taimi_hoard = { path = "./rt/hoard", default-features = false, features = ["serde"] }
+taimi_ui = { path = "./rt/ui", default-features = false, features = ["serde"] }
 
 include_dir = { version = "0.7.4", features = ["glob"] }
 retour = { version = "0.3", optional = true }
@@ -308,9 +331,9 @@ sync-unsafe-cell = { version = "0.1", optional = true }
 closure-ffi = { version = "3", default-features = false, features = ["std"], optional = true }
 jit-allocator2 = { version = "0.2", optional = true }
 
-nexus = { workspace = true }
-arcloader-mumblelink = { git = "https://codeberg.org/TaimiHUD/arcloader", default-features = false, features = ["log", "identity"], optional = true }
-dpsapi = { git = "https://codeberg.org/TaimiHUD/arcloader", default-features = false, optional = true }
+nexus = { workspace = true, features = ["imgui"] }
+arcloader-mumblelink = { workspace = true, optional = true }
+dpsapi = { workspace = true, optional = true }
 
 [dependencies.image]
 optional = true
@@ -340,23 +363,34 @@ features = [
 ]
 
 [workspace.dependencies]
-arcdps = { git = "https://github.com/zerthox/arcdps-rs" }
-nexus = { git = "https://github.com/zerthox/nexus-rs" }
-#gw2_mumble_nexus = { package = "gw2_mumble", git = "https://github.com/zerthox/gw2-mumble-rs", tag = "0.2.4", default-features = false }
+arcffi = { git = "https://codeberg.org/TaimiHUD/arcloader", default-features = false, features = ["std"] }
+dpsapi = { git = "https://codeberg.org/TaimiHUD/arcloader", default-features = false }
+arcloader-mumblelink = { git = "https://codeberg.org/TaimiHUD/arcloader", default-features = false, features = ["log", "identity"] }
+arcdps = { git = "https://codeberg.org/TaimiHUD/arcdps-rs", branch = "0.23.x-taimi", default-features = false }
+nexus = { git = "https://codeberg.org/TaimiHUD/nexus-rs", branch = "0.11.x-taimi", default-features = false }
+#gw2_mumble = { git = "https://codeberg.org/TaimiHUD/gw2-mumble-rs", branch = "0.3.x-taimi", default-features = false }
 glam = "0.30"
 glamour = "0.18"
+mint = "0.5"
 num-traits = { version = "0.2", default-features = false }
 bytemuck = { version = "1", default-features = false, features = ["extern_crate_std", "derive"] }
+rustc-hash = "2"
 indexmap = "2.9"
 bitvec = "1"
 bitflags = "2"
-# TODO: macro_rules_attribute = "0.2"
+macro_rules_attribute = "0.2"
 
-[patch."https://github.com/zerthox/arcdps-rs"]
-# some fixes need to be contributed back upstream
-arcdps = { git = "https://github.com/arcnmx/arcdps-rs" }
-arcdps_codegen = { git = "https://github.com/arcnmx/arcdps-rs" }
-evtc = { git = "https://github.com/arcnmx/arcdps-rs" }
+# unsure how many of these changes can be contributed back upstream?
+#[patch."https://github.com/zerthox/arcdps-rs"]
+#arcdps = { git = "https://codeberg.org/TaimiHUD/arcdps-rs", branch = "0.23.x-taimi" }
+#arcdps_codegen = { git = "https://codeberg.org/TaimiHUD/arcdps-rs", branch = "0.23.x-taimi" }
+#evtc = { git = "https://codeberg.org/TaimiHUD/arcdps-rs", branch = "0.23.x-taimi" }
+#[patch."https://github.com/zerthox/nexus-rs"]
+#nexus = { git = "https://codeberg.org/TaimiHUD/nexus-rs", branch = "0.11.x-taimi" }
+#nexus_codegen = { git = "https://codeberg.org/TaimiHUD/nexus-rs", branch = "0.11.x-taimi" }
+#[patch."https://github.com/zerthox/gw2-mumble-rs"]
+#gw2_mumble = { git = "https://codeberg.org/TaimiHUD/gw2-mumble-rs", branch = "0.3.x-taimi" }
 
 [patch.crates-io]
 gw2lib-model = { git = "https://github.com/greaka/gw2lib" }
+#arcdps-imgui = { path = "rt/ui/shim/180", version = "0.8.0" }

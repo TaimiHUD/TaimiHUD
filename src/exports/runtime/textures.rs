@@ -1,5 +1,5 @@
 #[cfg(feature = "extension-nexus")]
-pub use nexus::texture::Texture as NexusTexture;
+use glamour::Size2;
 #[cfg(feature = "texture-loader")]
 use {
     anyhow::{anyhow, Context},
@@ -7,7 +7,6 @@ use {
     windows::Win32::Graphics::Dxgi::Common::{self as dxgi, DXGI_FORMAT},
 };
 use {
-    nexus::imgui::TextureId,
     std::{
         collections::{hash_map, HashMap},
         future::Future,
@@ -15,7 +14,7 @@ use {
         path::PathBuf,
         sync::{Arc, RwLock as StdRwLock},
     },
-    taimi_d3d::dx11::{buffer::TextureView2, prelude::*},
+    taimi_d3d::dx11::buffer::TextureView2,
     tokio::sync::{self, mpsc, RwLock},
 };
 
@@ -436,6 +435,11 @@ pub enum TextureSlot {
     #[cfg(feature = "extension-nexus")]
     Nexus(NexusTexture),
 }
+/// it's complicated...
+#[cfg(feature = "extension-nexus")]
+unsafe impl Send for TextureSlot {}
+#[cfg(feature = "extension-nexus")]
+unsafe impl Sync for TextureSlot {}
 
 impl TextureSlot {
     pub fn resource_view(&self) -> Option<&TextureView2> {
@@ -443,16 +447,13 @@ impl TextureSlot {
             #[cfg(feature = "texture-loader")]
             Self::Loaded(t) => Some(&t.view),
             #[cfg(feature = "extension-nexus")]
-            Self::Nexus(t) => Some(t.resource.as_ref()),
+            Self::Nexus(t) => t.resource().as_ref(),
             _ => None,
         }
     }
 
     pub fn imgui_texture(&self) -> Option<ImguiTexture> {
-        let id = self
-            .resource_view()
-            .map(|resource| TextureId::new(resource.to_ref().as_raw() as usize));
-        let id = id.unwrap_or(TextureId::new(0));
+        let id = self.resource_view().map(|resource| resource.clone());
 
         Some(match self {
             #[cfg(feature = "texture-loader")]
@@ -460,7 +461,7 @@ impl TextureSlot {
                 id,
                 size: {
                     let [w, h] = t.dimensions;
-                    [w as f32, h as f32]
+                    Size2::new(w as f32, h as f32)
                 },
             },
             #[cfg(feature = "extension-nexus")]
@@ -491,12 +492,6 @@ impl TextureSlot {
     }
 }
 
-#[cfg(feature = "extension-nexus")]
-impl From<NexusTexture> for TextureSlot {
-    fn from(texture: NexusTexture) -> Self {
-        Self::Nexus(texture)
-    }
-}
 #[cfg(feature = "texture-loader")]
 impl From<Texture> for TextureSlot {
     fn from(texture: Texture) -> Self {
@@ -510,16 +505,87 @@ impl From<Arc<Texture>> for TextureSlot {
     }
 }
 
+#[cfg(feature = "extension-nexus")]
+#[derive(Debug)]
+#[repr(transparent)]
+pub struct NexusTexture(mem::ManuallyDrop<nexus::texture::Texture>);
+#[cfg(feature = "extension-nexus")]
+impl NexusTexture {
+    #[inline(always)]
+    pub const fn from_nexus(texture: nexus::texture::Texture) -> Self {
+        Self(mem::ManuallyDrop::new(texture))
+    }
+    #[inline]
+    pub fn new(srv: TextureView2, size: Size2<u32>) -> Self {
+        let Size2 { width, height } = size;
+        Self::from_nexus(nexus::texture::Texture { resource: srv.into(), width, height })
+    }
+    #[inline(always)]
+    pub fn resource(&self) -> &Option<TextureView2> {
+        unsafe { mem::transmute(&raw const self.0.resource) }
+    }
+    #[inline]
+    pub fn size_u32(&self) -> Size2<u32> {
+        Size2::new(self.0.width, self.0.height)
+    }
+    #[inline]
+    pub fn size(&self) -> Size2<f32> {
+        self.size_u32().as_()
+    }
+}
+#[cfg(feature = "extension-nexus")]
+impl Clone for NexusTexture {
+    fn clone(&self) -> Self {
+        Self::from_nexus({
+            let Size2 { width, height } = self.size_u32();
+            let resource = self.resource().clone();
+            nexus::texture::Texture {
+                width,
+                height,
+                resource: unsafe { mem::transmute(resource) },
+            }
+        })
+    }
+}
+#[cfg(feature = "extension-nexus")]
+impl Drop for NexusTexture {
+    fn drop(&mut self) {
+        if let Some(resource) = self.resource() {
+            use windows::core::Interface;
+            let ptr = resource.as_d3d_raw().as_ptr();
+            unsafe {
+                (resource.as_d3d().vtable().base__.base__.base__.Release)(ptr);
+            }
+        }
+    }
+}
+#[cfg(feature = "extension-nexus")]
+impl From<NexusTexture> for TextureSlot {
+    fn from(texture: NexusTexture) -> Self {
+        Self::Nexus(texture)
+    }
+}
+#[cfg(feature = "extension-nexus")]
+unsafe impl Send for NexusTexture {}
+#[cfg(feature = "extension-nexus")]
+unsafe impl Sync for NexusTexture {}
+
 #[derive(Debug, Clone)]
 pub struct ImguiTexture {
-    pub id: TextureId,
-    pub size: [f32; 2],
+    pub id: Option<TextureView2>,
+    pub size: Size2<f32>,
+}
+impl ImguiTexture {
+    #[inline(always)]
+    pub fn im_size(&self) -> taimi_ui::im::ui::ImSize2 {
+        self.size.cast()
+    }
 }
 
 impl Default for ImguiTexture {
     fn default() -> Self {
         Self {
-            id: TextureId::new(0),
+            id: Default::default(),
             size: Default::default(),
         }
     }

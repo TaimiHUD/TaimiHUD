@@ -1,49 +1,72 @@
 use {
     crate::{
-        exports::{
-            arcdps as exports,
-            runtime::imgui::{self, sys as imgui_sys, Ui},
+        exports::{arcdps as exports, runtime as rt},
+        render::element::im::{
+            img::io::{UiAllocatorFns, UiAllocatorRaw, WinHeapAllocator},
+            ImDrawWindow,
+            UiContextCell,
         },
         settings::state::AddonHostName,
     },
-    arcffi::cstr::{cstr, CStrPtr, CStrPtr16},
+    anyhow::Context,
+    arcffi::{
+        alloc::borrow::Cow,
+        cstr::{cstr, CStrPtr, Str0},
+        UnsaferCell,
+    },
     core::{
-        mem,
-        num::{NonZeroU32, NonZeroUsize},
+        num::NonZero,
         ptr::{self, NonNull},
     },
     dpsapi::api::header::{
+        arc_export,
         c_bool32,
-        wrap_init_addr,
         CombatArgs,
         ExtensionExports,
         ExtensionFnCombat,
         ExtensionHeader,
+        ExtensionLoadResult,
+        ID3d,
+        ImCtx,
         InitArgs,
         InitFn,
         ReleaseFn,
+        UserMalloc,
         HWND,
         LPARAM,
         WPARAM,
     },
     std::panic,
-    sync_unsafe_cell::SyncUnsafeCell,
 };
 
-pub const ARC_SIG: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(exports::SIG) };
-static ARC_ARGS: SyncUnsafeCell<InitArgs> = SyncUnsafeCell::new(InitArgs::EMPTY);
-static ARC_EXPORT: SyncUnsafeCell<ExtensionExports<'static>> = SyncUnsafeCell::new(ExtensionExports::EMPTY);
-static ARC_IMGUI_CONTEXT: SyncUnsafeCell<Option<NonZeroUsize>> = SyncUnsafeCell::new(None);
-static ARC_IMGUI_UI: SyncUnsafeCell<Option<NonZeroUsize>> = SyncUnsafeCell::new(None);
+pub const ARC_SIG: NonZero<u32> = unsafe { NonZero::new_unchecked(exports::SIG) };
+static ARC_ARGS: UnsaferCell<InitArgs> = unsafe { UnsaferCell::new(InitArgs::EMPTY) };
+static ARC_EXPORT: UnsaferCell<ExtensionExports<'static>> =
+    unsafe { UnsaferCell::new(ExtensionExports::EMPTY) };
+fn exported_imgui_version() -> &'static u32 {
+    let header = unsafe { &(&*ARC_EXPORT.get()).header };
+    header.imgui_version()
+}
+static ARC_IMGUI_CONTEXT: UnsaferCell<Option<Option<UiContextCell<'static>>>> =
+    unsafe { UnsaferCell::new(None) };
 //pub const ARC_CB_COMBAT: ExtensionFnCombat = ExtensionExports::wrap_combat_fn_item(&arc_cb_combat);
 pub const ARC_CB_COMBAT_LOCAL: ExtensionFnCombat =
     ExtensionExports::wrap_combat_fn_item(&arc_cb_combat_local);
 pub const ARC_BUILD: CStrPtr<'static> = cstr!(&env!("CARGO_PKG_VERSION"));
 pub const ARC_NAME: CStrPtr<'static> = CStrPtr::with_cstr(crate::exports::ADDON_TITLE_C);
-#[cfg(feature = "extension-nexus")]
-pub const ARC_IMGUI_VERSION: u32 = nexus::gui::IMGUI_VERSION;
-#[cfg(not(feature = "extension-nexus"))]
-pub const ARC_IMGUI_VERSION: u32 = ExtensionHeader::IMGUI_VERSION_20210202;
+fn arc_imgui_version() -> u32 {
+    match arc_args().map(|arc| arc.imgui.version()) {
+        #[cfg(all(todo = "unnecessary", not(taimi_imgui = "180")))]
+        Some(Some(ImCtx::VERSION_20210202)) => 0,
+        #[cfg(all(todo = "unnecessary", not(taimi_imgui = "192")))]
+        Some(Some(ImCtx::VERSION_20260507)) => 0,
+        #[cfg(all(todo = "unnecessary", not(taimi_imgui = "192")))]
+        Some(None) | None => ImCtx::VERSION_20210202.get(),
+        //#[cfg(taimi_imgui = "192")]
+        Some(None) | None => ImCtx::VERSION_20260507.get(),
+        Some(Some(v)) => v.get(),
+    }
+}
 
 pub fn arc_args() -> Option<&'static InitArgs> {
     let args = unsafe { &*ARC_ARGS.get() };
@@ -53,138 +76,55 @@ pub fn arc_args() -> Option<&'static InitArgs> {
     }
 }
 
-unsafe fn arc_imgui_context() -> Option<&'static imgui::Context> {
-    let context_global = *ARC_IMGUI_CONTEXT.get();
-    let context = match context_global {
-        Some(context_global) => {
-            let ptr = context_global.get() as *mut imgui::Context;
-            return Some(&*ptr)
-        },
-        None => {
-            let _context_sys = imgui_bind_context()?;
-            Box::new(imgui::Context::current())
-        },
-    };
-    let context = Box::into_raw(context);
-    ptr::write(ARC_IMGUI_CONTEXT.get() as *mut usize, context as usize);
-    Some(&*context)
+#[inline(always)]
+unsafe fn with_imgui<'ui, R, F: FnOnce(Option<&'ui mut UiContextCell>) -> R>(f: F) -> R {
+    f(ARC_IMGUI_CONTEXT
+        .as_mut_unchecked()
+        .as_mut()
+        .and_then(|ctx| ctx.as_mut()))
 }
-pub(super) fn arc_imgui_context_ptr() -> Option<NonNull<imgui_sys::ImGuiContext>> {
-    arc_args().and_then(|arc| arc.imgui_ctx.map(NonNull::cast))
+#[inline(always)]
+unsafe fn try_with_imgui<'ui, R, F: FnOnce(&mut dyn ImDrawWindow<'ui>) -> R>(f: F) -> Option<R> {
+    with_imgui(move |ctx| ctx.map(move |ctx| f(ctx.bound_ui_unchecked())))
 }
-
-#[cfg(feature = "extension-arcdps-extern-cleanup")]
-const DEFAULT_BUFFER_CAP: usize = 1024;
-#[cfg(feature = "extension-arcdps-extern-cleanup")]
-fn find_buffer_offset<T>(ui: *const T, ignore_context: usize) -> Result<usize, &'static str> {
-    use core::slice;
-    let res = unsafe {
-        let szs = mem::size_of::<T>() / mem::size_of::<usize>();
-        let ptrs = slice::from_raw_parts(ui as *const usize, szs);
-        let mut p = ptrs
-            .iter()
-            .copied()
-            .enumerate()
-            .filter(|&(_, p)| p != 0 && p != DEFAULT_BUFFER_CAP && p != ignore_context);
-        let found = p.next();
-        let res = found.ok_or("no ptr found");
-        if res.is_ok() && p.next().is_some() {
-            return Err("multiple ptrs found")
-        }
-        res.map(|(i, _p)| i)
-    };
-    #[cfg(debug_assertions)]
-    if let Ok(off) = res {
-        let buffer = unsafe { &*((&*ui as *const T as *const usize).add(off) as *const Vec<u8>) };
-        assert_eq!(buffer.capacity(), DEFAULT_BUFFER_CAP);
+/// marks it dead to avoid re-init if callback happens to be invoked
+#[inline]
+unsafe fn imgui_context_release() {
+    if let Some(ctx) = ARC_IMGUI_CONTEXT.as_mut_unchecked() {
+        drop(ctx.take());
     }
-
-    res
 }
+/// unlike [imgui_context_release] this doesn't clean up after prior context
+/// and allows it to be re-initialized again
+#[inline]
+unsafe fn imgui_context_reset() {
+    debug_assert!(matches!(ARC_IMGUI_CONTEXT.as_ref_unchecked(), None | Some(None)));
+    ptr::write(ARC_IMGUI_CONTEXT.get(), None);
+}
+unsafe fn imgui_context_adopt<'a>(ctx: &'_ ImCtx<'a>) -> Result<UiContextCell<'a>, Cow<'static, Str0>> {
+    let ptr = ctx.ptr().ok_or(cstr!(0"null context"))?;
+    let version = ctx
+        .version()
+        .or(NonZero::new(*exported_imgui_version()))
+        .ok_or(cstr!(0"version negotiation failed"))?;
+    let alloc = imgui_alloc_fns(ctx.user_malloc()).ok_or(cstr!(0"malloc missing"))?;
 
-#[cfg(feature = "extension-arcdps-extern-cleanup")]
-static ARC_IMGUI_BUFFER_OFFSET: SyncUnsafeCell<Option<usize>> = SyncUnsafeCell::new(None);
-pub unsafe fn arc_imgui_ui<'u>() -> Option<&'u Ui<'static>> {
-    if !super::loaded() {
-        return None
-    }
-    let ui_global = unsafe { *ARC_IMGUI_UI.get() };
-    if let Some(ui_global) = ui_global {
-        imgui_check_context()?;
-        return Some(&*(ui_global.get() as *const Ui<'static>))
-    }
-    match arc_imgui_context() {
-        Some(context) => Some(unsafe {
-            let ui = Box::new(Ui::from_ctx(context));
-            #[cfg(feature = "extension-arcdps-extern-cleanup")]
-            if (*ARC_IMGUI_BUFFER_OFFSET.get()).is_none() {
-                match find_buffer_offset::<Ui>(&*ui, context as *const imgui::Context as usize) {
-                    Ok(off) => {
-                        ptr::write(ARC_IMGUI_BUFFER_OFFSET.get(), Some(off));
-                    },
-                    Err(e) => {
-                        log::error!("could not find imgui buffer offset, this should not happen! {e}");
-                    },
-                }
-            }
-            let ui = Box::into_raw(ui);
-            ptr::write(ARC_IMGUI_UI.get() as *mut usize, ui as usize);
-            &*ui
+    UiContextCell::try_new_borrowed(version, ptr.cast(), alloc)
+        .ok_or(cstr!(0fmt:"unsupported version {version}").into())
+}
+fn imgui_alloc_fns(user_malloc: &UserMalloc) -> Option<UiAllocatorFns> {
+    match (user_malloc.malloc, user_malloc.free) {
+        (Some(malloc), Some(free)) => Some((Some(malloc), Some(free), user_malloc.userdata_ptr())),
+        (Some(malloc), None) => Some({
+            log::info!("was imgui free() meant to be missing?");
+            (
+                Some(malloc),
+                Some(<dyn UiAllocatorRaw>::nop_free),
+                user_malloc.userdata_ptr(),
+            )
         }),
-        None => None,
-    }
-}
-
-pub unsafe fn imgui_context_cleanup() {
-    let context = unsafe { mem::replace(&mut *ARC_IMGUI_CONTEXT.get(), None) };
-    let Some(context) = context else { return };
-
-    imgui_frame_cleanup();
-
-    let context = context.get() as *mut mem::ManuallyDrop<imgui::Context>;
-    // we do not want this to clean up the context shared by other addons!
-    let context = Box::from_raw(context);
-    drop(context);
-}
-pub unsafe fn imgui_frame_cleanup() {
-    let ui_global = unsafe { mem::replace(&mut *ARC_IMGUI_UI.get(), None) };
-    let ui = match ui_global {
-        Some(ui) => ui,
-        None => return,
-    };
-    ptr::write(ARC_IMGUI_UI.get(), None);
-    let ptr = ui.get() as *mut mem::ManuallyDrop<Ui<'static>>;
-    #[cfg(feature = "extension-arcdps-extern-cleanup")]
-    if let Some(offset) = unsafe { *ARC_IMGUI_BUFFER_OFFSET.get() } {
-        let buffer = (ptr as *mut usize).add(offset) as *mut Vec<u8>;
-        ptr::drop_in_place(buffer);
-    }
-    drop(Box::from_raw(ptr));
-}
-pub unsafe fn imgui_bind_context() -> Option<NonNull<imgui_sys::ImGuiContext>> {
-    let arc = arc_args()?;
-    let context_sys = arc.imgui_ctx.map(NonNull::cast::<imgui_sys::ImGuiContext>)?;
-    imgui_sys::igSetCurrentContext(context_sys.as_ptr());
-    imgui_sys::igSetAllocatorFunctions(arc.malloc, arc.free, InitArgs::ALLOC_USER_DATA);
-    Some(context_sys)
-}
-pub unsafe fn new_imgui_frame() {
-    #[cfg(todo = "unnecessary")]
-    imgui_frame_cleanup();
-}
-pub unsafe fn imgui_check_context() -> Option<()> {
-    let Some(target) = arc_imgui_context_ptr() else { return None };
-    let current = imgui_sys::igGetCurrentContext();
-    if target.as_ptr() != current {
-        imgui_bind_context();
-    }
-    Some(())
-}
-
-pub unsafe fn with_imgui<R, F: FnOnce(&'_ Ui<'_>) -> R>(f: F) -> Option<R> {
-    match arc_imgui_ui() {
-        Some(ui) => Some(f(ui)),
-        None => None,
+        (None, _) => rt::log::warn_ok(WinHeapAllocator::process_heap().context("imgui needs a heap"))
+            .map(|heap| heap.get_allocator_raw()),
     }
 }
 
@@ -225,20 +165,42 @@ unsafe extern "C" fn arc_cb_wnd_filter(wnd: HWND, msg: u32, w: WPARAM, l: LPARAM
 }
 
 unsafe extern "C" fn arc_cb_imgui(not_charsel_or_loading: c_bool32, hide_if_combat_or_ooc: c_bool32) {
-    new_imgui_frame();
+    match ARC_IMGUI_CONTEXT.as_mut_unchecked() {
+        dest @ &mut None =>
+            if let Some(arc) = arc_args() {
+                let ctx = match imgui_context_adopt(&arc.imgui) {
+                    Ok(ctx) => Some(ctx),
+                    Err(e) => {
+                        log::warn!("arcdps imgui setup failed: {e}");
+                        // Some(None) to avoid retrying setup every frame
+                        None
+                    },
+                };
+                *dest = Some(ctx);
+            },
+        #[cfg(todo)]
+        Some(Some(ctx)) => todo!("frame setup?"),
+        Some(..) => (),
+    }
 
-    with_imgui(|ui| exports::imgui(ui, not_charsel_or_loading.into(), hide_if_combat_or_ooc.value));
+    let frame = crate::render::machine::RenderMachine::ui_read_context().to_frame_storage();
+    with_imgui(|ui| {
+        let ui = ui.map(|ui| (ui, frame.as_ref()));
+        exports::imgui_present(ui, not_charsel_or_loading.into(), hide_if_combat_or_ooc.value)
+    });
 }
 
 unsafe extern "C" fn arc_cb_imgui_options_tab() {
-    with_imgui(|ui| exports::imgui_options_tab(ui));
+    let frame = crate::render::machine::RenderMachine::ui_read_context().to_frame_storage();
+    let _ = try_with_imgui(|ui| exports::imgui_draw_options_tab(ui, frame.as_ref()));
 }
 
 unsafe extern "C" fn arc_cb_imgui_options_windows(window_name: Option<CStrPtr>) -> c_bool32 {
-    with_imgui(|ui| {
+    let frame = crate::render::machine::RenderMachine::ui_read_context().to_frame_storage();
+    try_with_imgui(|ui| {
         let window = window_name.as_ref().map(|w| w.to_string_lossy());
         let window = window.as_ref().map(|w| &w[..]);
-        exports::imgui_options_windows(ui, window)
+        exports::imgui_draw_options_windows(ui, frame.as_ref(), window)
     })
     .map(Into::into)
     .unwrap_or(c_bool32::FALSE)
@@ -247,6 +209,9 @@ unsafe extern "C" fn arc_cb_imgui_options_windows(window_name: Option<CStrPtr>) 
 extern "C" fn arc_init() -> Option<NonNull<ExtensionExports<'static>>> {
     exports::pre_init();
 
+    unsafe {
+        imgui_context_reset();
+    }
     let res = panic::catch_unwind(|| Some(exports::init()));
     let exports = ExtensionExports {
         name: Some(ARC_NAME),
@@ -260,19 +225,19 @@ extern "C" fn arc_init() -> Option<NonNull<ExtensionExports<'static>>> {
         cb_ui_options_windows: Some(arc_cb_imgui_options_windows),
         header: match res {
             Ok(Some(Ok(()))) =>
-                ExtensionHeader::new_loaded(ARC_SIG, ExtensionExports::SIZE, ARC_IMGUI_VERSION),
+                ExtensionHeader::new_loaded(ARC_SIG, ExtensionExports::SIZE, arc_imgui_version()),
             Ok(Some(Err(e))) => {
                 // TODO
-                ::log::error!("Failed initialization: {e}");
+                log::error!("Failed initialization: {e}");
                 exports::disable_load();
-                let message = cstr!(&"init failed");
-                ExtensionHeader::new_failed(Some(message))
+                let message = c"init failed";
+                ExtensionHeader::new_failed(Some(message.into()))
             },
             Ok(None) => ExtensionHeader::new_failed(None),
             Err(e) => {
                 crate::log_any_error("arcdps init", &e);
                 exports::disable_load();
-                ExtensionHeader::new_failed(Some(cstr!(&"init panic")))
+                ExtensionHeader::new_failed(Some(c"init panic".into()))
             },
         },
     };
@@ -289,40 +254,29 @@ unsafe extern "C" fn arc_release() {
 
     //ptr::write(ARC_ARGS.get(), InitArgs::EMPTY);
     ptr::write(ARC_EXPORT.get(), ExtensionExports::EMPTY);
-    // XXX: leaking these buffers because the destructors call imgui APIs :<
-    ptr::write(ARC_IMGUI_CONTEXT.get(), None);
-    ptr::write(ARC_IMGUI_UI.get(), None);
+    imgui_context_release();
 }
 
-wrap_init_addr! {
+arc_export! {
+    #[naked]
     unsafe extern fn get_init_addr() => arc_get_init;
+    unsafe extern fn get_release_addr(reason) => arc_get_release_addr;
+    extern fn get_update_url() => exports::get_update_url;
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn get_release_addr() -> Option<ReleaseFn> {
+#[inline(always)]
+fn arc_get_release_addr(_reason: ExtensionLoadResult) -> Option<ReleaseFn> {
     Some(arc_release)
 }
 
-#[no_mangle]
-pub unsafe extern "C" fn get_update_url() -> Option<CStrPtr16<'static>> {
-    use windows::core::HSTRING;
-
-    let url = exports::get_update_url()?;
-    let url = HSTRING::from(url);
-    let ptr = url.as_ptr();
-    // memory leak, goodbye
-    mem::forget(url);
-    NonNull::new(ptr as *mut _).map(|p| CStrPtr16::new(p))
-}
-
 #[cfg(any(feature = "space", feature = "texture-loader"))]
-pub fn dxgi_swap_chain(
-) -> Option<windows::core::InterfaceRef<'static, windows::Win32::Graphics::Dxgi::IDXGISwapChain>> {
-    let sc = arc_args().and_then(|arc| match arc.d3d_version {
-        0..=9 => None,
-        _ => arc.id3d,
+pub fn dxgi_swap_chain() -> Option<&'static rt::SwapChain> {
+    let sc = arc_args().and_then(|arc| match arc.id3d.version() {
+        Some(ID3d::VERSION_DX9) => None,
+        Some(ID3d::VERSION_DX11) | Some(..) => arc.id3d.ptr_ref().as_ref(),
+        _ => None,
     });
-    sc.map(|sc| unsafe { windows::core::InterfaceRef::from_raw(sc) })
+    sc.map(|sc| unsafe { rt::SwapChain::from_d3d_raw_ref(sc) })
 }
 
 #[no_mangle]

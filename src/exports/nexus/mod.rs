@@ -8,16 +8,17 @@ use {
                 RuntimeResult,
             },
         },
-        game_language_id as lang_id,
         marker::format::MarkerType,
-        render::{machine::RenderMachine, RenderState},
+        render::{
+            i18n::{self, new_lang_id, with_i18n, LanguageIdentifier},
+            machine::RenderMachine,
+            RenderState,
+        },
         settings::{state::AddonHostName, IconStyle},
         unload,
-        with_i18n,
         TEXTURES,
     },
     anyhow::anyhow,
-    arcdps::Language,
     nexus::{
         addon::{AddonFlags, UpdateProvider},
         alert,
@@ -31,6 +32,7 @@ use {
         AddonApi,
     },
     std::{
+        borrow::Cow,
         collections::BTreeMap,
         ffi::{c_char, CStr, CString},
         path::{Path, PathBuf},
@@ -52,6 +54,7 @@ pub use self::r#extern::with_ui;
 #[cfg(feature = "extension-nexus-codegen")]
 pub(crate) mod cb;
 #[allow(dead_code)]
+#[cfg(feature = "extension-arcdps")]
 pub mod datalink;
 #[cfg(feature = "extension-nexus-extern")]
 pub(crate) mod r#extern;
@@ -150,7 +153,7 @@ extern "C-unwind" fn unsafe_render_pre() {
         };
         RenderMachine::turn_render_entry();
         if !render_ready {
-            exports::nexus::with_ui(RenderState::render_setup);
+            RenderState::render_setup();
         }
     }
 }
@@ -161,9 +164,10 @@ extern "C-unwind" fn unsafe_render() {
         if RenderState::is_host(AddonHostName::Nexus) != Some(true) {
             return
         }
-        exports::nexus::with_ui(|ui| {
+        let frame = RenderMachine::ui_read_context().to_frame_storage();
+        with_ui(|ui| {
             RenderMachine::turn_ui_entry(ui);
-            RenderState::render_ui(ui);
+            RenderState::render_ui(ui, frame.as_ref());
         });
     }
 }
@@ -171,8 +175,9 @@ extern "C-unwind" fn unsafe_options() {
     unsafe {
         let mut running = loaded() && RenderState::is_running();
         if running {
+            let frame = RenderMachine::ui_read_context().to_frame_storage();
             with_ui(|ui| {
-                running &= RenderState::render_options(ui, AddonHostName::Nexus);
+                running &= RenderState::render_options(ui, frame.as_ref(), AddonHostName::Nexus);
             });
         }
         if !running {
@@ -182,7 +187,8 @@ extern "C-unwind" fn unsafe_options() {
 }
 extern "C-unwind" fn unsafe_options_fallback() {
     unsafe {
-        with_ui(|ui| RenderState::render_options_fallback(ui, AddonHostName::Nexus));
+        let frame = RenderMachine::ui_read_context().to_frame_storage();
+        with_ui(|ui| RenderState::render_options_fallback(ui, frame.as_ref(), AddonHostName::Nexus));
     }
 }
 
@@ -254,27 +260,50 @@ pub fn addon_dir() -> RuntimeResult<Option<PathBuf>> {
         .map(Some)
 }
 
-pub fn detect_language() -> RuntimeResult<Option<String>> {
+pub fn detect_language() -> RuntimeResult<Option<LanguageIdentifier>> {
     if !available() {
         return Ok(None)
     }
 
     let index_to_check = "KB_CHANGELOG";
     let translated = translate(index_to_check).ok_or("Couldn't translate string")?;
-    let language = match &translated[..] {
-        "Registro de Alterações" => "pt-br",
-        "更新日志" => lang_id(Language::Chinese),
-        "Seznam změn" => "cz",
-        "Änderungsprotokoll" => lang_id(Language::German),
-        "Changelog" => lang_id(Language::English),
-        "Notas del parche" => lang_id(Language::Spanish),
-        "Journal des modifications" => lang_id(Language::French),
-        "Registro modifiche" => "it",
-        "Lista zmian" => "pl",
-        "Список изменений" => "ru",
-        _ => lang_id(Language::English),
-    };
-    Ok(Some(language.into()))
+    Ok(Some(match &translated[..] {
+        "Registro de Alterações" => LANG_PT,
+        "更新日志" => i18n::LANG_ZH,
+        "Seznam změn" => LANG_CZ,
+        "Änderungsprotokoll" => i18n::LANG_DE,
+        "Changelog" => i18n::LANG_EN,
+        "Notas del parche" => i18n::LANG_ES,
+        "Journal des modifications" => i18n::LANG_FR,
+        "Registro modifiche" => LANG_IT,
+        "Lista zmian" => LANG_PL,
+        "Список изменений" => LANG_RU,
+        msg => {
+            log::info!("unrecognized language: {msg:?}");
+            return Ok(None)
+        },
+    }))
+}
+const LANG_CZ: LanguageIdentifier = new_lang_id!(cz-*-);
+const LANG_IT: LanguageIdentifier = new_lang_id!(it-*-);
+const LANG_PL: LanguageIdentifier = new_lang_id!(pl-*-);
+const LANG_PT: LanguageIdentifier = new_lang_id!(pt-BR-);
+const LANG_RU: LanguageIdentifier = new_lang_id!(ru-*-);
+/// locales offered by nexus
+/// <https://github.com/RaidcoreGG/Nexus-Translations>
+pub static LANGUAGES_EXTRA: [LanguageIdentifier; 5] = [LANG_CZ, LANG_IT, LANG_PL, LANG_PT, LANG_RU];
+/// nexus uses region instead of lang code here for some reason, so adjust..
+const ZH_CN: i18n::unic_subtags::Region = new_lang_id!(Region: "CN");
+/// swappy [ZH_CN]
+const CN_ZH: i18n::unic_subtags::Language = new_lang_id!(Language: "cn");
+/// throw out the extra tags like region and substitute in [CN_ZH]
+fn nexus_language_id(lang: &i18n::LanguageIdentifier) -> Cow<'_, str> {
+    match *lang {
+        i18n::LanguageIdentifier { region: Some(self::ZH_CN), .. } => Cow::Borrowed(CN_ZH.as_str()),
+        // except for this one for some reason..?
+        self::LANG_PT => i18n::language_to_string(lang),
+        _ => Cow::Borrowed(lang.language.as_str()),
+    }
 }
 
 pub fn mumble_link_ptr() -> RuntimeResult<Option<NonNull<MumbleLink>>> {
@@ -348,7 +377,7 @@ pub async fn press_marker_bind(
     }))
 }
 
-pub fn send_alert(_ui: &rt::imgui::Ui, message: &str) -> RuntimeResult<Option<()>> {
+pub fn send_alert(message: &str) -> RuntimeResult<Option<()>> {
     if !available() {
         return Ok(None)
     }
@@ -477,7 +506,8 @@ fn nexus_texture_ok(texture: Option<&Texture>) -> anyhow::Result<Texture> {
 }
 
 static IMGUI_TEXTURE_CALLBACK: RawTextureReceiveCallback = nexus::texture_receive!(|id, texture| {
-    TEXTURES.report_load(id, nexus_texture_ok(texture));
+    let texture = nexus_texture_ok(texture).map(rt::textures::NexusTexture::from_nexus);
+    TEXTURES.report_load(id, texture);
 });
 
 pub fn texture_schedule_path(key: &str, path: &Path) -> RuntimeResult<Option<()>> {
@@ -524,16 +554,17 @@ pub fn register_keybind<I: Into<CString>>(control: TaimiControls, id: I, default
 
     let id = id.into();
     if let Ok(id) = id.to_str() {
-        let language = crate::LANGUAGE_LOADER.current_language().language;
+        let language = i18n::current_language();
+        let language = nexus_language_id(&language);
         if let Some(timer_trigger) = id.strip_prefix("timer-key-trigger-") {
             // ew special cased...
             set_translation(
                 id,
-                language.as_str(),
-                fl!("timer-key-trigger", id = timer_trigger),
+                &language,
+                fl!("timer-key-trigger", id = timer_trigger).into_string(),
             )
         } else {
-            with_i18n(id, |msg| set_translation(id, language.as_str(), msg));
+            with_i18n(id, |msg| set_translation(id, &language, msg));
         }
     }
     let id = if let Ok(mut keybinds) = KEYBIND_IDS.write() {
@@ -609,21 +640,38 @@ pub fn quick_access_add(icon: TaimiControls, state_on: TaimiControls, style: Ico
     });
 
     if IconStyle::control_has_menu(icon) {
+        extern "C-unwind" fn unsafe_render_popup_timers() {
+            unsafe {
+                let _ = with_ui(|ui| RenderState::render_context_popup(ui, TaimiControls::WINDOW_TIMERS));
+            }
+        }
+        extern "C-unwind" fn unsafe_render_popup_markers() {
+            unsafe {
+                let _ = with_ui(|ui| RenderState::render_context_popup(ui, TaimiControls::WINDOW_MARKERS));
+            }
+        }
+        extern "C-unwind" fn unsafe_render_popup_pathing() {
+            unsafe {
+                let _ = with_ui(|ui| RenderState::render_context_popup(ui, TaimiControls::WINDOW_PATHING));
+            }
+        }
+        extern "C-unwind" fn unsafe_render_popup_primary() {
+            unsafe {
+                let _ = with_ui(|ui| RenderState::render_context_popup(ui, TaimiControls::WINDOW_PRIMARY));
+            }
+        }
         let menu_id = IconStyle::control_menu_id(identifier);
         let callback = match icon {
             #[cfg(feature = "timers")]
-            TaimiControls::WINDOW_TIMERS =>
-                nexus::render!(|ui| RenderState::render_context_popup(ui, TaimiControls::WINDOW_TIMERS)),
+            TaimiControls::WINDOW_TIMERS => unsafe_render_popup_timers,
             #[cfg(feature = "markers")]
-            TaimiControls::WINDOW_MARKERS =>
-                nexus::render!(|ui| RenderState::render_context_popup(ui, TaimiControls::WINDOW_MARKERS)),
+            TaimiControls::WINDOW_MARKERS => unsafe_render_popup_markers,
             #[cfg(feature = "space")]
             TaimiControls::WINDOW_PATHING
             | TaimiControls::PATHING_SPACE
             | TaimiControls::PATHING_MINIMAP
-            | TaimiControls::PATHING_MAP =>
-                nexus::render!(|ui| RenderState::render_context_popup(ui, TaimiControls::WINDOW_PATHING)),
-            _ => nexus::render!(|ui| RenderState::render_context_popup(ui, TaimiControls::WINDOW_PRIMARY)),
+            | TaimiControls::PATHING_MAP => unsafe_render_popup_pathing,
+            _ => unsafe_render_popup_primary,
         };
         add_quick_access_context_menu(menu_id, Some(button_id), callback).leak()
     }

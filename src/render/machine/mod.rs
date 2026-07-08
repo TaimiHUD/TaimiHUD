@@ -1,7 +1,9 @@
 #[cfg(any(feature = "markers", feature = "space"))]
+pub use arcloader_mumblelink::identity::NexusIdentityUpdate as MumbleIdentityUpdate;
+#[cfg(any(feature = "markers", feature = "space"))]
 use {
     crate::exports::runtime::bindings::{ControlsReceiver, CONTROLS},
-    arcloader_mumblelink::identity::MumbleIdentity,
+    arcloader_mumblelink::identity::{MumbleIdentityTracker, NexusIdentityShare},
     std::borrow::Cow,
     taimi_meta::{
         coords::SignObtainer,
@@ -12,12 +14,7 @@ use {
 #[cfg(feature = "space")]
 use {crate::space::engine::Engine, std::ops::Range};
 use {
-    crate::{
-        controller::Controller,
-        exports::runtime::{self as rt, imgui},
-        render::RenderState,
-        settings::Settings,
-    },
+    crate::{controller::Controller, exports::runtime as rt, render::RenderState, settings::Settings},
     anyhow::Context,
     core::num::NonZero,
     glamour::{Angle, Point3, Size2, Vector2, Vector3},
@@ -33,8 +30,6 @@ use {
     },
 };
 
-#[cfg(any(feature = "markers", feature = "space"))]
-pub use self::mumblelink::MumbleIdentityUpdate;
 #[cfg(feature = "extension-nexus")]
 pub use self::rtapi::RenderStateRtapi;
 pub use self::{
@@ -51,10 +46,13 @@ mod rtapi;
 #[cfg(feature = "space")]
 mod space;
 mod tasks;
+mod ui;
 
 pub struct RenderMachine {
     #[cfg(any(feature = "markers", feature = "space"))]
-    pub identity: MumbleIdentity,
+    pub identity: NexusIdentityShare,
+    #[cfg(any(feature = "markers", feature = "space"))]
+    pub identity_changes: MumbleIdentityTracker,
     pub identity_users: RenderUsers,
     #[cfg(any(feature = "markers", feature = "space"))]
     pub map: UiMap,
@@ -109,7 +107,9 @@ impl RenderMachine {
     pub fn new() -> Self {
         Self {
             #[cfg(any(feature = "markers", feature = "space"))]
-            identity: MumbleIdentity::new(),
+            identity: NexusIdentityShare::EMPTY,
+            #[cfg(any(feature = "markers", feature = "space"))]
+            identity_changes: MumbleIdentityTracker::new(),
             identity_users: Self::USERS,
             #[cfg(any(feature = "markers", feature = "space"))]
             map: {
@@ -271,7 +271,10 @@ impl RenderMachine {
         }
     }
 
-    pub fn turn_ui_entry(ui: &imgui::Ui) {
+    pub fn turn_ui_entry<'ui, U>(ui: &mut U)
+    where
+        U: ?Sized + super::element::im::ImDrawWindow<'ui>,
+    {
         if !RenderState::is_running() {
             return
         }
@@ -396,10 +399,13 @@ impl RenderMachine {
         }
     }
 
-    pub fn turn_ui(&mut self, ui: &imgui::Ui) {
+    pub fn turn_ui<'ui, U>(&mut self, ui: &mut U)
+    where
+        U: ?Sized + super::element::im::ImDrawWindow<'ui>,
+    {
         let prev_display_size = *self.display_size_ref();
         let display_size = self.display_size_mut();
-        *display_size = Size2::from_array(ui.io().display_size);
+        *display_size = ui.im_io_display_size().0.cast();
         if !rt::vec_eq(*display_size, prev_display_size) {
             self.act_display_size();
         }

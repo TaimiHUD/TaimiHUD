@@ -54,6 +54,10 @@ impl RenderMachine {
         let rtapi = rt::rtapi()
             .map_err(anyhow::Error::msg)
             .context("RTAPI unavailable");
+        if let Ok(Some(rtapi)) = &rtapi {
+            let game_lang = unsafe { *&raw const (*rtapi.as_ptr()).language };
+            rt::notify_game_language(game_lang as _);
+        }
         match rtapi {
             #[cfg(not(feature = "extension-nexus"))]
             Err(_) => Ok(None),

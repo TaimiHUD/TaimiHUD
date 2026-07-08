@@ -6,6 +6,15 @@
       flake = false;
     };
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    libimgui = {
+      url = "git+https://codeberg.org/TaimiHUD/libimgui.git?ref=refs/heads/symver";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        fenix.follows = "fenix";
+        flake-utils.follows = "flake-utils";
+        flake-compat.follows = "flake-compat";
+      };
+    };
     fenix = {
       url = "github:nix-community/fenix";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -35,6 +44,7 @@
 
   outputs = {
     self,
+    libimgui,
     fenix,
     flake-utils,
     crane,
@@ -74,6 +84,7 @@
             dirty = false;
             platform = null;
           };
+          inherit (legacyPackages) arcdps-imgui_18000 arcdps-imgui_19270;
         };
         taimiHUD = packages.taimiHUD-develop.override {
           inherit (packages.taimiHUD-develop) cargoArtifacts;
@@ -142,6 +153,8 @@
         craneLib = (crane.mkLib pkgs).overrideToolchain (_p: legacyPackages.fenixToolchain);
         craneLibBuild = (crane.mkLib pkgs.buildPackages).overrideToolchain (_p: legacyPackages.fenixToolchainBuild);
         craneLibShell = (crane.mkLib pkgs).overrideToolchain (_p: legacyPackages.fenixToolchainShell);
+
+        inherit (libimgui.packages.${system}) arcdps-imgui_18000 arcdps-imgui_19270;
 
         git-hooks = self.lib.git-hooks.configForSystem system;
         treefmt = self.lib.treefmt.configForSystem system;

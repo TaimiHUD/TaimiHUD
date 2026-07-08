@@ -2,6 +2,7 @@
 use std::{fs, path::PathBuf};
 
 use {
+    core::fmt::Write,
     semver::{BuildMetadata, Prerelease, Version},
     std::env,
 };
@@ -10,12 +11,18 @@ const FEATURE_BUILT: &'static str = "CARGO_FEATURE_BUILT_INFO";
 const FEATURE_NEXUS_CODEGEN: &'static str = "CARGO_FEATURE_EXTENSION_NEXUS_CODEGEN";
 const FEATURE_NEXUS_EXTERN: &'static str = "CARGO_FEATURE_EXTENSION_NEXUS_EXTERN";
 const FEATURE_NEXUS: &'static str = "CARGO_FEATURE_EXTENSION_NEXUS";
+const FEATURE_ARCDPS: &'static str = "CARGO_FEATURE_EXTENSION_ARCDPS";
+const FEATURE_ARCDPS_IMGUI: &'static str = "CARGO_FEATURE_EXTENSION_ARCDPS_IMGUI";
+const FEATURE_NEXUS_IMGUI: &'static str = "CARGO_FEATURE_EXTENSION_NEXUS_IMGUI";
 const FEATURE_UPDATES: &'static str = "CARGO_FEATURE_UPDATES";
 fn main() {
     println!("cargo::rerun-if-env-changed={FEATURE_BUILT}");
     println!("cargo::rerun-if-env-changed={FEATURE_NEXUS_CODEGEN}");
     println!("cargo::rerun-if-env-changed={FEATURE_NEXUS_EXTERN}");
+    println!("cargo::rerun-if-env-changed={FEATURE_NEXUS_IMGUI}");
     println!("cargo::rerun-if-env-changed={FEATURE_NEXUS}");
+    println!("cargo::rerun-if-env-changed={FEATURE_ARCDPS}");
+    println!("cargo::rerun-if-env-changed={FEATURE_ARCDPS_IMGUI}");
 
     #[cfg(feature = "built-info")]
     write_built_info();
@@ -59,6 +66,37 @@ fn apply_built_info() {
     println!("cargo::rerun-if-env-changed=CARGO_CRATE_NAME");
     #[cfg(feature = "built-info")]
     println!("cargo::rerun-if-env-changed=CARGO_MANIFEST_DIR");
+
+    let (host_arc, host_nexus) = (
+        env::var_os(FEATURE_ARCDPS).is_some(),
+        env::var_os(FEATURE_NEXUS).is_some(),
+    );
+    let (imgui_192, imgui_180) = (
+        host_arc && env::var_os(FEATURE_ARCDPS_IMGUI).is_some(),
+        host_nexus && env::var_os(FEATURE_NEXUS_IMGUI).is_some(),
+    );
+    if host_arc || host_nexus {
+        println!("cargo::rustc-cfg=taimi_has={:?}", "imgui");
+        // TODO: could maybe source these from imgui-sys crate metadata but nahh
+    }
+    let imgui_versions_arc = IntoIterator::into_iter(["192", "19270"]);
+    let imgui_versions_nexus = IntoIterator::into_iter(["180", "18000"]);
+    let imgui_versions_all = imgui_versions_arc.clone().chain(imgui_versions_nexus.clone());
+    let mut imgui_cfg_values = String::new();
+    for imgui_ver in imgui_versions_all {
+        if !imgui_cfg_values.is_empty() {
+            imgui_cfg_values.push_str(", ");
+        }
+        let _ = write!(&mut imgui_cfg_values, "{imgui_ver:?}");
+    }
+    println!("cargo::rustc-check-cfg=cfg(taimi_imgui, values({imgui_cfg_values}))");
+    let imgui_versions = imgui_192
+        .then_some(imgui_versions_arc)
+        .into_iter()
+        .chain(imgui_180.then_some(imgui_versions_nexus));
+    for imgui_ver in imgui_versions.flatten() {
+        println!("cargo::rustc-cfg=taimi_imgui={:?}", imgui_ver);
+    }
 
     let ci = env::var_os(&format!("{built_env_prefix}{BUILT_ATTR_CI}"));
     let commit = env::var(&format!("{built_env_prefix}{BUILT_ATTR_REF}"));

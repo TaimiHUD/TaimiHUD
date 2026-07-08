@@ -115,13 +115,44 @@
         "type": "github"
       }
     },
+    "libimgui": {
+      "inputs": {
+        "fenix": [
+          "fenix"
+        ],
+        "flake-compat": [
+          "flake-compat"
+        ],
+        "flake-utils": [
+          "flake-utils"
+        ],
+        "nixpkgs": [
+          "nixpkgs"
+        ],
+        "rust": "rust"
+      },
+      "locked": {
+        "lastModified": 1779040518,
+        "narHash": "sha256-NkkMMu4OjXlqNPqypEsn/CNdBmS1OCZ6s7ZoLHa4qgs=",
+        "ref": "refs/heads/symver",
+        "rev": "8bab608feb747af55fab08a989c04b9dcfbdf8f6",
+        "revCount": 19,
+        "type": "git",
+        "url": "https://codeberg.org/TaimiHUD/libimgui.git"
+      },
+      "original": {
+        "ref": "refs/heads/symver",
+        "type": "git",
+        "url": "https://codeberg.org/TaimiHUD/libimgui.git"
+      }
+    },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1742237028,
-        "narHash": "sha256-xlpHmgBxUnvHo8FNnju0sgnEyasb4gC607b+keqjmX8=",
+        "lastModified": 1780203844,
+        "narHash": "sha256-K5sT4jTpGs15ADhviMKNBH38REpPf5Q6mM1+N6cArVE=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "9bc8a90931262245919a26f995c1f24c6c70d3fe",
+        "rev": "b51242d7d43689db2f3be91bd05d5b24fbb469c4",
         "type": "github"
       },
       "original": {
@@ -138,9 +169,31 @@
         "flake-compat": "flake-compat",
         "flake-utils": "flake-utils",
         "git-hooks": "git-hooks",
+        "libimgui": "libimgui",
         "nixpkgs": "nixpkgs",
         "rust-overlay": "rust-overlay",
         "treefmt-nix": "treefmt-nix"
+      }
+    },
+    "rust": {
+      "inputs": {
+        "nixpkgs": [
+          "libimgui",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1777607789,
+        "narHash": "sha256-FC0ulJIu6ZHn07+XLYz7uqSC64ph5OOhoA9UNpnFN8g=",
+        "owner": "arcnmx",
+        "repo": "nixexprs-rust",
+        "rev": "f3d808e7f9d2fb23588349f1acc3537f20f718a0",
+        "type": "github"
+      },
+      "original": {
+        "owner": "arcnmx",
+        "repo": "nixexprs-rust",
+        "type": "github"
       }
     },
     "rust-analyzer-src": {

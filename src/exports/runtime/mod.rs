@@ -1,9 +1,9 @@
 use {
     crate::{
         exports,
-        load_language,
         marker::format::MarkerType,
         notify_quit,
+        render::i18n::{self, LanguageIdentifier},
         settings::state::BootstrapState,
         Interruption,
     },
@@ -48,18 +48,14 @@ pub mod mouse;
 pub mod statistics;
 pub mod textures;
 pub mod update;
-#[cfg(feature = "extension-arcdps")]
-pub use arcloader_mumblelink::gw2_mumble::{LinkedMem as MumbleLink, MumblePtr, UiState};
-#[cfg(not(feature = "extension-arcdps"))]
-pub use nexus::data_link::mumble::{MumbleLink, MumblePtr, UiState};
+// TODO: decide and use consistent UIState casing
 #[cfg(feature = "extension-nexus")]
 pub use nexus::{data_link::NexusLink, rtapi::RealTimeApi};
+#[cfg(any(feature = "markers", feature = "space"))]
+pub use taimi_meta::ui::mumblelink::{MumbleLink, MumblePtr, UIState as UiState};
 pub use {
     self::{alert::send_alert, mouse::MousePosition, statistics::Counter, textures::TextureLoader},
-    arcdps::Language as GameLanguage,
-    nexus::imgui,
     taimi_meta::coords::vec_eq,
-    unic_langid_impl::subtags::Language,
 };
 #[cfg(not(feature = "extension-nexus"))]
 pub type NexusLink = ();
@@ -229,61 +225,73 @@ impl ops::Deref for AddonDir {
     }
 }
 
-pub fn detect_language() -> RuntimeResult<Cow<'static, str>> {
+pub fn detect_language() -> RuntimeResult<LanguageIdentifier> {
     #[cfg(feature = "extension-nexus")]
     if let Some(lang) = exports::nexus::detect_language()? {
-        return Ok(lang.into())
+        return Ok(lang)
     }
 
     #[cfg(feature = "extension-arcdps")]
     if let Some(lang) = exports::arcdps::detect_language()? {
-        return Ok(lang.into())
+        return Ok(lang)
     }
 
-    game_language()
-        .map(crate::game_language_id)
-        .map(Cow::Borrowed)
-        .ok_or(RT_UNAVAILABLE)
+    game_language().transpose().unwrap_or(Err(RT_UNAVAILABLE))
 }
 
-pub fn reload_language() -> RuntimeResult {
-    let saved = BootstrapState::read_with(|state: &BootstrapState| {
-        state.language.as_ref().and_then(|l| l.parse::<Language>().ok())
-    });
-    let language;
-    let language = match &saved {
-        Some(l) => l.as_str(),
-        _ => {
-            language = detect_language()?;
-            info!("Detected language {language} for internationalization");
-            &language
-        },
-    };
-
-    load_language(language)
+pub fn auto_reload_language() -> anyhow::Result<()> {
+    if language_explicitly_set() {
+        return Ok(())
+    }
+    let language = detect_language().map_err(anyhow::Error::msg)?;
+    i18n::load_language(&language)
 }
 
 static GAME_LANGUAGE: AtomicI32 = AtomicI32::new(i32::MIN);
-pub fn game_language() -> Option<GameLanguage> {
-    let id = GAME_LANGUAGE.load(Ordering::Relaxed);
-    GameLanguage::try_from(id).ok()
+pub fn game_language() -> RuntimeResult<Option<LanguageIdentifier>> {
+    parse_game_language(GAME_LANGUAGE.load(Ordering::Relaxed))
 }
 
-pub fn notify_game_language(language: GameLanguage) {
-    let id = language.into();
+pub fn language_explicitly_set() -> bool {
+    BootstrapState::read_with(|state| state.language.is_some())
+}
+/// `inline(never)` because arcdps-rs uses an enum which will break when derived from an arbitrary c_int :<
+/// maybe a black_box or fn cast would be better?
+#[inline(never)]
+pub fn notify_game_language(id: i32) {
     let prev = GAME_LANGUAGE.swap(id, Ordering::Relaxed);
     if prev != id {
-        let res = if BootstrapState::read_with(|state| state.language.is_none()) {
-            reload_language()
-                .map_err(anyhow::Error::msg)
-                .with_context(|| format!("Failed to reload language"))
-        } else {
-            Ok(())
+        let lang = match parse_game_language(id) {
+            Ok(Some(lang)) => lang,
+            Ok(None) => return,
+            Err(e) => {
+                ::log::warn!("{e}: {}", id);
+                return
+            },
         };
+        if language_explicitly_set() {
+            return
+        }
+        let res = i18n::load_language(&lang)
+            .map_err(anyhow::Error::msg)
+            .with_context(|| format!("Failed to reload language"));
         if let Err(e) = res {
             ::log::warn!("{e:#}");
         }
     }
+}
+/// IDs used by both RTAPI and arcdps_unofficial_extras
+fn parse_game_language(id: i32) -> RuntimeResult<Option<LanguageIdentifier>> {
+    Ok(Some(match id {
+        0 => i18n::LANG_EN,
+        1 => i18n::LANG_KO,
+        2 => i18n::LANG_FR,
+        3 => i18n::LANG_DE,
+        4 => i18n::LANG_ES,
+        5 => i18n::LANG_ZH,
+        i32::MIN => return Ok(None),
+        _ => return Err("unrecognized game language"),
+    }))
 }
 
 static MUMBLE_LINK_PTR: AtomicPtr<MumbleLink> = AtomicPtr::new(ptr::dangling_mut());
@@ -462,6 +470,7 @@ pub async fn invoke_marker_bind(
 
 /// TODO: this needs to be very careful if called from any render thread...
 pub unsafe fn notify_render_reinit() {
+    #[cfg(todo)]
     #[cfg(feature = "extension-arcdps-extern")]
     exports::arcdps::r#extern::imgui_context_cleanup();
 }

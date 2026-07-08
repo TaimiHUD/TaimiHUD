@@ -4,7 +4,7 @@
   system ? builtins.currentSystem,
   callPackage ? legacyPackages.callPackage or legacyPackages.pkgs.callPackage,
 }: let
-  inherit (legacyPackages) git-hooks formatter;
+  inherit (legacyPackages) git-hooks formatter arcdps-imgui_18000 arcdps-imgui_19270;
   taimiShell = {
     mkShell,
     lib,
@@ -25,6 +25,8 @@
       buildInputs =
         [
           stdenv.cc
+          arcdps-imgui_18000.cimgui-static
+          arcdps-imgui_19270.cimgui-static
         ]
         ++ lib.optional stdenv.hostPlatform.isWindows windows.pthreads;
 
@@ -39,6 +41,7 @@
         git-hooks.package
         git-hooks.installationScriptBin
         formatter
+        pkg-config
       ];
 
       shellHook = ''

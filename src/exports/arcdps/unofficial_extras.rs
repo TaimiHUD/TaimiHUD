@@ -128,9 +128,9 @@ fn extras_callbacks() -> Option<ExtrasCallbackFns> {
     }
 }
 
-pub(crate) type SquadUpdateFn = unsafe extern "C-unwind" fn(*const extras::user::UserInfo, u64);
-pub(crate) type LanguageChangedFn = unsafe extern "C-unwind" fn(arcdps::Language);
-pub(crate) type KeybindChangedFn = unsafe extern "C-unwind" fn(extras::keybinds::RawKeybindChange);
+pub(crate) type SquadUpdateFn = unsafe extern "C" fn(*const extras::user::UserInfo, u64);
+pub(crate) type LanguageChangedFn = unsafe extern "C" fn(arcdps::Language);
+pub(crate) type KeybindChangedFn = unsafe extern "C" fn(extras::keybinds::RawKeybindChange);
 pub(crate) type ExtrasCallbackFns = (
     Option<SquadUpdateFn>,
     Option<LanguageChangedFn>,
@@ -138,17 +138,17 @@ pub(crate) type ExtrasCallbackFns = (
 );
 
 #[inline(never)]
-pub(crate) unsafe extern "C-unwind" fn cb_squad_update_raw(users: *const extras::user::UserInfo, len: u64) {
+pub(crate) unsafe extern "C" fn cb_squad_update_raw(users: *const extras::user::UserInfo, len: u64) {
     exports::extras_squad_update(extras::user::to_user_info_iter(users, len))
 }
 
 #[inline(never)]
-pub(crate) unsafe extern "C-unwind" fn cb_language_changed_raw(language: arcdps::Language) {
-    rt::notify_game_language(language)
+pub(crate) unsafe extern "C" fn cb_language_changed_raw(language: arcdps::Language) {
+    rt::notify_game_language(language.into())
 }
 
 #[inline(never)]
-pub(crate) unsafe extern "C-unwind" fn cb_keybind_changed_raw(keybind: extras::keybinds::RawKeybindChange) {
+pub(crate) unsafe extern "C" fn cb_keybind_changed_raw(keybind: extras::keybinds::RawKeybindChange) {
     rt::bindings::process_key_bound(keybind_change_from_raw(&keybind));
 }
 

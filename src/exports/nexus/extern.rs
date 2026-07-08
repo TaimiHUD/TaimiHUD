@@ -4,11 +4,7 @@ use {
         built_info,
         exports::{
             nexus as exports,
-            runtime::{
-                self as rt,
-                imgui::{self, sys as imgui_sys},
-                log::DeferredLogger,
-            },
+            runtime::{self as rt, log::DeferredLogger},
             update_url_of,
             ADDON_TITLE_C,
         },
@@ -29,6 +25,7 @@ use {
     },
     sync_unsafe_cell::SyncUnsafeCell,
     taimi_hoard::str_opt_ref,
+    taimi_ui::im::im180::{sys as imgui_sys, Ui},
 };
 
 /// nexus copies the def, so lifetime isn't actually 'static, it just outlives
@@ -238,6 +235,8 @@ unsafe extern "C-unwind" fn nexus_load(api: *const AddonApi) {
             let prev_api = ptr::read_volatile(nexus_api);
             #[cfg(feature = "extension-nexus-extern-todo")]
             let prev_init = *NEXUS_API_INIT.get();
+            #[cfg(not(feature = "extension-nexus-extern-todo"))]
+            let prev_init = false;
             let api = match (api, prev_api) {
                 (Some(api), _) => {
                     ptr::write_volatile(nexus_api, Some(api));
@@ -363,23 +362,37 @@ fn curious(op: &str) {
     log::debug!(logger: DeferredLogger::BEST_EFFORT, "redundant {op}, curious");
 }
 
-unsafe fn imgui_bind_context() -> Option<NonNull<imgui_sys::ImGuiContext>> {
+unsafe fn imgui_bind_context() -> Option<NonNull<()>> {
     let aapi = addon_api()?;
-    let ctx = ptr::NonNull::new(aapi.imgui_context)?;
+    let ctx = ptr::NonNull::new(aapi.imgui_context)?.cast::<imgui_sys::ImGuiContext>();
     if imgui_sys::igGetCurrentContext() != ctx.as_ptr() as *mut _ {
         imgui_sys::igSetCurrentContext(ctx.as_ptr());
         imgui_sys::igSetAllocatorFunctions(aapi.imgui_malloc, aapi.imgui_free, ptr::null_mut());
     }
 
-    Some(ctx)
+    Some(ctx.cast())
 }
 
-pub(super) unsafe fn new_imgui_frame() {}
 #[cfg(feature = "extension-nexus-extern-todo")]
-pub unsafe fn imgui_ui<'a, 'u>() -> Option<&'a imgui::Ui<'u>> {
+pub unsafe fn imgui_ui<'a, 'u>() -> Option<&'a Ui<'u>> {
     imgui_bind_context()?;
-    Some(nexus::ui())
+    Some(match () {
+        #[cfg(todo = "unnecessary")]
+        _ => nexus::ui(),
+        _ => Ui::materialize().godmode(),
+    })
 }
-pub unsafe fn with_ui<'u, R, F: FnOnce(&imgui::Ui<'u>) -> R>(f: F) -> Option<R> {
+#[inline(always)]
+pub unsafe fn with_ui180<'u, R, F: FnOnce(&Ui<'u>) -> R>(f: F) -> Option<R> {
     imgui_ui().map(f)
+}
+#[cfg(not(any(taimi_imgui = "192", feature = "extension-arcdps-imgui")))]
+pub unsafe fn with_ui<'u, R, F: FnOnce(&mut &Ui<'u>) -> R>(f: F) -> Option<R> {
+    with_ui180(|mut ui| f(&mut ui))
+}
+#[cfg(any(taimi_imgui = "192", feature = "extension-arcdps-imgui"))]
+pub unsafe fn with_ui<'u, R, F: FnOnce(&mut dyn crate::render::element::im::ImDrawWindow<'u>) -> R>(
+    f: F,
+) -> Option<R> {
+    with_ui180(|mut ui| f(&mut ui))
 }

@@ -2,14 +2,11 @@ use {
     super::Alignment,
     crate::{
         controller::timers::{TimersController, TimersEvent},
-        fl,
-        render::RenderState,
+        render::{element::prelude::*, RenderState},
         settings::{Settings, SourceKind, TimerSettings},
         timer::TimerFile,
     },
-    glam::Vec2,
     indexmap::IndexMap,
-    nexus::imgui::{ChildWindow, Condition, Selectable, TreeNode, TreeNodeFlags, Ui, WindowFlags},
     std::{
         collections::{HashMap, HashSet},
         sync::Arc,
@@ -36,7 +33,10 @@ impl TimerTabState {
         }
     }
 
-    pub fn draw(&mut self, ui: &Ui, state_errors: &mut HashMap<String, anyhow::Error>) {
+    pub fn draw<'ui, U>(&mut self, ui: &mut U, state_errors: &mut HashMap<String, anyhow::Error>)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         ui.columns(2, "timers_tab_start", true);
         self.draw_sidebar(ui, state_errors);
         ui.next_column();
@@ -44,12 +44,21 @@ impl TimerTabState {
         ui.columns(1, "timers_tab_end", false)
     }
 
-    fn draw_sidebar(&mut self, ui: &Ui, state_errors: &mut HashMap<String, anyhow::Error>) {
+    fn draw_sidebar<'ui, U>(&mut self, ui: &mut U, state_errors: &mut HashMap<String, anyhow::Error>)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         self.draw_sidebar_header(ui, state_errors);
         self.draw_sidebar_child(ui);
     }
 
-    fn draw_sidebar_header(&mut self, ui: &Ui, _state_errors: &mut HashMap<String, anyhow::Error>) {
+    fn draw_sidebar_header<'ui, U>(
+        &mut self,
+        ui: &mut U,
+        _state_errors: &mut HashMap<String, anyhow::Error>,
+    ) where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let timers_dir = SourceKind::Timers.get_user_dir();
         RenderState::draw_open_path_button(ui, fl!("open-button", kind = "ad-hoc folder"), &timers_dir);
         ui.same_line();
@@ -73,7 +82,7 @@ impl TimerTabState {
             timer_window_state.reset_phases();
         }*/
         if self.category_status.len() != self.categories.keys().len() {
-            if ui.button(&fl!("expand-all")) {
+            if ui.button(fl!("expand-all")) {
                 self.category_status.extend(self.categories.keys().cloned());
             }
         }
@@ -81,35 +90,39 @@ impl TimerTabState {
             ui.same_line();
         }
         if !self.category_status.is_empty() {
-            if ui.button(&fl!("collapse-all")) {
+            if ui.button(fl!("collapse-all")) {
                 self.category_status.clear();
             }
         }
         //InputText::new(ui, "Search", &mut self.search_string);
     }
 
-    fn draw_sidebar_child(&mut self, ui: &Ui) {
-        let child_window_flags = WindowFlags::HORIZONTAL_SCROLLBAR;
-        ChildWindow::new("timer_sidebar")
-            .flags(child_window_flags)
-            .size([0.0, 0.0])
-            .build(ui, || {
-                let header_flags = TreeNodeFlags::FRAMED;
-                // interface design is my passion
-                let height = Vec2::from_array(ui.calc_text_size("U\nI"));
-                let height = height.y;
-                for idx in 0..self.categories.len() {
-                    self.draw_category(ui, header_flags, height, idx);
-                }
-            });
+    fn draw_sidebar_child<'ui, U>(&mut self, ui: &mut U)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        let Some(_container) = ui.begin_sidebar(c"timer_sidebar") else { return };
+        // interface design is my passion
+        let ImSize2 { height, .. } = ui.calc_text_size("U\nI");
+        for idx in 0..self.categories.len() {
+            self.draw_category(ui, height, idx);
+        }
     }
 
-    fn draw_category(&mut self, ui: &Ui, header_flags: TreeNodeFlags, height: f32, idx: usize) {
+    fn draw_category<'ui, U>(&mut self, ui: &mut U, height: f32, idx: usize)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let (category_name, category) = self
             .categories
             .get_index(idx)
             .expect("given an incorrect index for the category");
-        let category_closure = || {
+        let tree_node = ui.begin_sidebar_tree_node(
+            ImCondition::always(self.category_status.contains(category_name)),
+            idx,
+            category_name,
+        );
+        if let Some(_tree) = tree_node {
             ui.dummy([0.0, 4.0]);
             for timer in category {
                 let mut selected = false;
@@ -121,27 +134,20 @@ impl TimerTabState {
                     self.timer_selection = Some(timer.clone());
                 }
             }
-        };
-        let tree_node = TreeNode::new(category_name)
-            .flags(header_flags)
-            .opened(self.category_status.contains(category_name), Condition::Always)
-            .tree_push_on_open(false)
-            .build(ui, category_closure);
-        match tree_node {
-            Some(_) => {
-                self.category_status.insert(category_name.to_string());
-            },
-            None => {
-                self.category_status.remove(category_name);
-            },
+            self.category_status.insert(category_name.to_string());
+        } else {
+            self.category_status.remove(category_name);
         }
     }
 
-    fn draw_timer(ui: &Ui, height: f32, timer: &Arc<TimerFile>, selected_in: bool) -> bool {
+    fn draw_timer<'ui, U>(ui: &mut U, height: f32, timer: &Arc<TimerFile>, selected_in: bool) -> bool
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
         let mut selected = selected_in;
         let group_token = ui.begin_group();
-        let widget_pos = Vec2::from(ui.cursor_pos());
-        let window_size = Vec2::from(ui.window_content_region_max());
+        let widget_pos = ui.cursor_pos();
+        let window_size = ui.window_region_size();
         let widget_size = window_size.with_y(height);
         RenderState::icon(
             ui,
@@ -149,17 +155,15 @@ impl TimerTabState {
             Some(&timer.icon),
             timer.path.as_ref().and_then(|p| p.parent()),
         );
-        if Selectable::new(&timer.combined()).selected(selected).build(ui) {
-            selected = true;
-        }
+        selected |= ui.selectable(timer.combined(), selected);
         if let Some(settings) = Settings::try_read() {
             let settings_for_timer = settings.timers.get(&timer.id);
             ui.same_line();
             let (color, text) = match settings_for_timer {
-                Some(TimerSettings { disabled: true, .. }) => ([1.0, 0.0, 0.0, 1.0], &fl!("disabled")),
-                _ => ([0.0, 1.0, 0.0, 1.0], &fl!("enabled")),
+                Some(TimerSettings { disabled: true, .. }) => ([1.0, 0.0, 0.0, 1.0], fl!("disabled")),
+                _ => ([0.0, 1.0, 0.0, 1.0], fl!("enabled")),
             };
-            let text_size = Vec2::from(ui.calc_text_size(text));
+            let text_size = ui.calc_text_size(text);
             Alignment::set_cursor(ui, Alignment::RIGHT_MIDDLE, widget_pos, widget_size, text_size);
             ui.text_colored(color, text);
         }
@@ -168,71 +172,63 @@ impl TimerTabState {
         selected
     }
 
-    fn draw_main(&mut self, ui: &Ui) {
-        let child_window_flags = WindowFlags::HORIZONTAL_SCROLLBAR;
-        ChildWindow::new("timer_main")
-            .flags(child_window_flags)
-            .size([0.0, 0.0])
-            .build(ui, || {
-                if let Some(selected_timer) = &self.timer_selection {
-                    RenderState::icon(
-                        ui,
-                        None,
-                        Some(&selected_timer.icon),
-                        selected_timer.path.as_ref().and_then(|p| p.parent()),
-                    );
-                    ui.same_line();
-                    let split_name = selected_timer.name.split("\n");
-                    let layout_group = ui.begin_group();
-                    for (i, text) in split_name.into_iter().enumerate() {
-                        if i == 0 {
-                            RenderState::font_text("big", ui, text);
-                        } else {
-                            RenderState::font_text("ui", ui, text);
-                        }
-                    }
-                    layout_group.end();
-                    RenderState::font_text(
-                        "font",
-                        ui,
-                        &fl!("author-arg", author = selected_timer.author()),
-                    );
-                    if !selected_timer.source().is_empty() {
-                        RenderState::font_text(
-                            "font",
-                            ui,
-                            &fl!("source-arg", source = selected_timer.source()),
-                        );
-                    } else {
-                        RenderState::font_text("font", ui, &fl!("source-adhoc"));
-                    }
-                    if let Some(path) = &selected_timer.path {
-                        let path_display = format!("{}", path.display());
-                        RenderState::font_text("font", ui, &fl!("location", path = path_display));
-                    }
-                    RenderState::font_text("font", ui, &fl!("id-arg", id = selected_timer.id.clone()));
-                    RenderState::font_text("font", ui, &fl!("map-id-arg", id = selected_timer.map_id));
-                    ui.dummy([4.0; 2]);
-                    ui.separator();
-                    ui.dummy([4.0; 2]);
-                    RenderState::font_text("font", ui, &selected_timer.description);
-                    ui.dummy([4.0; 2]);
-                    ui.separator();
-                    ui.dummy([4.0; 2]);
-                    if let Some(settings) = Settings::try_read() {
-                        let settings_for_timer = settings.timers.get(&selected_timer.id);
-                        let button_text = match settings_for_timer {
-                            Some(TimerSettings { disabled: true, .. }) => &fl!("enable"),
-                            _ => &fl!("disable"),
-                        };
-                        if ui.button(button_text) {
-                            TimersController::try_send(TimersEvent::TimerToggle(selected_timer.id.clone()));
-                        }
-                    }
+    fn draw_main<'ui, U>(&mut self, ui: &mut U)
+    where
+        U: ?Sized + ImDrawWindow<'ui>,
+    {
+        let Some(_container) = ui.begin_mainbar(c"timer_main") else { return };
+        if let Some(selected_timer) = &self.timer_selection {
+            RenderState::icon(
+                ui,
+                None,
+                Some(&selected_timer.icon),
+                selected_timer.path.as_ref().and_then(|p| p.parent()),
+            );
+            ui.same_line();
+            let split_name = selected_timer.name.split("\n");
+            let layout_group = ui.begin_group();
+            for (i, text) in split_name.into_iter().enumerate() {
+                if i == 0 {
+                    ui.text_with_font(NexusLinkFont::Big, text);
                 } else {
-                    ui.text(&fl!("select-a-timer"));
+                    ui.text_with_font(NexusLinkFont::Ui, text);
                 }
-            });
+            }
+            layout_group.end();
+            if let _font_token = ui.push_font(NexusLinkFont::Font) {
+                ui.text(fl!("author-arg", author = selected_timer.author()));
+                if !selected_timer.source().is_empty() {
+                    ui.text(fl!("source-arg", source = selected_timer.source()));
+                } else {
+                    ui.text(fl!("source-adhoc"));
+                }
+                if let Some(path) = &selected_timer.path {
+                    let path_display = format!("{}", path.display());
+                    ui.text(fl!("location", path = &path_display));
+                }
+                ui.text(fl!("id-arg", id = selected_timer.id.clone()));
+                ui.text(fl!("map-id-arg", id = selected_timer.map_id));
+                ui.dummy([4.0; 2]);
+                ui.separator();
+                ui.dummy([4.0; 2]);
+                ui.text(&selected_timer.description);
+                ui.dummy([4.0; 2]);
+                ui.separator();
+                ui.dummy([4.0; 2]);
+            }
+            if let Some(settings) = Settings::try_read() {
+                let settings_for_timer = settings.timers.get(&selected_timer.id);
+                let button_text = match settings_for_timer {
+                    Some(TimerSettings { disabled: true, .. }) => fl!("enable"),
+                    _ => fl!("disable"),
+                };
+                if ui.button(button_text) {
+                    TimersController::try_send(TimersEvent::TimerToggle(selected_timer.id.clone()));
+                }
+            }
+        } else {
+            ui.text(fl!("select-a-timer"));
+        }
     }
     pub fn timers_update(&mut self, timers: Vec<Arc<TimerFile>>) {
         self.timers = timers;

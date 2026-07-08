@@ -1,0 +1,16 @@
+[package]
+name = "taimi_imgui_192"
+authors = [ "kittywitch" ]
+description = "TaimiHUD imgui compat shim"
+version = "0.12.0"
+edition = "2021"
+autobins = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+taimi_ui = { path = "../../", default-features = false, features = ["imgui192"] }

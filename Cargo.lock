@@ -156,69 +156,42 @@ checksum = "69f7f8c3906b62b754cd5326047894316021dcfe5a194c8ea52bdd94934a3457"
 
 [[package]]
 name = "arcdps"
-version = "0.15.1"
-source = "git+https://github.com/zerthox/arcdps-rs?tag=0.15.1#6806b5d78183716f38e5a2c21d46d93627134cfc"
+version = "0.23.0"
+source = "git+https://codeberg.org/TaimiHUD/arcdps-rs?branch=0.23.x-taimi#faf1c5b0c05f3c901f2f2d0268eeae6159c3ea60"
 dependencies = [
- "arcdps-imgui",
- "arcdps_codegen 0.10.4",
- "chrono",
- "evtc 0.9.1",
- "num_enum",
- "windows 0.57.0",
-]
-
-[[package]]
-name = "arcdps"
-version = "0.16.0"
-source = "git+https://github.com/arcnmx/arcdps-rs#2086f12530323e9393d48d10f2f78b34dfab7052"
-dependencies = [
- "arcdps-imgui",
- "arcdps_codegen 0.11.0",
+ "arcdps_codegen",
  "bitflags 2.9.0",
  "chrono",
- "evtc 0.9.2",
+ "evtc",
  "num_enum",
- "strum 0.26.3",
- "windows 0.60.0",
+ "strum 0.27.1",
+ "windows 0.61.1",
 ]
 
 [[package]]
 name = "arcdps-imgui"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12f578f5194d5eb98de932684b4d2cdd1dcb8efdb97c2c0b2f57f79d262b866c"
+source = "git+https://codeberg.org/TaimiHUD/imgui-rs?branch=libimgui-18000#229042ed728c5d72a861d6bc9f24117e3634f77d"
 dependencies = [
  "arcdps-imgui-sys",
  "bitflags 1.3.2",
- "parking_lot 0.11.2",
+ "parking_lot",
 ]
 
 [[package]]
 name = "arcdps-imgui-sys"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a739ce8c804e41f71f363d17f002e91c263af34cdbdc835c5d0513982ca09af8"
+source = "git+https://codeberg.org/TaimiHUD/libimgui#8bab608feb747af55fab08a989c04b9dcfbdf8f6"
 dependencies = [
- "cc",
- "chlorine",
+ "cty",
+ "mint",
+ "pkg-config",
 ]
 
 [[package]]
 name = "arcdps_codegen"
-version = "0.10.4"
-source = "git+https://github.com/zerthox/arcdps-rs?tag=0.15.1#6806b5d78183716f38e5a2c21d46d93627134cfc"
-dependencies = [
- "cfg-if",
- "paste",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "arcdps_codegen"
-version = "0.11.0"
-source = "git+https://github.com/arcnmx/arcdps-rs#2086f12530323e9393d48d10f2f78b34dfab7052"
+version = "0.12.1"
+source = "git+https://codeberg.org/TaimiHUD/arcdps-rs?branch=0.23.x-taimi#faf1c5b0c05f3c901f2f2d0268eeae6159c3ea60"
 dependencies = [
  "cfg-if",
  "paste",
@@ -230,24 +203,21 @@ dependencies = [
 [[package]]
 name = "arcffi"
 version = "0.1.0"
-source = "git+https://codeberg.org/TaimiHUD/arcloader#179c2d859364716a00db0c2e0fee094609034575"
+source = "git+https://codeberg.org/TaimiHUD/arcloader#eff18337f0201276395799883cd2552664326a08"
 dependencies = [
- "windows 0.60.0",
  "windows 0.61.1",
- "windows-core 0.60.1",
  "windows-core 0.61.0",
  "windows-result 0.3.2",
- "windows-strings 0.3.1",
  "windows-strings 0.4.0",
 ]
 
 [[package]]
 name = "arcloader-mumblelink"
 version = "0.1.0"
-source = "git+https://codeberg.org/TaimiHUD/arcloader#179c2d859364716a00db0c2e0fee094609034575"
+source = "git+https://codeberg.org/TaimiHUD/arcloader#eff18337f0201276395799883cd2552664326a08"
 dependencies = [
  "arcffi",
- "gw2_mumble 0.2.5",
+ "gw2_mumble",
  "log",
  "nexus",
  "serde",
@@ -397,7 +367,7 @@ version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a2473db70d8785b5c75d6dd951a2e51e9be2c2311122db9692c79c9d887517b"
 dependencies = [
- "parking_lot 0.12.3",
+ "parking_lot",
  "proc-macro2",
  "quote",
  "syn",
@@ -494,18 +464,18 @@ dependencies = [
 
 [[package]]
 name = "bitfields"
-version = "0.13.2"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7151782e2cd1dd0a1b00951a8b1be6b242f9a2240df9d244e3a7dbf7b55e7ac0"
+checksum = "dcdbce6688e3ab66aff2ab413b762ccde9f37990e27bba0bb38a4b2ad1b5d877"
 dependencies = [
  "bitfields-impl",
 ]
 
 [[package]]
 name = "bitfields-impl"
-version = "0.10.2"
+version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6675c064f07fe6e2433bc55263e114db648288e539e7fda779abd3e0a2bfe93b"
+checksum = "57413e4b276d883b77fb368b7b33ae6a5eb97692852d49a5394d4f72ba961827"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -588,6 +558,20 @@ name = "bytemuck"
 version = "1.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9134a6ef01ce4b366b50689c94f82c14bc72bc5d0386829828a2e2752ef7958c"
+dependencies = [
+ "bytemuck_derive",
+]
+
+[[package]]
+name = "bytemuck_derive"
+version = "1.10.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9abbd1bc6865053c427f7198e6af43bfdedc55ab791faed4fbd361d789575ff"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "byteorder"
@@ -654,12 +638,6 @@ name = "cfgenius"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ae118db0db0e2137671e9b916de8af5d3be65a5fb1ad3a9c7925c38b6644cfb"
-
-[[package]]
-name = "chlorine"
-version = "1.0.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c00d31b1d19317b4777ec879192d3745bd97d05262b4b19cb1dda284b9d22f19"
 
 [[package]]
 name = "chrono"
@@ -812,6 +790,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "cty"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b365fabc795046672053e29c954733ec3b05e4be654ab130fe8f1f94d7051f35"
+
+[[package]]
 name = "darling"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -961,24 +945,23 @@ checksum = "ea8a8b81cacc08888170eef4d13b775126db426d0b348bee9d18c2c1eaf123cf"
 [[package]]
 name = "dpsapi"
 version = "0.1.0"
-source = "git+https://codeberg.org/TaimiHUD/arcloader#179c2d859364716a00db0c2e0fee094609034575"
+source = "git+https://codeberg.org/TaimiHUD/arcloader#eff18337f0201276395799883cd2552664326a08"
 dependencies = [
- "arcdps 0.16.0",
+ "arcdps",
  "arcffi",
  "dyload",
- "evtc 0.9.2",
  "nexus",
- "windows 0.60.0",
+ "windows 0.61.1",
 ]
 
 [[package]]
 name = "dyload"
 version = "0.1.0"
-source = "git+https://codeberg.org/TaimiHUD/arcloader#179c2d859364716a00db0c2e0fee094609034575"
+source = "git+https://codeberg.org/TaimiHUD/arcloader#eff18337f0201276395799883cd2552664326a08"
 dependencies = [
  "arcffi",
- "windows 0.60.0",
- "windows-core 0.60.1",
+ "windows 0.61.1",
+ "windows-core 0.61.0",
 ]
 
 [[package]]
@@ -1041,24 +1024,13 @@ dependencies = [
 
 [[package]]
 name = "evtc"
-version = "0.9.1"
-source = "git+https://github.com/zerthox/arcdps-rs?tag=0.15.1#6806b5d78183716f38e5a2c21d46d93627134cfc"
+version = "0.15.0"
+source = "git+https://codeberg.org/TaimiHUD/arcdps-rs?branch=0.23.x-taimi#faf1c5b0c05f3c901f2f2d0268eeae6159c3ea60"
 dependencies = [
  "bitflags 2.9.0",
  "memoffset",
  "num_enum",
-]
-
-[[package]]
-name = "evtc"
-version = "0.9.2"
-source = "git+https://github.com/arcnmx/arcdps-rs#2086f12530323e9393d48d10f2f78b34dfab7052"
-dependencies = [
- "bitflags 2.9.0",
- "memoffset",
- "num_enum",
- "strum 0.26.3",
- "windows-core 0.60.1",
+ "strum 0.27.1",
 ]
 
 [[package]]
@@ -1429,29 +1401,17 @@ checksum = "a8d1add55171497b4705a648c6b583acafb01d58050a51727785f0b2c8e0a2b2"
 
 [[package]]
 name = "gw2_mumble"
-version = "0.2.4"
-source = "git+https://github.com/zerthox/gw2-mumble-rs?tag=0.2.4#42729cda8525a12721e68ea29f1aead58393147e"
-dependencies = [
- "bitflags 2.9.0",
- "num_enum",
- "strum 0.26.3",
- "thiserror 2.0.12",
- "windows 0.58.0",
-]
-
-[[package]]
-name = "gw2_mumble"
-version = "0.2.5"
-source = "git+https://github.com/zerthox/gw2-mumble-rs#7cb684bdb271253c99e2ad7fea4b448915ffe76f"
+version = "0.3.0"
+source = "git+https://codeberg.org/TaimiHUD/gw2-mumble-rs?branch=0.3.x-taimi#1bbf949b666c83a2b373746cd9ae51c93d0224bb"
 dependencies = [
  "bitflags 2.9.0",
  "num_enum",
  "serde",
  "serde_json",
  "serde_repr",
- "strum 0.26.3",
+ "strum 0.27.1",
  "thiserror 2.0.12",
- "windows 0.59.0",
+ "windows 0.61.1",
 ]
 
 [[package]]
@@ -1634,7 +1594,7 @@ dependencies = [
  "intl-memoizer",
  "log",
  "notify",
- "parking_lot 0.12.3",
+ "parking_lot",
  "rust-embed",
  "thiserror 1.0.69",
  "unic-langid",
@@ -1858,6 +1818,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "imgui-sys"
+version = "0.12.0"
+source = "git+https://codeberg.org/TaimiHUD/libimgui?branch=symver#8bab608feb747af55fab08a989c04b9dcfbdf8f6"
+dependencies = [
+ "cfg-if",
+ "cty",
+ "mint",
+ "pkg-config",
+]
+
+[[package]]
 name = "include_dir"
 version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1914,15 +1885,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01"
 dependencies = [
  "generic-array",
-]
-
-[[package]]
-name = "instant"
-version = "0.1.13"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e0242819d153cba4b4b05a5a8f2a7e9bbf97b6055b2a002b395c96b5ff3c0222"
-dependencies = [
- "cfg-if",
 ]
 
 [[package]]
@@ -2034,7 +1996,7 @@ dependencies = [
  "intrusive-collections",
  "libc",
  "once_cell",
- "parking_lot 0.12.3",
+ "parking_lot",
  "wasmtime-jit-icache-coherence",
  "winapi",
 ]
@@ -2242,6 +2204,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "macro_rules_attribute"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65049d7923698040cd0b1ddcced9b0eb14dd22c5f86ae59c3740eab64a676520"
+dependencies = [
+ "macro_rules_attribute-proc_macro",
+ "paste",
+]
+
+[[package]]
+name = "macro_rules_attribute-proc_macro"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "670fdfda89751bc4a84ac13eaa63e205cf0fd22b4c9a5fbfa085b63c1f1d3a30"
+
+[[package]]
 name = "magic_migrate"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2382,14 +2360,14 @@ dependencies = [
 
 [[package]]
 name = "nexus"
-version = "0.8.0"
-source = "git+https://github.com/zerthox/nexus-rs#18bace75a45fc5f0fdb0be2dc5ee709902447624"
+version = "0.11.0"
+source = "git+https://codeberg.org/TaimiHUD/nexus-rs?branch=0.11.x-taimi#d2dd57d3ae8f1e6c08000389a3fb33e0a4fc88ae"
 dependencies = [
- "arcdps 0.15.1",
+ "arcdps",
  "arcdps-imgui",
  "bitfields",
  "bitflags 2.9.0",
- "gw2_mumble 0.2.4",
+ "gw2_mumble",
  "nexus_codegen",
  "num_enum",
  "paste",
@@ -2398,8 +2376,8 @@ dependencies = [
 
 [[package]]
 name = "nexus_codegen"
-version = "0.3.0"
-source = "git+https://github.com/zerthox/nexus-rs#18bace75a45fc5f0fdb0be2dc5ee709902447624"
+version = "0.3.2"
+source = "git+https://codeberg.org/TaimiHUD/nexus-rs?branch=0.11.x-taimi#d2dd57d3ae8f1e6c08000389a3fb33e0a4fc88ae"
 dependencies = [
  "cfg-if",
  "paste",
@@ -2638,37 +2616,12 @@ checksum = "f38d5652c16fde515bb1ecef450ab0f6a219d619a7274976324d5e377f7dceba"
 
 [[package]]
 name = "parking_lot"
-version = "0.11.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d17b78036a60663b797adeaee46f5c9dfebb86948d1255007a1d6be0271ff99"
-dependencies = [
- "instant",
- "lock_api",
- "parking_lot_core 0.8.6",
-]
-
-[[package]]
-name = "parking_lot"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1bf18183cf54e8d6059647fc3063646a1801cf30896933ec2311622cc4b9a27"
 dependencies = [
  "lock_api",
- "parking_lot_core 0.9.10",
-]
-
-[[package]]
-name = "parking_lot_core"
-version = "0.8.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "60a2cfe6f0ad2bfc16aefa463b497d5c7a5ecd44a23efa72aa342d90177356dc"
-dependencies = [
- "cfg-if",
- "instant",
- "libc",
- "redox_syscall 0.2.16",
- "smallvec",
- "winapi",
+ "parking_lot_core",
 ]
 
 [[package]]
@@ -2983,15 +2936,6 @@ name = "rawpointer"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60a357793950651c4ed0f3f52338f53b2f809f32d83a07f72909fa13e4c6c1e3"
-
-[[package]]
-name = "redox_syscall"
-version = "0.2.16"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb5a58c1855b4b6819d59012155603f0b22ad30cad752600aadfcb695265519a"
-dependencies = [
- "bitflags 1.3.2",
-]
 
 [[package]]
 name = "redox_syscall"
@@ -3611,9 +3555,9 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "syn"
-version = "2.0.100"
+version = "2.0.106"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b09a44accad81e1ba1cd74a32461ba89dee89095ba17b32f5d03683b1b1fc2a0"
+checksum = "ede7c438028d4436d71104916910f5bb611972c5cfd7f89b8300a8186e6fada6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3708,7 +3652,7 @@ version = "0.4.1"
 dependencies = [
  "anyhow",
  "arc-atomic",
- "arcdps 0.16.0",
+ "arcdps",
  "arcloader-mumblelink",
  "async-compression",
  "bevy_ecs",
@@ -3717,6 +3661,7 @@ dependencies = [
  "bitvec",
  "built",
  "bvh",
+ "bytemuck",
  "bytes",
  "chrono",
  "closure-ffi",
@@ -3741,10 +3686,12 @@ dependencies = [
  "json-strip-comments",
  "lininterp",
  "log",
+ "macro_rules_attribute",
  "magic_migrate",
  "mint",
  "nalgebra",
  "nexus",
+ "num-traits",
  "open",
  "ordered-float",
  "palette",
@@ -3754,6 +3701,7 @@ dependencies = [
  "reqwest",
  "retour",
  "rust-embed",
+ "rustc-hash 2.1.1",
  "semver",
  "serde",
  "serde_json",
@@ -3768,7 +3716,9 @@ dependencies = [
  "taimi_meta",
  "taimi_pack",
  "taimi_sync",
+ "taimi_ui",
  "tempfile",
+ "tinystr 0.8.1",
  "tobj",
  "tokio",
  "tokio-stream",
@@ -3787,7 +3737,7 @@ name = "taimi_input"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "arcdps 0.16.0",
+ "arcdps",
  "bitflags 2.9.0",
  "glam 0.30.1",
  "glamour",
@@ -3809,7 +3759,6 @@ dependencies = [
  "compression-core",
  "glam 0.30.1",
  "glamour",
- "gw2_mumble 0.2.4",
  "log",
  "nexus",
  "num-traits",
@@ -3855,6 +3804,25 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "type-map",
+]
+
+[[package]]
+name = "taimi_ui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "arcdps-imgui",
+ "arcdps-imgui-sys",
+ "bitflags 2.9.0",
+ "glam 0.30.1",
+ "glamour",
+ "imgui-sys",
+ "log",
+ "mint",
+ "num-traits",
+ "serde",
+ "taimi_ffi",
+ "windows 0.61.1",
 ]
 
 [[package]]
@@ -4564,16 +4532,6 @@ checksum = "712e227841d057c1ee1cd2fb22fa7e5a5461ae8e48fa2ca79ec42cfc1931183f"
 
 [[package]]
 name = "windows"
-version = "0.57.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12342cb4d8e3b046f3d80effd474a7a02447231330ef77d71daa6fbc40681143"
-dependencies = [
- "windows-core 0.57.0",
- "windows-targets 0.52.6",
-]
-
-[[package]]
-name = "windows"
 version = "0.58.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd04d41d93c4992d421894c18c8b43496aa748dd4c081bac0dc93eb0489272b6"
@@ -4584,47 +4542,15 @@ dependencies = [
 
 [[package]]
 name = "windows"
-version = "0.59.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f919aee0a93304be7f62e8e5027811bbba96bcb1de84d6618be56e43f8a32a1"
-dependencies = [
- "windows-core 0.59.0",
- "windows-targets 0.53.0",
-]
-
-[[package]]
-name = "windows"
-version = "0.60.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddf874e74c7a99773e62b1c671427abf01a425e77c3d3fb9fb1e4883ea934529"
-dependencies = [
- "windows-collections 0.1.1",
- "windows-core 0.60.1",
- "windows-future 0.1.1",
- "windows-link",
- "windows-numerics 0.1.1",
-]
-
-[[package]]
-name = "windows"
 version = "0.61.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5ee8f3d025738cb02bad7868bbb5f8a6327501e870bf51f1b455b0a2454a419"
 dependencies = [
- "windows-collections 0.2.0",
+ "windows-collections",
  "windows-core 0.61.0",
- "windows-future 0.2.0",
+ "windows-future",
  "windows-link",
- "windows-numerics 0.2.0",
-]
-
-[[package]]
-name = "windows-collections"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5467f79cc1ba3f52ebb2ed41dbb459b8e7db636cc3429458d9a852e15bc24dec"
-dependencies = [
- "windows-core 0.60.1",
+ "windows-numerics",
 ]
 
 [[package]]
@@ -4634,18 +4560,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3beeceb5e5cfd9eb1d76b381630e82c4241ccd0d27f1a39ed41b2760b255c5e8"
 dependencies = [
  "windows-core 0.61.0",
-]
-
-[[package]]
-name = "windows-core"
-version = "0.57.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d2ed2439a290666cd67ecce2b0ffaad89c2a56b976b736e6ece670297897832d"
-dependencies = [
- "windows-implement 0.57.0",
- "windows-interface 0.57.0",
- "windows-result 0.1.2",
- "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -4663,32 +4577,6 @@ dependencies = [
 
 [[package]]
 name = "windows-core"
-version = "0.59.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "810ce18ed2112484b0d4e15d022e5f598113e220c53e373fb31e67e21670c1ce"
-dependencies = [
- "windows-implement 0.59.0",
- "windows-interface 0.59.1",
- "windows-result 0.3.2",
- "windows-strings 0.3.1",
- "windows-targets 0.53.0",
-]
-
-[[package]]
-name = "windows-core"
-version = "0.60.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca21a92a9cae9bf4ccae5cf8368dce0837100ddf6e6d57936749e85f152f6247"
-dependencies = [
- "windows-implement 0.59.0",
- "windows-interface 0.59.1",
- "windows-link",
- "windows-result 0.3.2",
- "windows-strings 0.3.1",
-]
-
-[[package]]
-name = "windows-core"
 version = "0.61.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4763c1de310c86d75a878046489e2e5ba02c649d185f21c67d4cf8a56d098980"
@@ -4702,33 +4590,12 @@ dependencies = [
 
 [[package]]
 name = "windows-future"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a787db4595e7eb80239b74ce8babfb1363d8e343ab072f2ffe901400c03349f0"
-dependencies = [
- "windows-core 0.60.1",
- "windows-link",
-]
-
-[[package]]
-name = "windows-future"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a1d6bbefcb7b60acd19828e1bc965da6fcf18a7e39490c5f8be71e54a19ba32"
 dependencies = [
  "windows-core 0.61.0",
  "windows-link",
-]
-
-[[package]]
-name = "windows-implement"
-version = "0.57.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9107ddc059d5b6fbfbffdfa7a7fe3e22a226def0b2608f72e9d552763d3e1ad7"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -4744,31 +4611,9 @@ dependencies = [
 
 [[package]]
 name = "windows-implement"
-version = "0.59.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83577b051e2f49a058c308f17f273b570a6a758386fc291b5f6a934dd84e48c1"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "windows-implement"
 version = "0.60.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a47fddd13af08290e67f4acabf4b459f647552718f683a7b415d290ac744a836"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "windows-interface"
-version = "0.57.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29bee4b38ea3cde66011baa44dba677c432a78593e202392d1e9070cf2a7fca7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4805,16 +4650,6 @@ checksum = "76840935b766e1b0a05c0066835fb9ec80071d4c09a16f6bd5f7e655e3c14c38"
 
 [[package]]
 name = "windows-numerics"
-version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "005dea54e2f6499f2cee279b8f703b3cf3b5734a2d8d21867c8f44003182eeed"
-dependencies = [
- "windows-core 0.60.1",
- "windows-link",
-]
-
-[[package]]
-name = "windows-numerics"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9150af68066c4c5c07ddc0ce30421554771e528bde427614c61038bc2c92c2b1"
@@ -4832,15 +4667,6 @@ dependencies = [
  "windows-result 0.3.2",
  "windows-strings 0.3.1",
  "windows-targets 0.53.0",
-]
-
-[[package]]
-name = "windows-result"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e383302e8ec8515204254685643de10811af0ed97ea37210dc26fb0032647f8"
-dependencies = [
- "windows-targets 0.52.6",
 ]
 
 [[package]]
