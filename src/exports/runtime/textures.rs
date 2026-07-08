@@ -1,5 +1,3 @@
-#[cfg(feature = "extension-nexus")]
-use glamour::Size2;
 #[cfg(feature = "texture-loader")]
 use {
     anyhow::{anyhow, Context},
@@ -9,6 +7,7 @@ use {
     windows::Win32::Graphics::Dxgi::Common::{self as dxgi, DXGI_FORMAT},
 };
 use {
+    glamour::Size2,
     std::{
         collections::{hash_map, HashMap},
         future::Future,
@@ -829,6 +828,7 @@ impl TextureSlot {
             Self::Loaded(tex) => tex.texture_byte_size(),
             Self::Inactive(tex) if tex.strong_count() > 0 =>
                 Weak::upgrade(tex).map(|tex| tex.texture_byte_size()).unwrap_or(0),
+            #[cfg(feature = "extension-nexus")]
             Self::Nexus(tex) => {
                 let size = tex.size_u32();
                 let bytes_pixel = tex

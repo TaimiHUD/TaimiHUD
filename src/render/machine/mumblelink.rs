@@ -1,5 +1,10 @@
-#[cfg(any(feature = "markers", feature = "space"))]
-pub use nexus::event::MumbleIdentityUpdate;
+#[cfg(all(any(feature = "markers", feature = "space"), not(feature = "extension-nexus")))]
+pub use arcloader_mumblelink::gw2_mumble::Identity as MumbleIdentityUpdate;
+#[cfg(all(any(feature = "markers", feature = "space"), feature = "extension-nexus"))]
+pub use arcloader_mumblelink::identity::{
+    NexusIdentityShare as MumbleIdentityShare,
+    NexusIdentityUpdate as MumbleIdentityUpdate,
+};
 #[cfg(any(feature = "markers", feature = "space"))]
 use {
     crate::render::machine::RenderPosition,
@@ -28,6 +33,9 @@ use {
 
 #[cfg(feature = "goggles2-project")]
 use crate::settings::goggles::GogglesEnables;
+
+#[cfg(all(any(feature = "markers", feature = "space"), not(feature = "extension-nexus")))]
+pub(crate) type MumbleIdentityShare = Option<MumbleIdentityUpdate>;
 
 impl RenderMachine {
     pub const LOCAL_UP: Vector3<LocalSpace> = Vector3::Y;
@@ -229,8 +237,14 @@ impl RenderMachine {
 
         #[cfg(any(feature = "markers", feature = "space"))]
         let identity = if !self.identity_users.is_empty() || !self.map_users.is_empty() {
+            #[cfg(feature = "extension-nexus")]
             let update = match self.identity.update(&mut self.identity_changes, &ml) {
                 Some(true) if !self.identity.is_empty() => Some(&self.identity.identity),
+                _ => None,
+            };
+            #[cfg(not(feature = "extension-nexus"))]
+            let update = match self.identity_changes.update(&ml) {
+                Some(Some((_, identity))) => Some(&*self.identity.insert(identity)),
                 _ => None,
             };
 
@@ -249,27 +263,36 @@ impl RenderMachine {
         };
 
         #[cfg(any(feature = "markers", feature = "space"))]
+        let id_update = match (identity, &mut self.map.calibration) {
+            _ if self.map_users.is_empty() => false,
+            #[cfg(feature = "extension-nexus")]
+            (Some(id), calib) => calib.update_from_mumblelink_identity_nexus(id),
+            #[cfg(not(feature = "extension-nexus"))]
+            (Some(id), calib) => calib.update_from_mumblelink_identity(id),
+            _ => false,
+        };
+        #[cfg(feature = "space")]
+        let new_fov = match (identity, self.map_users.contains(RenderUsers::SPACE)) {
+            (Some(update), true) => {
+                let fov_y = realign_fov(update.fov);
+                #[cfg(todo)]
+                let changed = fov_y.to_bits() != self.fov.y.to_bits();
+                Some(Vector2::ZERO.with_y(fov_y))
+            },
+            _ => None,
+        };
+
+        #[cfg(any(feature = "markers", feature = "space"))]
         if !self.map_users.is_empty() {
-            let id_update = if let Some(identity) = identity {
-                self.map
-                    .calibration
-                    .update_from_mumblelink_identity_nexus(identity)
-            } else {
-                false
-            };
             self.map.update_from_mumblelink(ml);
 
             if id_update {
                 self.act_map_recalibrate(false);
             }
         }
-
-        #[cfg(any(feature = "markers", feature = "space"))]
-        if let (Some(update), true) = (identity, self.map_users.contains(RenderUsers::SPACE)) {
-            let fov_y = realign_fov(update.fov);
-            #[cfg(todo)]
-            let changed = fov_y.to_bits() != self.fov.y.to_bits();
-            self.set_fov(Vector2::ZERO.with_y(fov_y));
+        #[cfg(feature = "space")]
+        if let Some(fov) = new_fov {
+            self.set_fov(fov);
         }
 
         if !self.mumblelink_users.is_empty() {

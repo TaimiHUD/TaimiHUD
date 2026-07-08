@@ -4,6 +4,7 @@ use {
         exports::runtime as rt,
         render::machine::MumbleIdentityUpdate,
     },
+    arcloader_mumblelink::identity::MumbleIdentityFields,
     std::{
         collections::BTreeSet,
         hash::Hash,
@@ -691,16 +692,15 @@ impl CharacterMetadata {
     }
     pub fn update_from_mumblelink(&mut self, id: &MumbleIdentityUpdate) -> bool {
         let mut dirty = false;
-        let prev_race = mem::replace(&mut self.race, (id.race as i32).try_into().ok());
+        let prev_race = mem::replace(&mut self.race, id.race_id().try_into().ok());
         dirty |= prev_race != self.race;
-        let prev_prof = mem::replace(&mut self.prof, (id.profession as i32).try_into().ok());
+        let prev_prof = mem::replace(&mut self.prof, id.profession_id().try_into().ok());
         dirty |= prev_prof != self.prof;
-        let prev_spec = mem::replace(&mut self.spec, NonZero::new(id.specialization));
+        let prev_spec = mem::replace(&mut self.spec, NonZero::new(id.specialization_id()));
         dirty |= prev_spec != self.spec;
-        let name_len = id.name.iter().position(|&c| c == 0).unwrap_or(id.name.len());
-        let name = unsafe { id.name.get_unchecked(..name_len) };
-        if self.name.len() != name_len || name != &self.name[..] {
-            self.name = name.into();
+        let name = id.character_name_ascii();
+        if &self.name[..] != &name[..] {
+            self.name = name[..].into();
             dirty = true;
         }
         dirty

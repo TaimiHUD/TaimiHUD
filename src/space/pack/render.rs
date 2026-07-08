@@ -148,6 +148,7 @@ pub trait DrawSpaceEntity {
         poi: &PoiRender,
         path: LoadedPoiPath,
     ) -> bool {
+        let _ = draw_state;
         let _ = pack_data;
         let _ = space_idx;
         let _ = poi;
@@ -468,6 +469,7 @@ impl DrawSpaceEntity for DrawSpaceArc<'_> {
         }
         true
     }
+    #[cfg(feature = "paths-interact")]
     fn poi_visible_override(
         &mut self,
         draw_state: &mut PackRenderState,

@@ -95,7 +95,7 @@
           buildType = "dev";
         };
         taimiHUD-check = packages.taimiHUD.override {
-          doCheck = true;
+          buildCheckOnly = true;
         };
 
         default = packages.taimiHUD;

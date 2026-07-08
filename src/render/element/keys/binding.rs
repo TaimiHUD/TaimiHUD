@@ -281,7 +281,7 @@ impl KeyBindState {
                     #[cfg(taimi_imgui = "180")]
                     Some(im180::VERSION_NUM) => imw::InputText::IM180_ARGS_READ_ONLY,
                     #[cfg(taimi_imgui = "192")]
-                    Some(im192::VERSION_NUM) => imw::InputText::IM180_ARGS_READ_ONLY,
+                    Some(im192::VERSION_NUM) => imw::InputText::IM192_ARGS_READ_ONLY,
                     _ => Default::default(),
                 },
                 false => Default::default(),

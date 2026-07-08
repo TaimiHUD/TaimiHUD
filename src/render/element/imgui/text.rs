@@ -1,13 +1,9 @@
-use taimi_ui::im::{
-    im180::prelude::*,
-    text::{ImFontStack, UiFontDyn},
-    token::UiTokenDyn,
-};
+use taimi_ui::im::{text::ImFontStack, token::UiTokenDyn};
 #[cfg(feature = "extension-nexus")]
 use {
     crate::exports::runtime as rt,
     core::ptr::{self, NonNull},
-    taimi_ui::im::im180::text::font_ref_from_nn,
+    taimi_ui::im::im180::{prelude::*, text::font_ref_from_nn},
 };
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -69,6 +65,7 @@ impl crate::render::TextFont {
         })
     }
 }
+#[cfg(feature = "extension-nexus")]
 impl<'ui> ImFontStack<'ui, NexusLinkFont> for Ui<'ui> {
     type FontToken = <&'static Ui<'ui> as ImFontStack<'ui, NexusLinkFont>>::FontToken;
     #[inline(always)]
@@ -76,7 +73,8 @@ impl<'ui> ImFontStack<'ui, NexusLinkFont> for Ui<'ui> {
         ImFontStack::push_font(&mut &*self, font)
     }
 }
-impl<'ui> ImFontStack<'ui, NexusLinkFont> for &'_ Ui<'ui> {
+#[cfg(taimi_imgui = "180")]
+impl<'ui> ImFontStack<'ui, NexusLinkFont> for &'_ taimi_ui::im::im180::Ui<'ui> {
     #[cfg(todo)]
     type FontToken = Option<<Ui<'ui> as ImFontStack<'ui, imgui::FontId>>::FontToken>;
     type FontToken = Option<UiTokenDyn<'ui>>;
@@ -87,7 +85,7 @@ impl<'ui> ImFontStack<'ui, NexusLinkFont> for &'_ Ui<'ui> {
             .map(Into::into)
     }
     #[cfg(not(feature = "extension-nexus"))]
-    fn push_font(&mut self, _font: NexusLinkFont) -> Self::FontToken {
+    fn push_font(&mut self, _: NexusLinkFont) -> Self::FontToken {
         None
     }
 }
@@ -95,7 +93,7 @@ impl<'ui> ImFontStack<'ui, NexusLinkFont> for &'_ Ui<'ui> {
 impl<'ui> ImFontStack<'ui, NexusLinkFont> for taimi_ui::im::im192::Ui<'ui> {
     type FontToken = Option<UiTokenDyn<'ui>>;
     #[inline(always)]
-    fn push_font(&mut self, font: NexusLinkFont) -> Self::FontToken {
+    fn push_font(&mut self, _: NexusLinkFont) -> Self::FontToken {
         None
     }
 }

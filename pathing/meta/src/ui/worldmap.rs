@@ -215,7 +215,7 @@ impl MapCalibration {
         self.update_from_mumblelink_identity_data(identity.ui_scale.into(), identity.map_id.into())
     }
 
-    #[cfg(any(feature = "mumblelink-arcloader", feature = "nexus"))]
+    #[cfg(feature = "nexus")]
     pub fn update_from_mumblelink_identity_nexus(
         &mut self,
         identity: &crate::ui::mumblelink::NexusIdentity,

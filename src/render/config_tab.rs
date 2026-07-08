@@ -29,18 +29,15 @@ use {
         MarkersEvent,
     },
     anyhow::Context,
-    strum::IntoEnumIterator,
+    strum::{IntoEnumIterator, VariantArray},
     taimi_hoard::iters::IterExt as _,
     tokio::sync::watch,
-};
-#[cfg(feature = "extension-nexus")]
-use {
-    crate::{exports::runtime::bindings::TaimiControls, settings::IconStyle},
-    strum::VariantArray,
 };
 
 #[cfg(feature = "paths")]
 use crate::settings::pathing::{SpaceSettings, ToggleGranularity};
+#[cfg(feature = "extension-nexus")]
+use crate::{exports::runtime::bindings::TaimiControls, settings::IconStyle};
 #[cfg(feature = "updates")]
 use crate::{
     exports::runtime::update::ResolvedVersion,

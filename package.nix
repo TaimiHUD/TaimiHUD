@@ -11,27 +11,40 @@
   arcdps-imgui_19270,
   builtInfo ? {},
   features ? [],
-  doCheck ? false,
   buildType ? "release",
+  # compile-time features
   enableBuilt ? (builtInfo == {} && (! source ? sourceInfo.rev) && (! source ? sourceInfo.dirtyRev)) || (builtInfo.platform or false == null),
   enableLibgit ? enableBuilt && lib.versionAtLeast libgit2.version "1.9.0",
   enableUpdates ? builtInfo != {} || (enableBuilt && (! source ? sourceInfo.dirtyRev)),
   enableStatistics ? false,
   enableEnvFilter ? false,
   enableCache ? true,
+  enableSpace ? enablePaths,
+  enableLua ? enableExperimentalFeatures,
+  # components
   enableTimers ? true,
+  enableTimersSpace ? true,
   enableMarkers ? true,
   enablePaths ? true,
-  enableSpace ? enablePaths,
-  enableLua ? false,
+  enablePathsApi ? true,
+  # XXX: could be enabled prior to stabilizing interactions but mostly pointless without it...
+  enablePathsFilter ? enableExperimentalFeatures,
+  enablePathsInteract ? enableExperimentalFeatures,
+  enablePathsEdit ? enableExperimentalFeatures,
+  enableScripts ? enableExperimentalFeatures,
+  # hosts
   enableNexus ? true,
   enableArcdps ? true,
+  # enable presets
+  enableExperimentalFeatures ? false,
+  # build opts
   buildWithDebugInfo ?
     if stdenv.hostPlatform.isMsvc
     then true
     else null,
   buildWithUnwind ? null,
   buildWithLto ? null,
+  buildCheckOnly ? false,
   source ? ./.,
   cargoArtifacts ? null,
 }: let
@@ -61,24 +74,50 @@
     ${mapNullable (_: "BUILT_OVERRIDE_taimi_hud_GIT_COMMIT_HASH") rev} = rev + revSuffix;
     ${mapNullable (_: "BUILT_OVERRIDE_taimi_hud_GIT_COMMIT_HASH_SHORT") shortRev} = shortRev + revSuffix;
   };
-  cargoBuildFeatures =
+  cargoBuildFeatures' = let
+    # currently required regardless
+    enablePathsSpace = enableSpace || enablePaths;
+    # depends on paths space...
+    enableTimersSpace' = enableTimersSpace && enablePathsSpace;
+    # non-optional
+    enableMarkersEdit = true;
+    # depends on paths-dyn atm...
+    enableScripts' = enablePaths && enableScripts;
+    featuresTimers =
+      ["timers"]
+      ++ optional enableTimersSpace' "timers-space";
+    featuresPaths =
+      ["paths"]
+      ++ optional enablePathsApi "paths-api"
+      ++ optional enablePathsSpace "paths-space"
+      ++ optional enablePathsFilter "paths-filter"
+      ++ optional enablePathsInteract "paths-interact"
+      ++ optional enablePathsEdit "paths-edit"
+      ++ optional enableLua "paths-lua";
+    featuresMarkers =
+      ["markers"]
+      ++ optional enableMarkersEdit "markers-edit";
+    featuresScripts =
+      ["scripts"]
+      ++ optional enableLua "scripts-lua";
+    # hosts
+    featuresNexus = ["extension-nexus"];
+    featuresArcdps = ["extension-arcdps"];
+  in
     features
-    ++ optional enableTimers "timers"
-    ++ optionals enableMarkers [
-      "markers"
-      "markers-edit"
-    ]
+    ++ optionals enableTimers featuresTimers
+    ++ optionals enableMarkers featuresMarkers
+    ++ optionals enablePaths featuresPaths
+    ++ optionals enableScripts' featuresScripts
     ++ optional isWindows "windows"
-    ++ optional enableNexus "extension-nexus"
-    ++ optional enableArcdps "extension-arcdps"
+    ++ optionals enableNexus featuresNexus
+    ++ optionals enableArcdps featuresArcdps
     ++ optional enableStatistics "statistics"
     ++ optional enableEnvFilter "env-filter"
     ++ optional enableCache "meta-cache"
-    ++ optional enablePaths "paths"
-    ++ optional enableLua "paths-lua"
-    ++ optional enableSpace "space"
     ++ optional enableUpdates "updates"
     ++ optional enableLibgit "built-info";
+  cargoBuildFeatures = lib.unique cargoBuildFeatures';
   /*
     dummySrc = let
     manifestSrc = builtins.path {
@@ -145,9 +184,9 @@ in
         else null
       } =
         cargoArtifacts;
-      cargoExtraArgs = optionalString (cargoBuildFeatures != []) (
+      cargoExtraArgs = optionalString (cargoBuildFeatures' != []) (
         toString
-        ["--no-default-features" "--features" (concatStringsSep "," (lib.unique cargoBuildFeatures))]
+        ["--no-default-features" "--features" (concatStringsSep "," cargoBuildFeatures)]
       );
 
       CARGO_BUILD_INCREMENTAL = "false";
@@ -197,15 +236,17 @@ in
         ++ optional enableLibgit libgit2'build;
 
       ${
-        if doCheck
+        if buildCheckOnly
         then "cargoBuildCommand"
         else null
       } = "cargoWithProfile check --workspace";
       ${
-        if doCheck
+        if buildCheckOnly
         then "installPhaseCommand"
         else null
       } = "touch $out";
+      #doCheck = false;
+      #doInstallCheck = false;
 
       LIBGIT2_NO_VENDOR = true;
       preConfigure = optionalString (stdenv.hostPlatform.config != stdenv.buildPlatform.config) ''
@@ -230,5 +271,8 @@ in
         "--cfg=windows_slim_errors"
       ];
       #RUSTC_BOOTSTRAP = 1; # tobj/merging?
+      passthru = {
+        CARGO_FEATURES = cargoBuildFeatures;
+      };
     }
     // builtInfo')

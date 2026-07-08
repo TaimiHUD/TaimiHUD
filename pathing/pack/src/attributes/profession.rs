@@ -17,11 +17,12 @@ pub enum Profession {
     Mesmer = 7,
     Necromancer = 8,
     Revenant = 9,
+    Monster = 10,
 }
 
 impl Profession {
     pub const REPR_MIN: u8 = Self::Guardian as u8;
-    pub const REPR_MAX: u8 = Self::Revenant as u8;
+    pub const REPR_MAX: u8 = Self::Monster as u8;
     pub const INDEX_MAX: u8 = Self::REPR_MAX - 1;
 
     pub const fn repr(self) -> u8 {
@@ -36,30 +37,47 @@ impl Profession {
             _ => None,
         }
     }
+    /// 0..=9
     pub const unsafe fn from_index_unchecked(index: u8) -> Self {
         mem::transmute(index + 1)
     }
+    /// mumblelink ID
+    pub const fn from_repr(repr: u8) -> Option<Self> {
+        match repr {
+            Self::REPR_MIN..=Self::REPR_MAX => Some(unsafe { Self::from_repr_unchecked(repr) }),
+            _ => None,
+        }
+    }
+    /// 1..=10
+    pub const unsafe fn from_repr_unchecked(repr: u8) -> Self {
+        mem::transmute(repr)
+    }
 }
 
-impl TryFrom<i32> for Profession {
+impl TryFrom<usize> for Profession {
     type Error = anyhow::Error;
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        u8::try_from(value)
+            .ok()
+            .and_then(Self::from_index)
+            .ok_or_else(|| anyhow!("unknown profession `{value}`"))
+    }
+}
+impl TryFrom<u32> for Profession {
+    type Error = anyhow::Error;
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        u8::try_from(value)
+            .ok()
+            .and_then(Self::from_repr)
+            .ok_or_else(|| anyhow!("unknown profession `{value}`"))
+    }
+}
+impl TryFrom<i32> for Profession {
+    type Error = <Self as TryFrom<u32>>::Error;
 
+    #[inline]
     fn try_from(value: i32) -> Result<Self, Self::Error> {
-        use Profession::*;
-        Ok(match value {
-            1 => Guardian,
-            2 => Warrior,
-            3 => Engineer,
-            4 => Ranger,
-            5 => Thief,
-            6 => Elementalist,
-            7 => Mesmer,
-            8 => Necromancer,
-            9 => Revenant,
-            _ => {
-                anyhow::bail!("unknown profession `{value}`")
-            },
-        })
+        (value as u32).try_into()
     }
 }
 
@@ -68,7 +86,7 @@ impl FromStr for Profession {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         use Profession::*;
-        if let Ok(i) = s.parse::<i32>() {
+        if let Ok(i) = s.parse::<u32>() {
             i.try_into()
         } else if s.eq_ignore_ascii_case("guardian") {
             Ok(Guardian)
@@ -88,6 +106,8 @@ impl FromStr for Profession {
             Ok(Necromancer)
         } else if s.eq_ignore_ascii_case("revenant") {
             Ok(Revenant)
+        } else if s.eq_ignore_ascii_case("monster") {
+            Ok(Monster)
         } else {
             Err(anyhow!("unknown profession `{s}`"))
         }
@@ -106,6 +126,7 @@ bitflags! {
         const MESMER = 1 << Profession::Mesmer.index();
         const NECROMANCER = 1 << Profession::Necromancer.index();
         const REVENANT = 1 << Profession::Revenant.index();
+        const MONSTER = 1 << Profession::Monster.index();
     }
 }
 

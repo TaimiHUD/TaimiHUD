@@ -1128,6 +1128,7 @@ impl PackRender {
     }
     pub fn prepare_frame(&mut self, anim_timestamp: Option<f32>) {
         self.resources.anim_timestamp = anim_timestamp;
+        #[cfg(feature = "paths-interact")]
         if let Some(anim_timestamp) = self.resources.anim_timestamp {
             self.draw_state.prune_anims(anim_timestamp);
             if self.draw_state.end_anims(self.pack_data.map_mut_as_slice()) {
@@ -1155,6 +1156,7 @@ impl PackRender {
                 poi.anim = None;
             }
         }
+        #[cfg(feature = "paths-interact")]
         self.draw_state.clear_anims();
     }
     pub fn poi_anim_start(&mut self, lpath: PoiMapPath, when: f32) {
@@ -1170,6 +1172,7 @@ impl PackRender {
         }
     }
     /// TODO: ease out or something
+    #[cfg(feature = "paths-interact")]
     pub fn poi_anim_end(&mut self, lpath: PoiMapPath, when: f32) {
         if self.draw_state.anims.contains_key(&lpath) {
             return
@@ -1179,6 +1182,7 @@ impl PackRender {
         let Some(poi) = pack.pois.lookup_mut(&lpoi_path) else { return };
         let Some(prev_anim) = poi.anim else { return };
         let elapsed = when - prev_anim;
+        #[cfg(feature = "paths-interact")]
         let (bounce_behavour, bounce_duration, bounce_delay) = pack
             .map_info
             .as_ref()
@@ -2048,10 +2052,12 @@ impl PackRenderResources {
                     },
                     ..instance::PoiInstanceData::INVALID
                 });
+                #[cfg(feature = "paths-interact")]
                 let anim_start = pack_data
                     .pois
                     .lookup_ref(&poi.loaded_index())
                     .and_then(|rpoi| rpoi.anim);
+                #[cfg(feature = "paths-interact")]
                 let bounce_args = poi.lpoi_info().get_interaction_attrs().map(|i| {
                     (
                         i.bounce_behavior,
@@ -2060,7 +2066,9 @@ impl PackRenderResources {
                         i.attr_or_default_into::<keys::BounceDelay, f32>(),
                     )
                 });
+                #[cfg(feature = "paths-interact")]
                 let mut bounce_delay: f32 = keys::BounceDelay::DEFAULT.into();
+                #[cfg(feature = "paths-interact")]
                 let bounce = match bounce_args {
                     Some((Some(behaviour), height, duration, delay)) => {
                         bounce_delay = delay;
@@ -2081,10 +2089,15 @@ impl PackRenderResources {
                     }),
                     _ => None,
                 };
+                #[cfg(feature = "paths-interact")]
                 if let Some((behaviour, height, duration)) = bounce {
                     let ending = draw_state.anims.contains_key(&poi.loaded_path());
                     ib.set_bounce(height, duration, behaviour, ending, bounce_delay, anim_start);
                 } else {
+                    ib.clear_bounce();
+                }
+                #[cfg(all(not(feature = "paths-interact"), todo = "unnecessary"))]
+                {
                     ib.clear_bounce();
                 }
                 if !attrs.has_attr_of::<keys::Rotate>() {
@@ -2375,6 +2388,7 @@ pub struct PackRenderState {
     pub prev_map_id: Option<MapIndex>,
     /// TODO: stash this in a common place like machine maybe?
     pub prev_waiting: bool,
+    #[cfg(feature = "paths-interact")]
     pub anims: BTreeMap<PoiMapPath, f32>,
     pub anim_stop: BTreeSet<PoiMapPath>,
     pub primary_draw: bool,
@@ -2403,8 +2417,11 @@ impl PackRenderState {
         }
     }
     pub fn clear_anims(&mut self) {
-        self.anims.clear();
-        self.anim_stop.clear();
+        #[cfg(feature = "paths-interact")]
+        {
+            self.anims.clear();
+            self.anim_stop.clear();
+        }
     }
 
     #[inline]
@@ -2419,10 +2436,12 @@ impl PackRenderState {
         !self.primary_draw
     }
 
+    #[cfg(feature = "paths-interact")]
     pub(super) fn poi_get_anim_end(&self, lpath: PoiMapPath) -> Option<f32> {
         self.anims.get(&lpath).copied()
     }
 
+    #[cfg(feature = "paths-interact")]
     fn prune_anims(&mut self, when: f32) {
         self.anims.retain(|path, end| {
             let ongoing = *end > when;
@@ -2432,6 +2451,7 @@ impl PackRenderState {
             ongoing
         });
     }
+    #[cfg(feature = "paths-interact")]
     fn end_anims(
         &mut self,
         pack_data: &mut IndexedList<PackRegistryNs, PackIndex, [PackRenderData]>,

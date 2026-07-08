@@ -636,12 +636,9 @@ impl PathingConfig {
             CameraSource::Goggles2 => {
                 ui.text_wrapped("goggles must also be enabled");
             },
-            #[cfg(not(feature = "goggles2-camera"))]
-            CameraSource::Goggles2 => {
-                #[cfg(not(feature = "goggles2-camera"))]
-                {
-                    ui.text_wrapped("missing");
-                }
+            #[cfg(not(all(feature = "extension-nexus", feature = "goggles2-camera")))]
+            _ => {
+                ui.text(fl!("feature-unsupported"));
             },
         }
 
