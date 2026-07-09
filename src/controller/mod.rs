@@ -879,17 +879,10 @@ impl Controller {
             WindowState(window, state) => self.set_window_state(&window, state).await,
             LoadTexture(identifier, path) => self.load_texture(identifier, path).await,
             LoadTextureIntegrated(identifier, data) => self.load_texture_integrated(identifier, data).await,
-            UiTick(tick) => {
-                #[cfg(feature = "scripts")]
-                if let Some(m) = script::ScriptMessage::tick(Some(tick.ui_tick())) {
-                    m.try_send();
-                }
-
-                match tick.is_player() {
-                    #[cfg(todo)]
-                    false => (),
-                    _ => self.mumblelink_tick().await?,
-                }
+            UiTick(tick) => match tick.is_player() {
+                #[cfg(todo)]
+                false => (),
+                _ => self.mumblelink_tick().await?,
             },
             Quit(reason) => return Ok(Some(reason)),
             // I forget why we needed this, but I think it's a holdover from the buttplug one o:

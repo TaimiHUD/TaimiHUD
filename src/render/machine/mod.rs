@@ -54,7 +54,7 @@ pub use self::{
     ui::{InterfaceParty, UiStateReport},
 };
 #[cfg(feature = "scripts")]
-use crate::render::plug::PlugElements;
+use crate::{controller::script::ScriptTicker, render::plug::PlugElements};
 
 mod diag;
 mod map;
@@ -135,6 +135,8 @@ pub struct RenderMachine {
     pub pack_ui_state: PackElements,
     #[cfg(feature = "scripts")]
     pub plug_ui_state: PlugElements,
+    #[cfg(feature = "scripts")]
+    pub plug_ticks: ScriptTicker,
     pub metrics_switch: MetricsSwitch,
     pub metrics_checkpoint: Option<Instant>,
     pub metrics_checkpoint_render: Option<Instant>,
@@ -225,6 +227,8 @@ impl RenderMachine {
             pack_ui_state: PackElements::default(),
             #[cfg(feature = "scripts")]
             plug_ui_state: PlugElements::default(),
+            #[cfg(feature = "scripts")]
+            plug_ticks: ScriptTicker::default(),
             metrics_switch: Default::default(),
             metrics_checkpoint: Default::default(),
             metrics_checkpoint_render: Default::default(),
@@ -497,6 +501,14 @@ impl RenderMachine {
         self.mumblelink_frames
             .record_render_tick_at(render_timestamp.unwrap_or(now));
 
+        #[cfg(feature = "scripts")]
+        if self.plug_ticks.wants_subscribe() {
+            Controller::with_sender(|s| {
+                if let Some(scripting) = &s.scripting {
+                    self.plug_ticks.subscribe(scripting);
+                }
+            });
+        }
         #[cfg(feature = "paths")]
         if self.pathing.is_none() {
             Controller::with_sender(|s| {
