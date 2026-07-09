@@ -392,8 +392,15 @@ impl RenderMachine {
         let tick_notable = ui_state_changes
             .intersects(MarkersController::MARKERS_NOTABLE_STATE | TimersController::TIMERS_NOTABLE_STATE)
             || map_id_update.is_some();
-        if tick_notable || playpos_ticked {
-            Controller::try_send(ControllerEvent::UiTick(self.last_ui_tick()));
+        let ui_tick = (tick_notable || playpos_ticked).then(|| self.last_ui_tick());
+        #[cfg(feature = "scripts")]
+        if playpos_ticked {
+            self.plug_ticks.process_player_tick(self.mumblelink_frame);
+        } else {
+            self.plug_ticks.process_new_tick(self.mumblelink_frame);
+        }
+        if let Some(tick) = ui_tick {
+            Controller::try_send(ControllerEvent::UiTick(tick));
         }
 
         let gameplay_update = match map_id_update {

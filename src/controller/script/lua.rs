@@ -11,6 +11,7 @@ use {
         PlugStateBeacon,
         PlugsShared,
         ScriptMessage,
+        ScriptShared,
     },
     crate::{controller::Controller, exports::runtime as rt},
     anyhow::Context,
@@ -75,6 +76,7 @@ pub struct LuaController {
     pub runtime: Option<RuntimeLua>,
     pub rx: mpsc::Receiver<LuaMessage>,
     pub plugs_shared: watch::Sender<PlugsShared>,
+    pub shared: Arc<ScriptShared>,
     pub packs: Vec<LuaPackDesc>,
     pub plugs: Vec<LuaPlugDesc>,
     pub plug_count: usize,
@@ -85,9 +87,14 @@ pub struct LuaController {
     pub prev_tick: u32,
 }
 impl LuaController {
-    pub fn new(rx: mpsc::Receiver<LuaMessage>, plugs_shared: watch::Sender<PlugsShared>) -> Self {
+    pub fn new(
+        rx: mpsc::Receiver<LuaMessage>,
+        shared: Arc<ScriptShared>,
+        plugs_shared: watch::Sender<PlugsShared>,
+    ) -> Self {
         Self {
             rx,
+            shared,
             plugs_shared,
             runtime: None,
             packs: Default::default(),
@@ -101,9 +108,10 @@ impl LuaController {
     }
     pub fn run_new(
         rx: mpsc::Receiver<LuaMessage>,
+        shared: Arc<ScriptShared>,
         plugs_shared: watch::Sender<PlugsShared>,
     ) -> anyhow::Result<()> {
-        Self::new(rx, plugs_shared).run()
+        Self::new(rx, shared, plugs_shared).run()
     }
     pub fn run(&mut self) -> anyhow::Result<()> {
         while !self.exiting {
@@ -189,6 +197,7 @@ impl LuaController {
                 }
             }
         }
+        self.shared.record_lua_tick_interest(false);
         Ok(())
     }
     fn preprocess_message(&mut self, msg: LuaMessage) -> Option<LuaMessage> {
@@ -344,6 +353,9 @@ impl LuaController {
                     let res = plug.notify_with(lua, id, args).with_context(context);
                     let _ = rt::log::warn_ok(res);
                 }
+                if matches!(id, ScriptNotification::PathingTick) {
+                    self.shared.record_lua_processed_tick(self.prev_tick);
+                }
             },
             LuaMessage::NotifyScriptWith { id, args, context } => {
                 let Some(lua) = self.runtime.as_ref() else { return Ok(true) };
@@ -400,20 +412,30 @@ impl LuaController {
             },
             #[cfg(feature = "paths-lua")]
             LuaMessage::SpawnPack(pack_path, entrypoint) => {
+                let was_empty = self.plugs.is_empty() & self.packs.is_empty();
                 let res = self
                     .spawn_pack(pack_path, entrypoint)
                     .and_then(|desc| self.start_pack(desc))
                     .with_context(|| format!("spawning pack.lua for {}", pack_path));
+                if was_empty && res.is_ok() {
+                    // TODO: refresh this when plugs request OnTick interest
+                    self.shared.record_lua_tick_interest(true);
+                }
                 res?;
             },
             LuaMessage::SpawnPlug(path) => {
                 let pathname = rt::relative_path(&path);
                 let entrypoint =
                     fs::File::open(&path).with_context(|| format!("opening {}", pathname.display()))?;
+                let was_empty = self.plugs.is_empty() & self.packs.is_empty();
                 let res = self
                     .spawn_plug(&path, &mut { entrypoint })
                     .and_then(|desc| self.start_plug(desc))
                     .with_context(|| format!("spawning plug.lua for {}", pathname.display()));
+                if was_empty && res.is_ok() {
+                    // TODO: refresh this when plugs request OnTick interest
+                    self.shared.record_lua_tick_interest(true);
+                }
                 res?;
             },
             LuaMessage::Stop { context: ScriptIndex::GLOBAL } => {
@@ -427,6 +449,8 @@ impl LuaController {
                         .context(lazyfmt::fmt_args!(move "stopping {path}"));
                     rt::log::warn_ok(res);
                 }
+                #[cfg(todo = "unnecessary")]
+                self.shared.record_lua_tick_interest(false);
             },
             LuaMessage::Stop { context } => {
                 let res = match context.namespace() {
@@ -470,6 +494,9 @@ impl LuaController {
                     },
                     _ => anyhow::bail!("how to stop {context}?"),
                 };
+                if res.is_ok() && self.plugs.is_empty() && self.packs.is_empty() {
+                    self.shared.record_lua_tick_interest(false);
+                }
                 self.plugs_shared
                     .send_if_modified(|shared| match context.namespace() {
                         ScriptIndex::NS_PLUG => {

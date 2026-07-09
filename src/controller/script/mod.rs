@@ -5,12 +5,12 @@ use {
     self::id::{LoadedScriptNs, ScriptEventPath},
     crate::{exports::runtime as rt, settings::pathing::TriggerKind, Interruption},
     anyhow::Context,
-    core::{any::Any, fmt},
+    core::{any::Any, fmt, num::NonZero},
     std::{
         collections::BTreeMap,
         path::Path,
         sync::{
-            atomic::{AtomicUsize, Ordering},
+            atomic::{AtomicU32, AtomicUsize, Ordering},
             Arc,
             RwLock,
             RwLockReadGuard,
@@ -365,9 +365,10 @@ impl ScriptController {
     async fn start_lua(&mut self) -> anyhow::Result<()> {
         log::debug!("starting lua...");
         let lua_tx = self.lua_tx.insert(None);
+        let shared = self.rx.shared.clone();
         let plugs_shared = self.rx.plugs_shared.clone();
         let (tx, rx) = mpsc::channel(48);
-        let lua = move || lua::LuaController::run_new(rx, plugs_shared);
+        let lua = move || lua::LuaController::run_new(rx, shared, plugs_shared);
         let controller = thread::Builder::new()
             .name(format!("{}/controller/lua", rt::CRATE_NAME))
             .spawn(lua)
@@ -495,6 +496,7 @@ impl ScriptRequest {
 pub struct ScriptSender {
     pub command: mpsc::Sender<ScriptMessage>,
     pub plugs_shared: watch::Sender<PlugsShared>,
+    pub shared: Arc<ScriptShared>,
 }
 impl fmt::Debug for ScriptSender {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
@@ -504,6 +506,7 @@ impl fmt::Debug for ScriptSender {
 pub struct ScriptReceiver {
     pub command: mpsc::Receiver<ScriptMessage>,
     pub plugs_shared: watch::Sender<PlugsShared>,
+    pub shared: Arc<ScriptShared>,
     #[cfg(feature = "paths")]
     pub pathing: Arc<PathingShared>,
     #[cfg(feature = "paths-interact")]
@@ -520,10 +523,12 @@ impl ScriptSender {
         let sender = Self {
             command: tx,
             plugs_shared: Default::default(),
+            shared: Default::default(),
         };
         let receiver = ScriptReceiver {
             command: rx,
             plugs_shared: sender.plugs_shared.clone(),
+            shared: sender.shared.clone(),
             #[cfg(feature = "paths-interact")]
             rx_interact: pathing.interact.events.subscribe(),
             #[cfg(feature = "paths")]
@@ -532,6 +537,121 @@ impl ScriptSender {
         (sender, receiver)
     }
     const QUEUE_LEN: usize = 64;
+}
+
+#[derive(Debug, Default)]
+pub struct ScriptShared {
+    #[cfg(feature = "scripts-lua")]
+    pub lua_processed_tick: Arc<AtomicU32>,
+}
+impl ScriptShared {
+    #[inline]
+    pub fn read_last_processed_tick(&self) -> Option<NonZero<u32>> {
+        #[cfg(feature = "scripts-lua")]
+        if let Some(tick) = NonZero::new(self.lua_processed_tick.load(Ordering::Relaxed)) {
+            return Some(tick)
+        }
+        None
+    }
+    #[cfg(feature = "scripts-lua")]
+    fn record_lua_processed_tick(&self, tick: u32) {
+        self.record_lua_processed_tick_of(Some(tick));
+    }
+    #[cfg(feature = "scripts-lua")]
+    fn record_lua_tick_interest(&self, want_tick: bool) {
+        let recent = want_tick
+            .then(|| {
+                rt::mumble_link_ptr()
+                    .ok()
+                    .map(|ml| ml.read_ui_tick().wrapping_sub(ScriptTicker::TICK_TIMEOUT >> 3))
+            })
+            .flatten();
+        self.record_lua_processed_tick_of(recent);
+    }
+    #[cfg(feature = "scripts-lua")]
+    fn record_lua_processed_tick_of(&self, tick: Option<u32>) {
+        let tick = tick.map(|t| t.max(1u32)).unwrap_or(0u32);
+        self.lua_processed_tick.store(tick, Ordering::Relaxed);
+    }
+}
+/// TODO: placeholder until Controller gets some sort of sane time tracking...
+#[derive(Debug, Clone, Default)]
+pub struct ScriptTicker {
+    pub last_sent: u32,
+    pub next_scheduled: u32,
+    pub last_period: u32,
+    pub shared: Option<Arc<ScriptShared>>,
+    pub tx: Option<mpsc::Sender<ScriptMessage>>,
+}
+impl ScriptTicker {
+    #[inline]
+    pub fn wants_subscribe(&self) -> bool {
+        self.shared.is_none()
+    }
+    pub fn subscribe(&mut self, sender: &ScriptSender) {
+        self.shared = Some(sender.shared.clone());
+        self.tx = Some(sender.command.clone());
+    }
+    pub fn unsubscribe(&mut self) {
+        self.next_scheduled = 0;
+        self.shared = None;
+        self.tx = None;
+    }
+    pub fn process_new_tick(&mut self, ui_frame: u32) -> bool {
+        if self.next_scheduled != 0 && Self::tick_is_earlier_than(ui_frame, self.next_scheduled) {
+            // not yet time
+            return false
+        }
+        let last_processed = self
+            .shared
+            .as_ref()
+            .and_then(|s| s.read_last_processed_tick())
+            .map(|l| l.get());
+        let Some(last) = last_processed else {
+            self.next_scheduled = 0;
+            return false
+        };
+        if Self::tick_is_earlier_than(self.last_sent, last) && !Self::tick_is_expired(last, ui_frame) {
+            return false
+        }
+
+        self.process_tick(ui_frame);
+        true
+    }
+    #[inline]
+    pub fn process_player_tick(&mut self, ui_frame: u32) {
+        self.process_tick(ui_frame)
+    }
+    fn process_tick(&mut self, ui_frame: u32) {
+        if self.next_scheduled == 0 {
+            let interest = self.shared.as_ref().and_then(|s| s.read_last_processed_tick());
+            if interest.is_none() {
+                return
+            }
+        }
+        let sent = if let Some(tick) = ScriptMessage::tick(Some(ui_frame)) {
+            self.tx
+                .as_ref()
+                .and_then(|tx| tx.try_send(tick).is_ok().then_some(self.last_period.max(2) - 1))
+        } else {
+            // back off and pretend it was sent for now
+            Some(Self::TICK_TIMEOUT >> 1)
+        };
+        if let Some(delay) = sent {
+            let prev = core::mem::replace(&mut self.last_sent, ui_frame);
+            self.last_period = ui_frame.wrapping_sub(prev).clamp(1, 0x2000);
+            self.next_scheduled = ui_frame.wrapping_add(delay);
+        }
+    }
+    #[inline]
+    fn tick_is_earlier_than(tick: u32, future: u32) -> bool {
+        tick.wrapping_sub(future) > 0x20000000
+    }
+    const TICK_TIMEOUT: u32 = 0x180;
+    #[inline]
+    fn tick_is_expired(tick: u32, now: u32) -> bool {
+        tick.abs_diff(now) > Self::TICK_TIMEOUT
+    }
 }
 
 #[derive(Debug, Clone, Default)]
