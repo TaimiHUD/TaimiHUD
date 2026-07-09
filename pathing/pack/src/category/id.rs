@@ -1169,6 +1169,15 @@ impl<T: ?Sized + AsFullId> hash::Hash for IdCmpRelaxed<T> {
         }
     }
 }
+/// for use with BTreeMap::range - complicated due to start and end bounds requiring
+/// same type, but also cmp needs know if they're the start or end of range...
+/// probably just needs new type to allocate `format!("{cat_prefix}.")`
+///
+/// TODO: consider mandating that all valid/full IDs end with an empty segment
+/// (or `.`) to make a prefix distinguishable? been wanting to distinguish
+/// between branches and leaves anyway for purpose of attaching markers/attrs/etc...
+#[cfg(todo)]
+impl<T> ops::RangeBounds<dyn IdRangeCmp> for IdCmpRelaxed<T> {}
 impl<T: ?Sized> Borrow<IdCmpRelaxed<FullIdRef>> for IdCmpRelaxed<CategoryId<T>>
 where
     CategoryId<T>: Borrow<FullIdRef>,
