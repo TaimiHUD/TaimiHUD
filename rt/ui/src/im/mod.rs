@@ -53,7 +53,14 @@ pub mod prelude {
                 ImUi,
                 ImUiContextExt as _,
             },
-            tables::{ImTable, ImTableExt as _},
+            tables::{
+                ImTable,
+                ImTableExt as _,
+                ImTableSort,
+                ImTableSortColumn,
+                ImTableSortSpecs,
+                ImTableSortSpecsExt as _,
+            },
             text::{
                 ImDrawText,
                 ImDrawTextExt as _,

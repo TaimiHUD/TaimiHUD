@@ -1773,29 +1773,22 @@ where
     ///
     /// TODO? 3d trigger bounds could point ray downward for distance-sorted iter but we have other factors...
     fn update_sort(&mut self) {
-        match self.ui.imgui_version_num() {
-            Some(im180::VERSION_NUM) => (),
-            // TODO
-            _ => return,
-        };
-        let sorting =
-            unsafe { core::ptr::NonNull::new(im180::sys::igTableGetSortSpecs()).map(|s| &mut *s.as_ptr()) };
-        let should_sort = sorting.as_ref().map(|s| s.SpecsDirty);
-        if !should_sort.unwrap_or(false) && !self.state.is_dirty() {
+        let sorting = self.ui.table_sort_specs_mut_dyn();
+        let should_sort = sorting.as_ref().map(|s| s.is_dirty()).unwrap_or(false);
+        if !should_sort && !self.state.is_dirty() {
             return
         }
         let mut sort_desc = InteractSortFlags::empty();
         let mut sorts = InteractSortFlags::empty();
-        if let Some(specs) = &sorting {
+        if let Some(sorting) = &sorting {
             let cols = [
                 (Self::HEADER_TITLE, InteractSortFlags::DISTANCE),
                 (Self::HEADER_NEARBY, InteractSortFlags::NEARBY),
                 (Self::HEADER_HIDDEN, InteractSortFlags::VISIBLE),
                 (Self::HEADER_INTERACT, InteractSortFlags::INTERACTIVE),
             ];
-            for spec_idx in 0..specs.SpecsCount as usize {
-                let spec = unsafe { &*specs.Specs.add(spec_idx) };
-                let Some(&(_id, flag)) = cols.get(spec.ColumnIndex as usize) else {
+            for spec in sorting.specs() {
+                let Some(&(_id, flag)) = cols.get(spec.column() as usize) else {
                     log::debug!("BUG: spec idx");
                     continue
                 };
@@ -1805,68 +1798,30 @@ where
                 }
                 sorts.insert(flag);
                 #[cfg(todo)]
-                let order = spec.sort_order();
-                match spec.SortDirection() as u32 {
-                    im180::sys::ImGuiSortDirection_Descending => sort_desc.insert(flag),
-                    im180::sys::ImGuiSortDirection_Ascending => (),
-                    #[cfg(todo)]
-                    _ => sorts.remove(flag),
-                    _ => (),
+                let order = spec.priority();
+                match spec.is_ascending() {
+                    Some(false) => sort_desc.insert(flag),
+                    Some(true) => (),
+                    #[cfg(taimi_debug)]
+                    None => {
+                        log::debug!("TODO: neutral sort column?");
+                        sorts.remove(flag);
+                    },
+                    None => (),
                 }
             }
         } else {
-            sorts = InteractSortFlags::DEFAULT_UI
+            sorts = InteractSortFlags::DEFAULT_UI;
         };
-        if self.state.prepare_sort(sorts) | should_sort.unwrap_or(false) {
+        if self.state.prepare_sort(sorts) | should_sort {
             self.state.apply_sort(sorts, sort_desc)
         }
-        if let (Some(sorting), Some(true)) = (sorting, should_sort) {
-            sorting.SpecsDirty = false;
-        }
-    }
-    #[cfg(todo)]
-    fn update_sort(&mut self) {
-        let sorting = self.ui.table_sort_specs_mut();
-        let should_sort = sorting.as_ref().map(|s| s.should_sort());
-        if should_sort.unwrap_or(false) || self.state.is_dirty() {
-            let mut sort_desc = InteractSortFlags::empty();
-            let mut sorts = InteractSortFlags::empty();
-            if let Some(sorting) = &sorting {
-                let specs = sorting.specs();
-                let cols = [
-                    (Self::HEADER_TITLE, InteractSortFlags::DISTANCE),
-                    (Self::HEADER_NEARBY, InteractSortFlags::NEARBY),
-                    (Self::HEADER_HIDDEN, InteractSortFlags::VISIBLE),
-                    (Self::HEADER_INTERACT, InteractSortFlags::INTERACTIVE),
-                ];
-                for spec in specs.iter() {
-                    let Some(&(_id, flag)) = cols.get(spec.column_idx() as usize) else {
-                        log::debug!("BUG: spec idx");
-                        continue
-                    };
-                    #[cfg(todo = "unnecessary")]
-                    if flag.is_empty() {
-                        continue
-                    }
-                    sorts.insert(flag);
-                    #[cfg(todo)]
-                    let order = spec.sort_order();
-                    match spec.sort_direction() {
-                        #[cfg(todo)]
-                        None => sorts.remove(flag),
-                        Some(TableSortDirection::Descending) => sort_desc.insert(flag),
-                        _ => (),
-                    }
-                }
-            } else {
-                sorts = InteractSortFlags::DEFAULT_UI
-            };
-            if self.state.prepare_sort(sorts) | should_sort.unwrap_or(false) {
-                self.state.apply_sort(sorts, sort_desc)
-            }
-            if let (Some(mut sorting), Some(true)) = (sorting, should_sort) {
-                sorting.set_sorted();
-            }
+        let sorted = should_sort.then(|| unsafe {
+            // can't be true if it wasn't Some!
+            sorting.unwrap_unchecked()
+        });
+        if let Some(sorting) = sorted {
+            sorting.mark_clean();
         }
     }
 }
