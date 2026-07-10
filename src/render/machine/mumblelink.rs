@@ -330,7 +330,8 @@ impl RenderMachine {
         }
 
         if playpos_ticked {
-            if !crate::built_info::IS_TAGGED_VERSION {
+            #[cfg(taimi_debug)]
+            {
                 let up = Vector3::<LocalSpace>::from_array(unsafe {
                     ptr::read_volatile(&raw const (*avatar).top)
                 });
