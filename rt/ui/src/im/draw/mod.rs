@@ -10,6 +10,7 @@ pub trait ImDrawWindow<'ui>:
     + ImDraw
     + ImTable
     + ImTableLegacy
+    + ImTableSort
     + ImTableStack<'ui>
     + ImDrawText
     + ImFontStack<'ui, (), FontToken = ()>
@@ -39,6 +40,7 @@ impl<'ui, U> ImDrawWindow<'ui> for U where
         + ImDrawText
         + ImTable
         + ImTableLegacy
+        + ImTableSort
         + ImTableStack<'ui>
         + ImColourStack<'ui, ImColourIndex, StyleTokenColour = UiTokenDyn<'ui>>
         + ImColourContainer<ImColourIndex>

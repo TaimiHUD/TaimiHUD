@@ -96,9 +96,60 @@ pub trait ImTableExt: ImTable {
         let name = name.as_mut().map(|n| n as &mut dyn ImStr);
         self.table_column_setup_dyn_untyped(name, untyped_flags, init_size, user_id);
     }
+    #[inline]
+    fn table_sort_is_dirty(&self) -> bool
+    where
+        Self: ImTableSort,
+    {
+        self.table_sort_specs_dyn()
+            .map(|sort| sort.is_dirty())
+            .unwrap_or(false)
+    }
+    #[inline]
+    fn table_sort_dyn_if_dirty(&mut self) -> Option<&mut dyn ImTableSortSpecs>
+    where
+        Self: ImTableSort,
+    {
+        self.table_sort_specs_mut_dyn()
+            .and_then(|sort| sort.is_dirty().then_some(sort))
+    }
 }
 impl<U: ?Sized + ImTable> ImTableExt for U {}
 pub trait ImTableLegacy {
     fn table_legacy_columns_dyn(&mut self, count: u32, ident: &mut dyn ImStr, border: bool);
     fn table_legacy_columns_next(&mut self);
 }
+
+pub trait ImTableSort {
+    #[cfg(todo)]
+    fn with_table_sort_specs_dyn_mut(&mut self, f: &mut dyn FnMut(&mut dyn TableSortSpecs));
+    fn table_sort_specs_dyn(&self) -> Option<&dyn ImTableSortSpecs>;
+    fn table_sort_specs_mut_dyn(&mut self) -> Option<&mut dyn ImTableSortSpecs>;
+}
+pub trait ImTableSortSpecs {
+    fn is_dirty(&self) -> bool;
+    fn set_dirty(&mut self, dirty: bool);
+    /// TODO: consider the `dyn_slice` crate if unstable is acceptable?
+    /// or a dyn collection trait otherwise idk :<
+    fn specs<'a>(&'a self) -> Box<dyn Iterator<Item = &'a dyn ImTableSortColumn> + 'a>;
+    #[cfg(todo)]
+    fn specs(&self) -> DynSlice<'_, dyn ImTableSortColumn>;
+    #[cfg(todo)]
+    fn specs_mut(&mut self);
+}
+pub trait ImTableSortColumn {
+    fn user_id(&self) -> u32;
+    /// index
+    fn column(&self) -> u32;
+    /// TODO: currently redundant because specs will be ordered by imgui
+    fn priority(&self) -> isize;
+    /// TODO: ordering enum? cmp::Ordering?
+    fn is_ascending(&self) -> Option<bool>;
+}
+pub trait ImTableSortSpecsExt: ImTableSortSpecs {
+    #[inline(always)]
+    fn mark_clean(&mut self) {
+        self.set_dirty(false);
+    }
+}
+impl<U: ?Sized + ImTableSortSpecs> ImTableSortSpecsExt for U {}

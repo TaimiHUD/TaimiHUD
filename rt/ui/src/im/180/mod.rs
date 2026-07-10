@@ -34,6 +34,7 @@ use {
         num::NonZero,
         ops::RangeInclusive,
         ptr::{self, NonNull},
+        slice,
     },
     glamour::Box2,
 };
@@ -1450,6 +1451,74 @@ impl<'ui> ImTableLegacy for Ui<'ui> {
     #[inline(always)]
     fn table_legacy_columns_next(&mut self) {
         ImTableLegacy::table_legacy_columns_next(&mut &*self)
+    }
+}
+impl<'ui> ImTableSort for &'_ Ui<'ui> {
+    #[inline(always)]
+    fn table_sort_specs_dyn(&self) -> Option<&dyn ImTableSortSpecs> {
+        ImTableSort::table_sort_specs_dyn(*self)
+    }
+    fn table_sort_specs_mut_dyn(&mut self) -> Option<&mut dyn ImTableSortSpecs> {
+        unsafe {
+            NonNull::new(sys::igTableGetSortSpecs())
+                .map(|sort| &mut *sort.as_ptr() as &mut dyn ImTableSortSpecs)
+        }
+    }
+    #[cfg(todo)]
+    fn table_sort_specs_mut_dyn(&mut self) -> Option<&mut dyn ImTableSortSpecs> {
+        unsafe { mem::transmute(self.table_sort_specs_dyn()) }
+    }
+}
+impl<'ui> ImTableSort for Ui<'ui> {
+    fn table_sort_specs_dyn(&self) -> Option<&dyn ImTableSortSpecs> {
+        unsafe {
+            NonNull::new(sys::igTableGetSortSpecs()).map(|sort| &*sort.as_ptr() as &dyn ImTableSortSpecs)
+        }
+    }
+    #[inline(always)]
+    fn table_sort_specs_mut_dyn(&mut self) -> Option<&mut dyn ImTableSortSpecs> {
+        unsafe {
+            NonNull::new(sys::igTableGetSortSpecs())
+                .map(|sort| &mut *sort.as_ptr() as &mut dyn ImTableSortSpecs)
+        }
+    }
+}
+/// TODO: any traits on sys structs should be on a newtype since fields are public...
+impl<'ui> ImTableSortSpecs for sys::ImGuiTableSortSpecs {
+    fn specs(&self) -> Box<dyn Iterator<Item = &dyn ImTableSortColumn>> {
+        unsafe {
+            let ptrs = slice::from_raw_parts(self.Specs, self.SpecsCount as usize);
+            let iter = ptrs.iter().map(|p| p as &dyn ImTableSortColumn);
+            Box::new(iter) as Box<_>
+        }
+    }
+    fn is_dirty(&self) -> bool {
+        self.SpecsDirty
+    }
+    fn set_dirty(&mut self, dirty: bool) {
+        self.SpecsDirty = dirty;
+    }
+}
+impl<'ui> ImTableSortColumn for sys::ImGuiTableColumnSortSpecs {
+    #[inline]
+    fn column(&self) -> u32 {
+        self.ColumnIndex as _
+    }
+    #[inline]
+    fn user_id(&self) -> u32 {
+        self.ColumnUserID
+    }
+    #[inline]
+    fn priority(&self) -> isize {
+        self.SortOrder as isize
+    }
+    #[inline]
+    fn is_ascending(&self) -> Option<bool> {
+        match self.SortDirection() as sys::ImGuiSortDirection_ {
+            sys::ImGuiSortDirection_Ascending => Some(true),
+            sys::ImGuiSortDirection_Descending => Some(false),
+            sys::ImGuiSortDirection_None | _ => None,
+        }
     }
 }
 impl<'ui> ImTableStack<'ui> for &'_ Ui<'ui> {
