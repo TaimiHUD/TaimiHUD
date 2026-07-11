@@ -4,6 +4,7 @@ use {
         LocalizationsEmbed,
     },
     anyhow::Context,
+    core::cell::RefCell,
     i18n_embed::{
         fluent::{fluent_language_loader, FluentLanguageLoader},
         I18nAssets,
@@ -124,8 +125,6 @@ pub fn with_i18n_message<R, F>(message_id: &str, f: F) -> R
 where
     F: FnOnce(Option<(fluent::FluentMessage, &FluentBundle)>, &mut FluentErrors) -> R,
 {
-    use core::cell::RefCell;
-
     // XXX: why does this not take an FnOnce...
     let mut errors = Vec::new();
     let f = RefCell::new((Some(f), &mut errors));
@@ -181,6 +180,31 @@ where
                 },
         }
     }
+    res
+}
+#[inline]
+pub fn with_current_bundle<R, F: FnOnce(&FluentBundle) -> R>(f: F) -> Option<R> {
+    with_bundle_for(MSG_PLACEHOLDER_ALL, f)
+}
+#[inline]
+pub fn with_fallback_bundle<R, F: FnOnce(&FluentBundle) -> R>(f: F) -> Option<R> {
+    with_bundle_for(MSG_PLACEHOLDER_FALLBACK, f)
+}
+fn with_bundle_for<R, F: FnOnce(&FluentBundle) -> R>(msg: &str, f: F) -> Option<R> {
+    let f = RefCell::new(Some(f));
+    let res = LOADER.with_fluent_message_and_bundle(msg, |_m, b| {
+        let f = match f.try_borrow_mut() {
+            #[cfg(debug_assertions)]
+            mut f => f
+                .as_mut()
+                .ok()
+                .and_then(|f| f.take())
+                .expect("with_message not FnOnce"),
+            #[cfg(not(debug_assertions))]
+            f => unsafe { f.unwrap_unchecked().take().unwrap_unchecked() },
+        };
+        f(b)
+    });
     res
 }
 #[macro_export]
@@ -290,6 +314,13 @@ pub const LANG_DE: LanguageIdentifier = new_lang_id!(de-DE-);
 pub const LANG_ES: LanguageIdentifier = new_lang_id!(es-ES-);
 pub const LANG_ZH: LanguageIdentifier = new_lang_id!(zh-CN-);
 
+/// a message id guaranteed to only be present in the fallback language (english)
+pub(crate) const MSG_PLACEHOLDER_FALLBACK: &'static str = "locale-native-en";
+#[cfg(todo)]
+const MSG_PLACEHOLDER_SENTINEL: &'static str = "locale-native-fallback";
+/// a message id guaranteed be present in all languages
+pub(crate) const MSG_PLACEHOLDER_ALL: &'static str = "locale-name";
+
 pub fn load_language(language: &LanguageIdentifier) -> anyhow::Result<()> {
     let requested = slice::from_ref(language);
     let changing = LOADER.current_language() != *language;
@@ -299,6 +330,27 @@ pub fn load_language(language: &LanguageIdentifier) -> anyhow::Result<()> {
     language_loader_setup(&LOADER);
     if changing && LOADER.current_language() == *language {
         log::info!("Selected language {language}");
+        #[cfg(todo)]
+        let fallback_fill = LOADER.with_fluent_message_and_bundle(MSG_PLACEHOLDER_SENTINEL, |_, b| {
+            b.locales.get(0) == Some(language)
+        }) == Some(false);
+        #[cfg(todo)]
+        if fallback_fill {
+            // fill in missing keys so that english fallback patterns will interpolate
+            // using the target language where possible.
+            // TODO: i18n-embed doesn't expose the fluent resources, so we can't do the straightforward thing
+            // here and just add_resource() the fallback... :<
+            let msgs = with_current_bundle(|b| {
+                LOADER.with_message_iter(LOADER.fallback_language, |m| {
+                    m.filter(|m| !b.has_message(m.id())).collect()
+                })
+            });
+            LOADER.with_bundles_mut(|b| {
+                if b.locales.get(0) != Some(language) {
+                    return
+                }
+            })
+        }
     }
     I18N_INIT_LOADED.store(true, Ordering::Relaxed);
     Ok(())

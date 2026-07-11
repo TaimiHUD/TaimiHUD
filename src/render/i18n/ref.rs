@@ -126,13 +126,14 @@ where
     }
 }
 impl<'a> FluentBundleArgs<'a> for () {
-    fn fluent_args<'b>(&'b self, bundle: &'b FluentBundle) -> Option<FluentArgs<'b>>
+    fn fluent_args<'b>(&'b self, _: &'b FluentBundle) -> Option<FluentArgs<'b>>
     where
         'a: 'b,
     {
         None
     }
 }
+#[cfg(todo = "unnecessary")]
 fn no_args<'a, 'b>(_: &'b FluentBundle) -> Option<FluentArgs<'a>> {
     None
 }
@@ -215,6 +216,8 @@ where
         let id = self.id.as_ref();
         let res = with_i18n_message(id, |m, errors| {
             m.and_then(|(m, b)| {
+                #[cfg(todo)]
+                let is_fallback = b.locales.get(0) != Some(super::current_language());
                 m.value()
                     .map(|p| b.write_pattern(f, p, self.args(b).as_ref(), errors))
             })

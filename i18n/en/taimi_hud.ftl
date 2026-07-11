@@ -615,3 +615,13 @@ Squad_Object_Triangle = {gamebind-marker-triangle}{gamebind-marker-object-suffix
 Squad_Object_X = {gamebind-marker-x}{gamebind-marker-object-suffix}
 Squad_ClearAllLocationMarkers = {gamebind-marker-clear}{gamebind-marker-location-suffix}
 Squad_ClearAllObjectMarkers = {gamebind-marker-clear}{gamebind-marker-object-suffix}
+
+# i18n
+locale-name = English
+#locale-name-de = German
+#locale-name-de-DE = {locale-name-de} (Germany)
+
+# DO NOT COPY INTO NEW LANGUAGES - add entry here instead
+locale-native-fallback = PLACEHOLDER
+locale-native-en = English
+locale-native-de = Deutsch
