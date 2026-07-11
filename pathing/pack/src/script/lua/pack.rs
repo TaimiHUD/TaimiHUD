@@ -66,6 +66,11 @@ use {
     std::io,
 };
 
+pub const FILES_URL_SCHEME: &'static str = "gw2files";
+pub const FILES_URL_PREFIX: &'static str = "gw2files://";
+pub const FILES_URL_ROOT_V1: &'static str = "v1";
+pub const FILES_URL_ROOT_V2: &'static str = "v2";
+
 pub struct GlobalInstancePack;
 impl<T> UserData for ScriptApiTable<GlobalInstancePack, T>
 where
@@ -374,6 +379,12 @@ where
         reg.add_method("OpenTexture", |lua, this, (path,): (BorrowedStr<'_>,)| {
             this.borrow()
                 .open_texture(&path[..])
+                .map_err(to_lua_error)
+                .and_then(|tex| tex.to_lua_handle(lua))
+        });
+        reg.add_method("OpenWebTexture", |lua, this, (path,): (BorrowedStr<'_>,)| {
+            this.borrow()
+                .open_web_texture(&path[..])
                 .map_err(to_lua_error)
                 .and_then(|tex| tex.to_lua_handle(lua))
         });

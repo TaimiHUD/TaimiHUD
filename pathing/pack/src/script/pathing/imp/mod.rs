@@ -129,6 +129,13 @@ impl ScriptApiPackAssets for Unimplemented {
         Ok(*self)
     }
     type Texture = Self;
+    fn open_web_texture<P>(&self, _path: P) -> Result<Self::WebTexture>
+    where
+        P: ScriptUserStr,
+    {
+        Ok(*self)
+    }
+    type WebTexture = Self;
 }
 impl ScriptApiVersion for Unimplemented {
     fn taimi_version(&self) -> Cow<'_, str> {

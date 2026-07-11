@@ -10,6 +10,7 @@ use {
 
 pub use self::{
     festival::{Festival, Festivals},
+    keys::AttrStr,
     mount::{Mount, Mounts},
     profession::{Profession, Professions},
     race::{Race, Races},

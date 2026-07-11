@@ -31,8 +31,21 @@ Context.env.I = {
 	Color = util.fun_skip1(vectors.Colour),
 	Guid = util.fun_skip1(vectors.Guid),
 }
-function Context.env.I:WebTexture(id)
-	error("unimplemented: WebTexture")
+function Context.env.I:NamedTextureV1(id)
+	return require"@taimi/api/files".Files.UrlV1(id)
+end
+function Context.env.I:NamedTextureV2(id)
+	return require"@taimi/api/files".Files.UrlV2(id)
+end
+function Context.env.I:NamedTexture(id)
+	if type(id) == "number" then
+		return self:NamedTextureV1(id)
+	else
+		return self:NamedTextureV2(id)
+	end
+end
+function Context.env.I:WebTexture(url)
+	return url
 end
 
 Context.user_alerts = {}
@@ -256,14 +269,26 @@ function Context.env_for_plug(pack_info, genv, out, pack_info_key)
 	local menus = require"@taimi/compat/menu"
 	-- TODO: out.World = all packs?
 	out.Menu = menus.RootMenu.new(Taimi.ctx.plug, Taimi.ctx.events)
-	out.I = util.alias_index_to(out.I, {})
+	out.I = util.alias_index_to(out.I, {
+		[pack_info_key] = Taimi.ctx.plug,
+	})
 	function out.I:Texture(a, ...)
-		if type(a) == "number" then
-			return out.I:WebTexture(a, ...)
+		local open, pack = "OpenTexture", self[pack_info_key]
+		local a_ty = type(a)
+		if a_ty == "number" then
+			open = "OpenWebTexture"
+			path = out.I:NamedTextureV1(a, ...)
+		elseif a_ty == "string" then
+			open = "OpenWebTexture"
+			-- TODO? if a contains "/" then path = self:WebTexture(a)
+			-- TODO? path = out.I:NamedTextureV2(a, ...)
+			error("I:Texture(Pack, ...) expected", 2)
 		else
-			local pack = a
-			return pack[pack_info_key]:GetPackAssets():OpenTexture(...)
+			pack = a[pack_info_key] or a
+			path = ...
 		end
+		local assets = pack:GetPackAssets()
+		return assets[open](assets, path)
 	end
 	return out
 end

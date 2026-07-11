@@ -51,7 +51,10 @@ use {
         TrailIndex,
         TrailPath,
     },
-    taimi_pack::{attributes::AttrString, Pack},
+    taimi_pack::{
+        attributes::{AttrStr, AttrString},
+        Pack,
+    },
     taimi_sync::{
         arcs::ArcPtrCmp,
         watched::{watch, Watcher},
@@ -268,6 +271,13 @@ impl SharedPackInfo {
         keys.entry(resource.clone())
             .or_insert_with(|| Arc::from(self.gen_key_for_subresource(resource)))
             .clone()
+    }
+    pub fn lookup_key_for_subresource(&self, resource: impl AsRef<AttrStr>) -> Option<Arc<str>> {
+        self.lookup_key_for_subresource_inner(resource.as_ref())
+    }
+    fn lookup_key_for_subresource_inner(&self, resource: &AttrStr) -> Option<Arc<str>> {
+        let keys = self.allocated_keys.read().ok()?;
+        keys.get(resource).cloned()
     }
     pub fn gen_key_for_subresource(&self, resource: &AttrString) -> String {
         let packname = self.path_name();

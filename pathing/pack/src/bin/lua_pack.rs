@@ -48,6 +48,9 @@ fn main() -> anyhow::Result<()> {
     lua.setup_api_event(events.clone())?;
     //preload_lib(&lua, "@taimi/core/event.lua")?;
     preload_lib(&lua, "@taimi/event.lua")?;
+    preload_lib(&lua, "@taimi/api/files.lua")?;
+    preload_lib(&lua, "@taimi/api/init.lua")?;
+    preload_lib(&lua, "@taimi/url/init.lua")?;
     //lua.setup_api_bindings::<script::Unimplemented, script::Unimplemented, _>()?;
     preload_lib(&lua, "@taimi/core/bindings.lua")?;
     preload_lib(&lua, "@taimi/bindings.lua")?;
@@ -627,6 +630,13 @@ impl script::pathing::ScriptApiPackAssets for PackApi {
         Ok(TextureApi::new(path.clone_to_string()))
     }
     type Texture = TextureApi;
+    fn open_web_texture<P>(&self, url: P) -> script::Result<Self::WebTexture>
+    where
+        P: ScriptUserStr,
+    {
+        Ok(TextureApi::new(url.clone_to_string()))
+    }
+    type WebTexture = TextureApi;
 }
 impl script::pathing::PackHandle for PackApi {
     fn get_category<I>(&self, id: I) -> script::Result<Option<Self::Category>>

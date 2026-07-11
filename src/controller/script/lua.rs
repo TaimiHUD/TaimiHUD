@@ -576,6 +576,9 @@ impl LuaController {
         lua.setup_api_mumble(super::mumble::ScriptHostMumbleLink::new())?;
         lua.setup_api_event(super::event::ScriptHostEvent::new())?;
         EmbeddedLuaTaimi::preload_lib(lua, "@taimi/event.lua")?;
+        EmbeddedLuaTaimi::preload_lib(lua, "@taimi/api/files.lua")?;
+        EmbeddedLuaTaimi::preload_lib(lua, "@taimi/api/init.lua")?;
+        EmbeddedLuaTaimi::preload_lib(lua, "@taimi/url/init.lua")?;
         lua.setup_api_bindings::<rt::bindings::GameControls, _, _>(rt::bindings::interesting_controls())?;
         EmbeddedLuaTaimi::preload_lib(lua, "@taimi/bindings.lua")?;
         lua.setup_api_ui_exchange(super::ui::ScriptHostUiX::new())?;
@@ -1436,6 +1439,13 @@ impl script::pathing::ScriptApiPackAssets for LuaPlugDesc {
         Err(script::format_err!("TODO: open_texture"))
     }
     type Texture = script::Unimplemented;
+    fn open_web_texture<P>(&self, path: P) -> script::Result<Self::WebTexture>
+    where
+        P: script::user::ScriptUserStr,
+    {
+        Err(script::format_err!("TODO: open_web_texture"))
+    }
+    type WebTexture = script::Unimplemented;
 }
 
 impl ops::Deref for LuaPlugDesc {

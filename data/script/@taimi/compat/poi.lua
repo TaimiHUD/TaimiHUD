@@ -163,7 +163,9 @@ function Poi.i:SetTexture(tex)
 	end
 end
 function Poi.i:SetWebTexture(id)
-	error("unimplemented: SetWebTexture")
+	local url = require"@taimi/api/files".UrlFromId(id)
+	local tex = self.pack_info:GetPackAssets():OpenWebTexture(url)
+	self:SetAttrByKey("iconfile", tostring(tex))
 end
 function Poi.i:GetTexture()
 	local tex = self[ud.key_instance]:GetAttrByKey("iconfile")
