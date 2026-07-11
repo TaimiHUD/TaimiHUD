@@ -1,7 +1,7 @@
 use {
     crate::{
         exports::runtime as rt,
-        resources::shader::{ShaderDescription, ShaderPair},
+        resources::shader::{ShaderDescription, ShaderLayout, ShaderPair},
     },
     anyhow::Context,
     futures::future::Either,
@@ -171,6 +171,30 @@ impl ShaderLoader {
         layout
             .and_then(|layout| self.insert(device, identifier.into(), bytecode, layout))
             .with_context(context)
+    }
+    pub fn load_reinterpret(
+        &mut self,
+        device: &Dx11Device,
+        identifier: &str,
+        bytecode: &Blob,
+        layout: ShaderLayout,
+        template_id: &str,
+    ) -> anyhow::Result<()> {
+        if self.vertex.contains_key(identifier) {
+            return Ok(())
+        }
+        let context = || format!("interpreting shader {template_id} as {identifier}");
+        self.vertex
+            .get(template_id)
+            .context("missing")
+            .and_then(|(template, _)| {
+                let desc = layout.input_layout_desc();
+                InputLayout::new_with_desc(device, desc, bytecode).map(|l| (template.clone(), l))
+            })
+            .with_context(context)
+            .map(|entry| {
+                self.vertex.insert(identifier.into(), entry);
+            })
     }
 
     pub fn pair_named(&self, name: &str) -> anyhow::Result<ShaderPair> {

@@ -38,6 +38,7 @@ pub struct TrailRender {
     pub texture: Option<TextureSlot>,
     pub section_vbuffer: Option<VertexBuffer>,
     pub section_vb_ng: Option<super::instance::TrailVertexBuffer>,
+    pub section_vb_ng_map: Option<super::instance::Map2dVertexBuffer>,
     pub section_vb_map: Option<VertexBuffer>,
     pub vbuffer_section_end: Vec<u32>,
     pub vbuffer_section_end_map: Vec<u32>,
@@ -51,6 +52,7 @@ impl TrailRender {
             texture: None,
             section_vbuffer: None,
             section_vb_ng: None,
+            section_vb_ng_map: None,
             section_vb_map: None,
             vbuffer_section_end: Vec::new(),
             vbuffer_section_end_map: Vec::new(),
@@ -89,6 +91,17 @@ impl TrailRender {
                 crate::exports::runtime::log::error_ok(super::instance::TrailVertex::alloc(device, &trailv))
             })
             .flatten();
+        let trailv_map = arcrender
+            .then(|| {
+                let trailv = geometry
+                    .map
+                    .vertices
+                    .iter()
+                    .map(|v| super::instance::Map2dVertex::from(*v))
+                    .collect::<Vec<_>>();
+                crate::exports::runtime::log::error_ok(super::instance::Map2dVertex::alloc(device, &trailv))
+            })
+            .flatten();
         let section_vb_map = match arcrender {
             true => rt::log::warn_ok({
                 // TODO: if not visible on maps, don't bother or something idk
@@ -123,18 +136,29 @@ impl TrailRender {
             .as_ref()
             .map(|v| v.size() as isize)
             .unwrap_or(0);
+        #[cfg(feature = "statistics")]
+        let prev_size_ng_map = self
+            .section_vb_ng_map
+            .as_ref()
+            .map(|v| v.size() as isize)
+            .unwrap_or(0);
         match section_vbuffer {
             Ok(vbuffer) => {
                 #[cfg(feature = "statistics")]
                 STATS_TRAIL_VERTEX_SIZE.adjust_by(|| {
                     let vb_size = vbuffer.as_ref().map(|vb| vb.size() as isize).unwrap_or_default();
-                    vb_size - prev_size_vb - prev_size_ng - prev_size_map
+                    vb_size - prev_size_vb - prev_size_ng - prev_size_ng_map - prev_size_map
                 });
                 self.section_vbuffer = vbuffer;
                 self.section_vb_ng = trailv;
+                self.section_vb_ng_map = trailv_map;
                 self.section_vb_map = section_vb_map;
                 #[cfg(feature = "statistics")]
                 if let Some(vb) = &self.section_vb_ng {
+                    STATS_TRAIL_VERTEX_SIZE.adjust_by(|| vb.size() as isize);
+                }
+                #[cfg(feature = "statistics")]
+                if let Some(vb) = &self.section_vb_ng_map {
                     STATS_TRAIL_VERTEX_SIZE.adjust_by(|| vb.size() as isize);
                 }
                 #[cfg(feature = "statistics")]

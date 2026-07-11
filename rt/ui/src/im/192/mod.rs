@@ -86,7 +86,7 @@ pub type PlatformIo = ImGuiPlatformIO;
 //#[cfg(not(feature = "imgui192-rs"))]
 pub type DrawIo = ImDrawData;
 //#[cfg(not(feature = "imgui192-rs"))]
-pub type DrawList = ImDrawList;
+pub type DrawList<'ui> = ImPtr<'ui, ImDrawList>;
 
 #[repr(transparent)]
 pub struct Ui<'ui>(PhantomData<&'ui ()>);
@@ -308,22 +308,23 @@ impl ImContextHookInfo for ImGuiContextHook {
         }
     }
 }
-impl ImDrawTarget for ImDrawList {
+impl ImSurfaceTarget for DrawList<'_> {
     fn clip_rect_min(&self) -> ImPos2<ImSpace> {
         unsafe {
             let mut min = MaybeUninit::uninit();
-            sys::ImDrawList_GetClipRectMin(min.as_mut_ptr(), self as *const Self as *mut Self);
+            sys::ImDrawList_GetClipRectMin(min.as_mut_ptr(), self.get_ptr());
             ImVec2::from(ImSpaces(min.assume_init())).to_point()
         }
     }
     fn clip_rect_max(&self) -> ImPos2<ImSpace> {
         unsafe {
             let mut max = MaybeUninit::uninit();
-            sys::ImDrawList_GetClipRectMin(max.as_mut_ptr(), self as *const Self as *mut Self);
+            sys::ImDrawList_GetClipRectMin(max.as_mut_ptr(), self.get_ptr());
             ImVec2::from(ImSpaces(max.assume_init())).to_point()
         }
     }
-
+}
+impl ImDrawTarget for DrawList<'_> {
     fn add_line(
         &mut self,
         p0: ImPos2<ImSpace>,
@@ -334,7 +335,7 @@ impl ImDrawTarget for ImDrawList {
         let thickness = thickness.unwrap_or(1.0);
         let p0 = ImSpaces(p0).into();
         let p1 = ImSpaces(p1).into();
-        unsafe { sys::ImDrawList_AddLine(self, p0, p1, ImSpaces(colour).into(), thickness) }
+        unsafe { sys::ImDrawList_AddLine(self.as_ptr_mut(), p0, p1, ImSpaces(colour).into(), thickness) }
     }
     fn add_rect_untyped(
         &mut self,
@@ -350,10 +351,16 @@ impl ImDrawTarget for ImDrawList {
         let [min, max] = ImSpaces(rect).into();
         unsafe {
             match thickness {
-                None =>
-                    sys::ImDrawList_AddRectFilled(self, min, max, ImSpaces(colour).into(), rounding, flags),
+                None => sys::ImDrawList_AddRectFilled(
+                    self.as_ptr_mut(),
+                    min,
+                    max,
+                    ImSpaces(colour).into(),
+                    rounding,
+                    flags,
+                ),
                 Some(thickness) => sys::ImDrawList_AddRect(
-                    self,
+                    self.as_ptr_mut(),
                     min,
                     max,
                     ImSpaces(colour).into(),
@@ -369,9 +376,23 @@ impl ImDrawTarget for ImDrawList {
         let [p1, p2, p3, p4] = ImSpaces(points).into();
         unsafe {
             match thickness {
-                None => sys::ImDrawList_AddQuadFilled(self, p1, p2, p3, p4, ImSpaces(colour).into()),
-                Some(thickness) =>
-                    sys::ImDrawList_AddQuad(self, p1, p2, p3, p4, ImSpaces(colour).into(), thickness),
+                None => sys::ImDrawList_AddQuadFilled(
+                    self.as_ptr_mut(),
+                    p1,
+                    p2,
+                    p3,
+                    p4,
+                    ImSpaces(colour).into(),
+                ),
+                Some(thickness) => sys::ImDrawList_AddQuad(
+                    self.as_ptr_mut(),
+                    p1,
+                    p2,
+                    p3,
+                    p4,
+                    ImSpaces(colour).into(),
+                    thickness,
+                ),
             }
         }
     }
@@ -385,9 +406,21 @@ impl ImDrawTarget for ImDrawList {
         let [p1, p2, p3] = ImSpaces(points).into();
         unsafe {
             match thickness {
-                None => sys::ImDrawList_AddTriangleFilled(self, p1, p2, p3, ImSpaces(colour).into()),
-                Some(thickness) =>
-                    sys::ImDrawList_AddTriangle(self, p1, p2, p3, ImSpaces(colour).into(), thickness),
+                None => sys::ImDrawList_AddTriangleFilled(
+                    self.as_ptr_mut(),
+                    p1,
+                    p2,
+                    p3,
+                    ImSpaces(colour).into(),
+                ),
+                Some(thickness) => sys::ImDrawList_AddTriangle(
+                    self.as_ptr_mut(),
+                    p1,
+                    p2,
+                    p3,
+                    ImSpaces(colour).into(),
+                    thickness,
+                ),
             }
         }
     }
@@ -404,10 +437,15 @@ impl ImDrawTarget for ImDrawList {
         let mid = ImSpaces(mid).into();
         unsafe {
             match thickness {
-                None =>
-                    sys::ImDrawList_AddCircleFilled(self, mid, radius, ImSpaces(colour).into(), segments),
+                None => sys::ImDrawList_AddCircleFilled(
+                    self.as_ptr_mut(),
+                    mid,
+                    radius,
+                    ImSpaces(colour).into(),
+                    segments,
+                ),
                 Some(thickness) => sys::ImDrawList_AddCircle(
-                    self,
+                    self.as_ptr_mut(),
                     mid,
                     radius,
                     ImSpaces(colour).into(),
@@ -430,9 +468,21 @@ impl ImDrawTarget for ImDrawList {
         let mid = ImSpaces(mid).into();
         unsafe {
             match thickness {
-                None => sys::ImDrawList_AddNgonFilled(self, mid, radius, ImSpaces(colour).into(), segments),
-                Some(thickness) =>
-                    sys::ImDrawList_AddNgon(self, mid, radius, ImSpaces(colour).into(), segments, thickness),
+                None => sys::ImDrawList_AddNgonFilled(
+                    self.as_ptr_mut(),
+                    mid,
+                    radius,
+                    ImSpaces(colour).into(),
+                    segments,
+                ),
+                Some(thickness) => sys::ImDrawList_AddNgon(
+                    self.as_ptr_mut(),
+                    mid,
+                    radius,
+                    ImSpaces(colour).into(),
+                    segments,
+                    thickness,
+                ),
             }
         }
     }
@@ -453,7 +503,7 @@ impl ImDrawTarget for ImDrawList {
         unsafe {
             match thickness {
                 None => sys::ImDrawList_AddEllipseFilled(
-                    self,
+                    self.as_ptr_mut(),
                     mid,
                     radius,
                     ImSpaces(colour).into(),
@@ -461,7 +511,7 @@ impl ImDrawTarget for ImDrawList {
                     segments,
                 ),
                 Some(thickness) => sys::ImDrawList_AddEllipse(
-                    self,
+                    self.as_ptr_mut(),
                     mid,
                     radius,
                     ImSpaces(colour).into(),
@@ -502,7 +552,7 @@ impl<'ui> ImContext for Ui<'ui> {
     type Io = ImGuiIO;
     type PlatformIo = ImGuiPlatformIO;
     type DrawIo = ImDrawData;
-    type DrawList = ImDrawList;
+    type DrawList = DrawList<'ui>;
     type Style = ImGuiStyle;
     #[inline]
     fn get_context_ptr(&self) -> NonNull<Self::Context> {
@@ -799,7 +849,9 @@ unsafe impl<'ui> ImUi for Ui<'ui> {
 impl<'ui> ImFrameArena<'ui> for Ui<'ui> {}
 impl<'ui> ImUiWindow for Ui<'ui> {
     fn get_draw_target_ptr_dyn(&self) -> NonNull<dyn ImDrawTarget> {
-        unsafe { NonNull::new_unchecked(sys::igGetWindowDrawList() as *mut dyn ImDrawTarget) }
+        unsafe {
+            NonNull::new_unchecked(ImPtr::with_ptr_mut(sys::igGetWindowDrawList()) as *mut dyn ImDrawTarget)
+        }
     }
     fn viewport_framebuffer_scale(&self) -> ImVec2<f32> {
         ImSpaces(unsafe { (&*sys::igGetWindowViewport()).FramebufferScale }).into()

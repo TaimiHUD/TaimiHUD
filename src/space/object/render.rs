@@ -47,7 +47,7 @@ impl ObjectRenderBacking {
             if count != data.len() {
                 let buffer = self.instance_buffer.get();
                 let buffer = &mut *buffer;
-                buffer.replace(device, device_context, data)?;
+                buffer.replace(device, device_context, data, false)?;
             } else {
                 self.instance_buffer()
                     .update_all_unchecked(device_context, data, 0);

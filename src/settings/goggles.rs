@@ -50,12 +50,13 @@ pub struct GogglesSettings {
     pub map_proj_seen: Arc<BTreeMap<u32, GogglesProjection>>,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub project_shadowboxing: Option<bool>,
+    pub project_ui_bg: Option<bool>,
 }
 
 impl GogglesSettings {
     pub const DEFAULT_ENABLED: bool = false;
     pub const DEFAULT_ENABLED_PROJECT: bool = false;
+    pub const DEFAULT_ENABLED_PROJECT_UI_BG: bool = false;
     pub const DEFAULT_ARCRENDER: bool = false;
     pub const DEFAULT_OBSCURED_ALPHA: f32 = 0.10;
     pub const DEFAULT_OBSCURED_DISTANCE: f32 = 0.175;
@@ -73,7 +74,7 @@ impl GogglesSettings {
                 goggles_enabled: None | Some(Self::DEFAULT_ENABLED),
                 enables: None | Some(GogglesEnables::DEFAULT),
                 project_enabled: None | Some(Self::DEFAULT_ENABLED_PROJECT),
-                project_shadowboxing: None,
+                project_ui_bg: None | Some(Self::DEFAULT_ENABLED_PROJECT_UI_BG),
                 obscured_alpha: None,
                 obscured_distance: None,
                 edge_scale: None | Some(Self::DEFAULT_EDGE_SCALE),
@@ -128,6 +129,9 @@ impl GogglesSettings {
     }
     pub fn arcrender_enabled(&self) -> bool {
         self.enables().contains(GogglesEnables::ARCRENDER_ENABLE)
+    }
+    pub fn project_ui_bg(&self) -> bool {
+        self.project_ui_bg.unwrap_or(Self::DEFAULT_ENABLED_PROJECT_UI_BG)
     }
 
     pub fn obscured_alpha(&self) -> f32 {

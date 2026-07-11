@@ -47,7 +47,15 @@ use {
         space::{
             dx11::{InstanceBufferData, RenderBackend},
             pack::{
-                instance::{self, EntityInstanceBuffer, EntityInstanceData, PoiVertexBuffer},
+                instance::{
+                    self,
+                    EntityInstanceBuffer,
+                    EntityInstanceData,
+                    Map2dVertexBuffer,
+                    MapEntityInstanceBuffer,
+                    MapEntityInstanceData,
+                    PoiVertexBuffer,
+                },
                 PoiRender,
                 TrailRender,
             },
@@ -1254,9 +1262,11 @@ pub struct PackRenderResources {
     pub shader_variant: Option<render::ArcShaderVariant>,
     pub poi_vb: Option<PoiVertexBuffer>,
     pub poi_vb_trans: Option<PoiVertexBuffer>,
+    pub poi_vb_map: Option<Map2dVertexBuffer>,
     pub shared_cb_v: Option<ConstantBufferV>,
     pub shared_cb_p: Option<ConstantBufferP>,
-    #[cfg(todo)]
+    pub shared_map_v: Option<ConstantBufferV>,
+    pub shared_map_p: Option<ConstantBufferP>,
     pub map_ib: Option<MapEntityInstanceBuffer>,
 }
 impl PackRenderResources {
@@ -1268,16 +1278,31 @@ impl PackRenderResources {
         markers: I,
     ) -> anyhow::Result<()> {
         let markers = markers.into_iter();
+        let mut map_ib = Vec::with_capacity(markers.size_hint().0);
         let out = markers
-            .into_iter()
             .enumerate()
-            .map(|(idx, mid)| Self::build_ib_marker_id(pack_data, &*draw_state, mid, idx))
+            .map(|(idx, mid)| {
+                map_ib.push(MapEntityInstanceData::IDENTITY);
+                let map = unsafe { map_ib.last_mut().unwrap_unchecked() };
+                Self::build_ib_marker_id(pack_data, &*draw_state, mid, idx, Some(map))
+            })
             .collect::<Vec<_>>();
         let mut res = Ok(());
         let len = out.len();
         self.entities_ib = match out {
             out if out.is_empty() => None,
             out => match EntityInstanceData::alloc_populated(device, &out[..]) {
+                Ok(ib) => Some(ib),
+                Err(e) => {
+                    res = Err(e);
+                    None
+                },
+            },
+        };
+        self.map_ib = match map_ib {
+            _ if self.entities_ib.is_none() => None,
+            out if out.is_empty() => None,
+            out => match MapEntityInstanceData::alloc_populated(device, &out[..]) {
                 Ok(ib) => Some(ib),
                 Err(e) => {
                     res = Err(e);
@@ -1302,11 +1327,23 @@ impl PackRenderResources {
                     &instance::PoiVertex::POI_QUAD_TRANSPARENT,
                 )?);
             }
+            if self.poi_vb_map.is_none() {
+                self.poi_vb_map = Some(instance::Map2dVertex::alloc(
+                    device,
+                    &instance::Map2dVertex::POI_QUAD,
+                )?);
+            }
         }
         STATS_ENTITY_INSTANCE_SIZE.reset(
             self.entities_ib
                 .is_some()
                 .then_some(len * mem::size_of::<EntityInstanceData>())
+                .unwrap_or(0),
+        );
+        STATS_ENTITY_INSTANCE_SIZE_MAP.reset(
+            self.map_ib
+                .is_some()
+                .then_some(len * mem::size_of::<MapEntityInstanceData>())
                 .unwrap_or(0),
         );
 
@@ -1324,6 +1361,7 @@ impl PackRenderResources {
         if idx >= self.len {
             return false
         }
+        let ib_map = self.map_ib.as_ref();
 
         let marker = pack_data.map_info.as_ref().and_then(|i| {
             SharedMarkerRef::from_loaded_path(i, Some(&pack_data.map_state), path)
@@ -1334,9 +1372,13 @@ impl PackRenderResources {
             log::debug!("can't update ib for missing {path}");
             return false
         };
-        let data = Self::build_ib_marker_path(pack_data, draw_state, path, marker, idx);
+        let mut map = ib_map.is_some().then_some(MapEntityInstanceData::IDENTITY);
+        let data = Self::build_ib_marker_path(pack_data, draw_state, path, marker, idx, map.as_mut());
         unsafe {
             ib.update_element_at(device_context, &data, idx, 0);
+            if let (Some(map), Some(ib_map)) = (map, ib_map) {
+                ib_map.update_element_at(device_context, &map, idx, 0);
+            }
         }
         true
     }
@@ -1367,6 +1409,7 @@ impl PackRenderResources {
         draw_state: &PackRenderState,
         mid: MarkerId,
         idx: usize,
+        map: Option<&mut MapEntityInstanceData>,
     ) -> EntityInstanceData {
         let path = mid
             .marker_path::<PackMapPath>()
@@ -1380,7 +1423,7 @@ impl PackRenderResources {
         });
 
         marker
-            .map(|(path, m, pack)| Self::build_ib_marker_path(pack, draw_state, path, m, idx))
+            .map(|(path, m, pack)| Self::build_ib_marker_path(pack, draw_state, path, m, idx, map))
             .unwrap_or(EntityInstanceData::INVALID)
     }
     pub fn build_ib_marker_path(
@@ -1389,18 +1432,19 @@ impl PackRenderResources {
         path: LoadedMarkerPath<PackMapPath>,
         marker: LoadedMarkerRef<'_>,
         idx: usize,
+        mut map: Option<&mut MapEntityInstanceData>,
     ) -> EntityInstanceData {
-        use glam::Quat;
+        use {glam::Quat, glamour::Vector3};
 
         let mut ib = EntityInstanceData::INVALID;
         let (mib, attrs) = match marker {
             LoadedMarkerRef::Poi(ref poi) => {
                 let attrs = poi.poi_attrs();
                 let icon_size = f32::from(attrs.attr_or_default::<keys::IconSize>()) * 0.5;
+                let pos = poi.lpoi().position.to_vector();
                 let ib = ib.write_poi(instance::PoiInstanceData {
                     model: {
-                        let scale = glamour::Vector3::splat(icon_size);
-                        let pos = poi.lpoi().position.to_vector();
+                        let scale = Vector3::splat(icon_size);
                         let rot = attrs.get_attr_of::<keys::Rotate>().map(|rot| {
                             let rot = rot.radians();
                             Quat::from_euler(
@@ -1410,7 +1454,7 @@ impl PackRenderResources {
                                 -rot.z,
                             )
                         });
-                        glamour::Matrix4::from_scale_rotation_translation(
+                        Matrix4::from_scale_rotation_translation(
                             scale,
                             rot.unwrap_or(Quat::IDENTITY),
                             pos.to_untyped(),
@@ -1494,21 +1538,48 @@ impl PackRenderResources {
                 };
                 ib.set_size_range(min_size, max_size);
                 ib.marker.set_depth_bias(idx as u32);
+                if let Some(map) = &mut map {
+                    if !attrs.attr_or_default_into::<keys::ScaleOnMapWithZoom, bool>() {
+                        map.flags |= MapEntityInstanceData::FLAG_STATIC_SCALE;
+                    }
+                    #[cfg(todo)]
+                    {
+                        map.map_scale = ib.map_scale;
+                    }
+                    map.mid_height = pos.y;
+                    map.model = Matrix4::from_scale_rotation_translation(
+                        Vector3::splat(ib.map_scale),
+                        Quat::IDENTITY,
+                        pos.to_untyped(),
+                    );
+                }
                 (&mut ib.marker, poi.lpoi_info().marker_info())
             },
             LoadedMarkerRef::Trail(ref trail) => {
                 let attrs = trail.trail_attrs();
                 let ib =
                     ib.write_trail(instance::TrailInstanceData { ..instance::TrailInstanceData::INVALID });
-                ib.marker
-                    .set_anim_scale(attrs.attr_or_default::<keys::AnimSpeed>().into());
+                let anim_speed = attrs.attr_or_default::<keys::AnimSpeed>().into();
+                ib.marker.set_anim_scale(anim_speed);
                 ib.marker.set_depth_bias(idx as u32);
                 if attrs.attr_or_default_into::<keys::IsWall, bool>() {
                     ib.marker.flags |= instance::MarkerInstanceData::FLAG_WALL;
                 }
+                if let Some(map) = &mut map {
+                    map.flags |= MapEntityInstanceData::FLAG_IS_TRAIL;
+                    // TODO: map.mid_height = trail_bounds.center().y;
+                    map.anim_scale = anim_speed;
+                }
                 (&mut ib.marker, trail.ltrail_info().marker_info())
             },
         };
+        if let Some(map) = &mut map {
+            map.colour = attrs
+                .clone_attr_of::<keys::MapTint>()
+                .map(keys::Colour::from)
+                .unwrap_or_else(|| attrs.attr_or_default::<keys::Tint>().into())
+                .into();
+        }
         Self::apply_ib_marker_common(mib, &**attrs.attrs(), path.path.namespace());
         match marker {
             LoadedMarkerRef::Poi(ref poi)
@@ -1701,9 +1772,13 @@ impl PackRenderResources {
         self.clear_buffers();
         self.poi_vb = None;
         self.poi_vb_trans = None;
+        self.poi_vb_map = None;
         self.shared_cb_v = None;
         self.shared_cb_p = None;
+        self.shared_map_v = None;
+        self.shared_map_p = None;
         STATS_ENTITY_INSTANCE_SIZE.reset(0);
+        STATS_ENTITY_INSTANCE_SIZE_MAP.reset(0);
         self.clear_shaders();
     }
     pub fn clear_shaders(&mut self) {
@@ -1716,19 +1791,24 @@ impl PackRenderResources {
     pub fn clear_buffers(&mut self) {
         self.len = 0;
         self.entities_ib = None;
+        self.map_ib = None;
         self.dirty = false;
     }
     pub fn cleanup_background(mut self) {
         self.len = 0;
         mem::forget(self.entities_ib.take());
+        mem::forget(self.map_ib.take());
         mem::forget(self.shader_poi.take());
         mem::forget(self.shader_trail.take());
         mem::forget(self.shader_p_poi.take());
         mem::forget(self.shader_p_trail.take());
         mem::forget(self.poi_vb.take());
         mem::forget(self.poi_vb_trans.take());
+        mem::forget(self.poi_vb_map.take());
         mem::forget(self.shared_cb_v.take());
         mem::forget(self.shared_cb_p.take());
+        mem::forget(self.shared_map_v.take());
+        mem::forget(self.shared_map_p.take());
         if let Some(poi_common) = self.poi_common.take() {
             poi_common.cleanup_background();
         }
@@ -2290,6 +2370,7 @@ impl ArcrenderSettings {
 }
 
 pub static STATS_ENTITY_INSTANCE_SIZE: Counter = Counter::DEFAULT;
+pub static STATS_ENTITY_INSTANCE_SIZE_MAP: Counter = Counter::DEFAULT;
 pub static STATS_ENTITY_DRAW: Counter = Counter::DEFAULT;
 pub static STATS_ENTITY_DRAW_PASS: Counter = Counter::DEFAULT;
 pub static STATS_ENTITY_DRAW_ALL: Counter = Counter::DEFAULT;

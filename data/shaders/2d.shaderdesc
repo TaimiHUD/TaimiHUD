@@ -1,0 +1,34 @@
+[
+  {
+    "partial": true,
+    "identifier": "map2d-v",
+    "kind": "Vertex",
+    "path": "2d.hlsl",
+    "entrypoint": "map2d_main_v",
+    "layout_type": "Map2dMarker",
+    "defs": {
+      "SHADER_V": "1"
+    }
+  },
+  {
+    "partial": true,
+    "identifier": "imgui-v",
+    "kind": "Vertex",
+    "path": "2d.hlsl",
+    "entrypoint": "map2d_main_v",
+    "layout_type": "Map2dIm",
+    "defs": {
+      "SHADER_V": "1"
+    }
+  },
+  {
+    "partial": true,
+    "identifier": "map2d-p",
+    "kind": "Pixel",
+    "path": "2d.hlsl",
+    "entrypoint": "map2d_main_p",
+    "defs": {
+      "SHADER_P": "1"
+    }
+  }
+]

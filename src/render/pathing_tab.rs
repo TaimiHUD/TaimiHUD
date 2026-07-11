@@ -1140,6 +1140,7 @@ impl PathingConfig {
             obscured_alpha,
             obscured_distance,
             obscured_distance_effective,
+            mut _project_ui,
             farz_set,
             farz_seen,
         ) = Self::get_pathing(|s| {
@@ -1148,6 +1149,10 @@ impl PathingConfig {
                 s.space.goggles.obscured_alpha(),
                 s.space.goggles.obscured_distance(),
                 s.space.obscured_distance(),
+                #[cfg(feature = "goggles2-project")]
+                s.space.goggles.project_ui_bg(),
+                #[cfg(not(feature = "goggles2-project"))]
+                false,
                 map_id.and_then(|map| s.space.goggles.get_map_depth_setting(map.get())),
                 map_id.and_then(|map| s.space.goggles.map_proj_seen.get(&map.get()).cloned()),
             )
@@ -1205,6 +1210,13 @@ impl PathingConfig {
                 GogglesEnables::OPTIONS_PROJECT_COMPAT,
             );
             enables_commit.insert(options_commit);
+
+            #[cfg(todo)]
+            if ui.checkbox(c"background ui", &mut _project_ui) {
+                Self::set_pathing(|s| {
+                    s.space.goggles.project_ui_bg = Some(_project_ui);
+                });
+            }
         }
 
         if enables.contains(GogglesEnables::LENS_ENABLE) {

@@ -282,6 +282,7 @@ stats-engine-entities = Loaded
 stats-space-engine-d3d = { space } D3D
 stats-engine-instance-poi = POI Instance Buffer
 stats-engine-instance-entities = Marker Instance Buffers
+stats-engine-instance-entities-map = Map Instance Buffers
 stats-engine-vertex-trail = { vertices }
 stats-space-engine-textures = Textures
 stats-engine-texture-count = Loaded

@@ -1,6 +1,7 @@
 use {
     super::{
         class::{BufferClass, BufferKind, BufferStateFlags, ClassShared},
+        d3d::RenderSnapshotPreset,
         g2,
         lens::LensShared,
         D3dNn,
@@ -490,6 +491,7 @@ impl ProjectShared {
         };
         let draw = match (what, state.as_mut()) {
             (_, Some(state)) if state.machine.is_ingame_paused() => None,
+            (ProjectAction::DrawUi, Some(state)) if state.machine.is_ui_hidden() => None,
             (ProjectAction::DrawMinimap, Some(state))
                 if cls == BufferClass::Target && state.machine.is_ui_hidden() =>
                 None,
@@ -512,6 +514,26 @@ impl ProjectShared {
         };
         FrameState::TAIMI.publish_set();
         let engine = match &mut state.engine {
+            Some(Ok(engine)) if what == ProjectAction::DrawUi => {
+                engine.drawing.drawn.insert(what);
+                let snapshot = engine.start_being_careful(
+                    &state.machine.goggles,
+                    context,
+                    RenderSnapshotPreset::ProjectImguiBg,
+                );
+                #[cfg(todo)]
+                {
+                    taimi_d3d::dx11::RenderTargetViews::with_views(
+                        target,
+                        None::<taimi_d3d::dx11::DepthView>,
+                    )
+                    .set(context);
+                    state.draw_ui_bg(context);
+                }
+                snapshot.pop();
+                ProjectShared::mask_drawing(what);
+                None
+            },
             Some(Ok(engine)) =>
                 if engine.project_proceed(&mut state.machine, draw) {
                     Some(engine)
@@ -531,6 +553,7 @@ impl ProjectShared {
                 (what, _) => what,
             };
             let target_dv = match what {
+                ProjectAction::DrawUi => None,
                 #[cfg(todo)]
                 ProjectAction::DrawObscured
                     if matches!(cls, BufferClass::Shadowbox)
@@ -830,7 +853,7 @@ impl ProjectMethod {
                 };
                 return method.actions_on_unbind(ProjectAction::Draw, cls)
             },
-            (ProjectAction::DrawObscured, ..) => None,
+            (ProjectAction::DrawObscured | ProjectAction::DrawUi, ..) => None,
             (ProjectAction::DrawMinimap, cls, method) => {
                 let method = ProjectMethodMinimap::from(method);
                 let next = match method {
@@ -890,7 +913,7 @@ impl ProjectMethod {
                 // in which case, reach to pretty prior? idk
                 Some((0x80, None))
             },
-            (ProjectAction::Draw, _, Self::Late)
+            (ProjectAction::Draw | ProjectAction::DrawUi, _, Self::Late)
                 if ClassShared::with_current_dv(|_, buf| {
                     buf.winner && matches!(buf.classification, BufferClass::Target)
                 })
@@ -970,7 +993,7 @@ impl ProjectMethod {
                 .unwrap_or(false) =>
                 Some((0x08, None)),
             (ProjectAction::Draw, BufferClass::Target, Self::Conservative)
-            | (ProjectAction::DrawObscured, BufferClass::Target, _) => Some((0, None)),
+            | (ProjectAction::DrawObscured | ProjectAction::DrawUi, BufferClass::Target, _) => Some((0, None)),
             (
                 ProjectAction::DrawMinimap | ProjectAction::DrawMap,
                 BufferClass::Target,
@@ -1164,6 +1187,7 @@ impl ProjectAction {
     const Draw: Drawing = Drawing::SPACE;
     const Shadowbox: Drawing = Drawing::SHADOWBOX;
     const DrawObscured: Drawing = Drawing::OBSCURED;
+    const DrawUi: Drawing = Drawing::UI_BG;
     #[inline(always)]
     pub fn iter_bits(bits: Drawing) -> impl Iterator<Item = Drawing> {
         bits.iter_passes()

@@ -37,6 +37,7 @@ use {
     },
 };
 
+mod blit;
 mod context;
 mod draw;
 mod selection;

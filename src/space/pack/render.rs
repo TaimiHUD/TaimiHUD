@@ -501,6 +501,8 @@ impl DrawSpaceEntity for DrawSpaceArc<'_> {
 pub enum ArcShaderVariant {
     Vanilla,
     Map,
+    #[cfg(taimi_imgui)]
+    Imgui,
     #[cfg(feature = "goggles")]
     Obscured,
     #[cfg(feature = "goggles2-project")]
@@ -511,6 +513,12 @@ pub enum ArcShaderVariant {
 impl ArcShaderVariant {
     pub fn template_id(self, kind: ShaderKind, entity: Option<ShaderState>) -> Option<&'static str> {
         Some(match (self, kind, entity) {
+            (Self::Map, ShaderKind::Vertex, Some(ShaderState::Poi)) => "map2d-v",
+            (Self::Map, ShaderKind::Pixel, Some(ShaderState::Poi)) => "map2d-p",
+            #[cfg(taimi_imgui)]
+            (Self::Imgui, ShaderKind::Vertex, Some(ShaderState::Poi)) => "imgui-v",
+            #[cfg(taimi_imgui)]
+            (Self::Imgui, ShaderKind::Pixel, Some(ShaderState::Poi)) => "map2d-p",
             (_, ShaderKind::Vertex, Some(ShaderState::Poi)) => "poi-ng-v",
             (_, ShaderKind::Vertex, Some(ShaderState::Trail)) => "trail-ng-v",
             #[cfg(todo)]
@@ -527,8 +535,12 @@ impl ArcShaderVariant {
             (Self::Vanilla, ShaderKind::Vertex, Some(ShaderState::Trail)) => "trail-ng",
             (Self::Vanilla, ShaderKind::Vertex, Some(ShaderState::Poi)) => "poi-ng",
             (Self::Vanilla, ShaderKind::Pixel, ..) => "trail-ng",
-            #[cfg(todo)]
-            (Self::Map, _, None) => None,
+            (Self::Map, ShaderKind::Vertex, ..) => "map2d",
+            (Self::Map, ShaderKind::Pixel, ..) => "map2d",
+            #[cfg(taimi_imgui)]
+            (Self::Imgui, ShaderKind::Vertex, ..) => "imgui-v",
+            #[cfg(taimi_imgui)]
+            (Self::Imgui, ShaderKind::Pixel, ..) => "map2d",
             #[cfg(feature = "goggles")]
             (Self::Obscured, k, e) => return Self::Vanilla.id(k, e),
             #[cfg(feature = "goggles2-project")]
@@ -557,6 +569,8 @@ impl ArcShaderVariant {
         let type_id = ShaderState::type_id_c(entity);
         let base_ty = match self {
             Self::Map => (c"SHADER_MAP", type_id),
+            #[cfg(taimi_imgui)]
+            Self::Imgui => (c"SHADER_MAP", type_id),
             _ => (c"SHADER_SPACE", type_id),
         };
         let options = match self {
@@ -603,6 +617,10 @@ impl ArcShaderVariant {
             "poi-ng-v",
             "trail-ng-v",
             "trail-ng-p",
+            "map2d-v",
+            "map2d-p",
+            #[cfg(taimi_imgui)]
+            "imgui-v",
             #[cfg(todo)]
             "poi-ng-p",
         ]
@@ -631,6 +649,9 @@ bitflags::bitflags! {
         const SHADOWBOX = 0x0400;
         #[cfg(feature = "goggles2-project")]
         const SHADOWBOX_OUTLINE = 0x0800;
+
+        #[cfg(feature = "goggles2-project")]
+        const UI_BG = 0x1000;
 
         const FLAG_SPACE_POI = 0x1000_0000;
         const FLAG_SPACE_TRAIL = 0x2000_0000;
@@ -668,7 +689,10 @@ impl Drawing {
     });
     #[cfg(feature = "goggles2-project")]
     pub const PASSES_PROJECT: Self = Self::from_bits_retain(
-        Self::PASSES_REFLECT.bits() | Self::SHADOWBOX.bits() | Self::SHADOWBOX_OUTLINE.bits(),
+        Self::PASSES_REFLECT.bits()
+            | Self::SHADOWBOX.bits()
+            | Self::SHADOWBOX_OUTLINE.bits()
+            | Self::UI_BG.bits(),
     );
     #[cfg(feature = "goggles2-project")]
     pub const PASSES_REFLECT: Self =
