@@ -12,6 +12,9 @@ function mt:__index(k)
 	end
 	return Taimi_i[k]
 end
+function loaders.Lib(Taimi)
+	return require"@taimi/v0/lib".Lib.for_ctx(Taimi.ctx)
+end
 function loaders.Mumble(Taimi)
 	return require"@taimi/v0/mumblelink".Mumble.for_plug(Taimi.ctx.plug)
 end
