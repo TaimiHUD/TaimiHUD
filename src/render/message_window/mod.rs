@@ -10,11 +10,11 @@ use {
     core::{fmt, mem, ops},
     std::{
         borrow::Cow,
-        collections::{btree_map, BTreeMap},
+        collections::{btree_map, BTreeMap, BTreeSet},
     },
     taimi_hoard::str_opt_ref,
     taimi_pack::attributes::{
-        cell::{pack_attr, GetAttrDynExt, PackValueSet, SetAttrDyn},
+        cell::{GetAttrDynExt, PackValueSet},
         keys,
     },
     taimi_sync::watched::Watched,
@@ -247,6 +247,7 @@ pub struct MessageWindowState {
     ui_state_authorative: bool,
     ui_size_dirty: bool,
     items: BTreeMap<MessageKey, MessageItemState>,
+    pins: BTreeSet<MessageKey>,
     item_stash: MessageItemStash,
     scratch_s: String,
 }
@@ -259,6 +260,7 @@ impl MessageWindowState {
             ui_state_authorative: false,
             ui_size_dirty: false,
             items: Default::default(),
+            pins: Default::default(),
             item_stash: Default::default(),
             scratch_s: String::new(),
         }
@@ -592,6 +594,7 @@ impl MessageWindowState {
 
         let mut scratch = &mut self.scratch_s;
         let mut dismiss_item = None;
+        let mut pin_item = None;
         for (i, (key, item)) in self.items.iter().enumerate() {
             if i > 0 {
                 ui.separator();
@@ -664,6 +667,8 @@ impl MessageWindowState {
                 }
                 ui.unindent();
             }
+            // TODO: transient items should be marked in some way, maybe if InfoRange attr is set?
+            let pinnable = pack_path.is_some();
             group.end();
             let (tip_title, tip_desc) = (item.desc.tooltip_title(), item.desc.tooltip_desc());
             let actionable = item.desc.is_actionable();
@@ -793,13 +798,22 @@ impl MessageWindowState {
                         }
                     }
                 }
-                if ui.selectable(fl!("remove"), false) {
+                let pinnable = pinnable && !self.pins.contains(key);
+                if ui.pressable(fl!("message-dismiss")) {
                     dismiss_item = Some(key.clone());
+                }
+                if pinnable && ui.pressable(fl!("message-pin")) {
+                    pin_item = Some(key.clone());
                 }
             }
         }
         if let Some(key) = dismiss_item {
+            // explicit request forces removal even if pinned
+            self.pins.remove(&key);
             self.remove_item(&key);
+        }
+        if let Some(key) = pin_item {
+            self.pin_item(key);
         }
         ui.separator();
         ui.spacing();
@@ -840,6 +854,11 @@ impl MessageWindowState {
         }
     }
     pub fn remove_item(&mut self, id: &MessageKey) {
+        if self.pins.contains(id) {
+            #[cfg(taimi_debug)]
+            log::debug!("msg remove blocked by pin");
+            return
+        }
         let removed = self.items.remove(id).is_some();
         self.ui_size_dirty |= removed;
         if removed && self.items.is_empty() {
@@ -849,6 +868,9 @@ impl MessageWindowState {
                 // self.ui_state_authorative = true;
             }
         }
+    }
+    pub fn pin_item(&mut self, id: MessageKey) {
+        self.pins.insert(id);
     }
     #[cfg(todo = "unused")]
     pub fn update_item_attr(&mut self, id: &MessageKey, value: MessageAttrValue) -> bool {
@@ -870,6 +892,7 @@ impl MessageWindowState {
     }
     pub fn clear_items(&mut self) {
         self.items.clear();
+        self.pins.clear();
         self.item_stash.clear();
         self.ui_size_dirty = true;
     }

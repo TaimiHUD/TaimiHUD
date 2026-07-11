@@ -541,7 +541,9 @@ packs-empty-notice = Once installed from the { data-sources-tab } tab or downloa
 
 message-window-notice = Pathing packs may use this space to display notification messages.
  This window will become transparent and unobtrusive when minimized, and will ignore your mouse unless the configured modifier keys are held down (typically ALT+SHIFT).
-message-dismiss = { trigger-behaviour }
+#message-dismiss = { trigger-behaviour }
+message-dismiss = { remove }
+message-pin = Pin Message
 message-sample = Test
 message-sample-title = { title }
 message-sample-body = { experimental-notice }
