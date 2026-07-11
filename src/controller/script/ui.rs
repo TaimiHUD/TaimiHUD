@@ -34,3 +34,24 @@ impl ScriptApiUser for ScriptHostUiX {
         Ok(())
     }
 }
+
+#[derive(Debug, Copy, Clone, strum::Display, strum::IntoStaticStr, strum::VariantArray)]
+pub enum TextureUrlScheme {
+    #[strum(serialize = "gw2files")]
+    ApiFiles,
+    #[cfg(feature = "texture-loader")]
+    #[strum(serialize = "taimitex")]
+    TextureKey,
+    #[cfg(feature = "extension-nexus")]
+    #[strum(serialize = "addonapitex")]
+    AddonApiKey,
+    #[cfg(todo)]
+    Pack,
+}
+impl TextureUrlScheme {
+    pub fn scheme(&self) -> &'static str {
+        self.into()
+    }
+}
+#[cfg(todo)]
+impl FromStr for TextureUrlScheme {}

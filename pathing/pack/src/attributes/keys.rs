@@ -105,6 +105,49 @@ impl FromStr for Script {
 }
 pub type Script = AttrString;
 
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct AttrStr(pub str);
+impl AttrStr {
+    #[inline(always)]
+    pub fn new<S: ?Sized + AsRef<str>>(s: &S) -> &Self {
+        Self::with_ref(s.as_ref())
+    }
+    #[inline(always)]
+    pub const fn with_ref(s: &str) -> &Self {
+        unsafe { mem::transmute(s) }
+    }
+}
+impl<'a> Default for &'a AttrStr {
+    #[inline]
+    fn default() -> Self {
+        AttrStr::with_ref(<&'a str>::default())
+    }
+}
+impl Borrow<AttrStr> for AttrString {
+    #[inline]
+    fn borrow(&self) -> &AttrStr {
+        AttrStr::with_ref(&self[..])
+    }
+}
+impl Borrow<AttrStr> for str {
+    #[inline]
+    fn borrow(&self) -> &AttrStr {
+        AttrStr::with_ref(self)
+    }
+}
+impl AsRef<AttrStr> for AttrString {
+    #[inline]
+    fn as_ref(&self) -> &AttrStr {
+        self.borrow()
+    }
+}
+impl AsRef<AttrStr> for str {
+    #[inline]
+    fn as_ref(&self) -> &AttrStr {
+        self.borrow()
+    }
+}
+
 #[derive(Debug, Copy, Clone, Default)]
 pub struct Bool(pub bool);
 
@@ -2077,6 +2120,18 @@ macro_rules! pack_key {
             #[inline]
             fn borrow(&self) -> &AttrString {
                 core::borrow::Borrow::borrow(&self.0)
+            }
+        }
+        impl Borrow<AttrStr> for $ident {
+            #[inline]
+            fn borrow(&self) -> &AttrStr {
+                self.as_ref()
+            }
+        }
+        impl AsRef<AttrStr> for $ident {
+            #[inline]
+            fn as_ref(&self) -> &AttrStr {
+                AttrStr::with_ref(self.as_ref())
             }
         }
     };

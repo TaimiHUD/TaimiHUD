@@ -355,6 +355,13 @@ pub trait ScriptApiPackAssets {
         script_unimpl!()
     }
     type Texture: TextureHandle + IntoUserHandle;
+    fn open_web_texture<P>(&self, url: P) -> Result<Self::WebTexture>
+    where
+        P: ScriptUserStr,
+    {
+        script_unimpl!()
+    }
+    type WebTexture: TextureHandle + IntoUserHandle;
 }
 #[cfg(todo)]
 impl_upcast! {

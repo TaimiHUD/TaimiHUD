@@ -79,7 +79,9 @@ function Trail.i:SetTexture(tex)
 	end
 end
 function Trail.i:SetWebTexture(id)
-	error("unimplemented: SetWebTexture")
+	local url = require"@taimi/api/files".UrlFromId(id)
+	local tex = self.pack_info:GetPackAssets():OpenWebTexture(url)
+	self:SetAttrByKey("texture", tostring(tex))
 end
 function Trail.i:GetTexture()
 	local tex = self[ud.key_instance]:GetAttrByKey("texture")

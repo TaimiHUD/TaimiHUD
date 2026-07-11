@@ -24,7 +24,7 @@ use {
             },
             Controller,
         },
-        exports::runtime as rt,
+        exports::runtime::{self as rt, textures::TextureKey},
     },
     anyhow::Context,
     core::{fmt, mem, ops},
@@ -544,17 +544,27 @@ impl ScriptApiPackAssets for LuaPackDesc {
         P: ScriptUserStr,
     {
         let loader = self.shared().get_loader()?;
-        let exists = {
+        let exists = path.with_str(|p| {
+            if let Some(key) = self.shared().load.info.lookup_key_for_subresource(p) {
+                return Ok((p.to_owned(), Some(key)))
+            }
             let loader = loader.blocking_lock();
-            path.with_str(|p| match loader.contains_asset(p) {
+            match loader.contains_asset(p) {
                 Err(e) => Err(e),
                 Ok(false) => Err(script::format_err!("texture {p} not found")),
-                Ok(true) => Ok(p.to_owned()),
-            })
-        };
-        exists.map(|path| PackTexture::new(path, self.path(), loader))
+                Ok(true) => Ok((p.to_owned(), None)),
+            }
+        });
+        exists.map(|(path, key)| PackTexture::new(path, self.path(), loader, key))
     }
     type Texture = PackTexture;
+    fn open_web_texture<P>(&self, url: P) -> script::Result<Self::WebTexture>
+    where
+        P: ScriptUserStr,
+    {
+        Ok(url.with_str(|url| WebTexture::new(url.to_owned(), self.path())))
+    }
+    type WebTexture = WebTexture;
 }
 impl ScriptApiPack for LuaPackDesc {
     fn current_pack(&self) -> script::Result<Self::Pack> {
@@ -1454,15 +1464,37 @@ pub struct PackTexture {
     loader: SharedLoader,
     pack_path: PackScriptPath,
     path: String,
+    key: Option<TextureKey>,
     size: OnceLock<[u32; 2]>,
 }
 impl PackTexture {
-    pub fn new(path: String, pack_path: PackScriptPath, loader: SharedLoader) -> Self {
+    pub fn new(
+        path: String,
+        pack_path: PackScriptPath,
+        loader: SharedLoader,
+        key: Option<TextureKey>,
+    ) -> Self {
         Self {
+            size: Default::default(),
             path,
+            key,
             pack_path,
             loader,
-            size: Default::default(),
+        }
+    }
+
+    pub fn has_size(&self) -> bool {
+        self.size.get().is_some()
+    }
+    const SIZE_UNAVAIL: [u32; 2] = [0, 0];
+    pub fn lookup_loaded_size(&self) {
+        let (Some(key), None) = (&self.key, self.size.get()) else { return };
+        let size = crate::TEXTURES.lookup_with(key, |slot| match slot {
+            rt::textures::TextureSlot::Unavailable => Some(Self::SIZE_UNAVAIL),
+            slot => slot.im_size().map(|s| s.as_::<u32>().to_array()),
+        });
+        if let Some(Some(size)) = size {
+            let _ = self.size.get_or_init(move || size);
         }
     }
 }
@@ -1476,11 +1508,45 @@ impl fmt::Debug for PackTexture {
 }
 impl InstanceTexture for PackTexture {
     fn get_size(&self) -> script::Result<[u32; 2]> {
-        log::debug!("TODO: Texture:GetSize");
-        Ok([0, 0])
+        self.lookup_loaded_size();
+        let Some(size) = self.size.get() else {
+            log::debug!("texture {} not loaded", self.path);
+            return Ok(Self::SIZE_UNAVAIL)
+        };
+        Ok(*size)
     }
 }
 impl TextureHandle for PackTexture {}
+#[derive(Clone)]
+pub struct WebTexture {
+    pack_path: PackScriptPath,
+    url: String,
+    size: OnceLock<[u32; 2]>,
+}
+impl WebTexture {
+    pub fn new(url: String, pack_path: PackScriptPath) -> Self {
+        Self {
+            url,
+            pack_path,
+            size: Default::default(),
+        }
+    }
+}
+impl fmt::Debug for WebTexture {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("WebTexture")
+            .field(&self.url)
+            .field(&self.pack_path)
+            .finish()
+    }
+}
+impl InstanceTexture for WebTexture {
+    fn get_size(&self) -> script::Result<[u32; 2]> {
+        log::debug!("TODO: WebTexture:GetSize");
+        Ok([0, 0])
+    }
+}
+impl TextureHandle for WebTexture {}
 #[derive(Debug, Clone)]
 pub struct PackRoot {
     root: PackRootCategories,
@@ -2571,6 +2637,26 @@ impl UserData for PackTexture {
         ScriptApiTable::<_, Self>::register_texture(reg);
         reg.add_meta_method(MetaMethod::ToString.name(), |lua, this, ()| {
             mlua::IntoLua::into_lua(&this.path[..], lua)
+        });
+    }
+}
+impl IntoUserHandle for WebTexture {
+    type IntoHandle = Self;
+    fn into_handle(self) -> Self::IntoHandle {
+        self
+    }
+    fn clone_into_handle(&self) -> Self::IntoHandle {
+        self.clone()
+    }
+    fn to_lua_handle(&self, lua: &Lua) -> LuaResult<LuaValue> {
+        self.clone_into_handle().into_lua(lua)
+    }
+}
+impl UserData for WebTexture {
+    fn register(reg: &mut UserDataRegistry<Self>) {
+        ScriptApiTable::<_, Self>::register_texture(reg);
+        reg.add_meta_method(MetaMethod::ToString.name(), |lua, this, ()| {
+            mlua::IntoLua::into_lua(&this.url[..], lua)
         });
     }
 }
