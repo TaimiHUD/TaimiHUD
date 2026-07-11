@@ -6,7 +6,7 @@ use crate::{
 };
 
 #[must_use]
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct D3dStateToken<'c, S: ?Sized + D3dState<D3DC>, D3DC: D3dContext = crate::defaults::DxContext> {
     pub context: Option<InterfaceRef<'c, D3DC>>,
     pub state: S,
@@ -25,6 +25,15 @@ where
             state: S::snapshot_state(context),
             context: Some(context.to_ref()),
         }
+    }
+}
+impl<'c, S: D3dStateSnapshot<D3DC>, D3DC: D3dContext> Default for D3dStateToken<'c, S, D3DC>
+where
+    S: D3dState<D3DC> + Default,
+{
+    #[inline]
+    fn default() -> Self {
+        Self { state: S::default(), context: None }
     }
 }
 /// need interface cow from arcffi to make this work...
