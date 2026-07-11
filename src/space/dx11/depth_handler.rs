@@ -2,16 +2,12 @@ use {
     crate::{
         render::machine::frame_log,
         resources::Model,
-        space::{
-            dx11::SwapChain,
-            engine::{DrawDescMap, DrawDescSpace},
-            ScreenSpace,
-        },
+        space::{dx11::SwapChain, engine::DrawDescSpace, ScreenSpace},
     },
     glamour::{Box2, Point2, Size2},
     taimi_d3d::dx11::{
         buffer::{Texture2, VertexBuffer, D3D11_TEXTURE2D_DESC},
-        depth::{ClearFlags, ComparisonFunc, DepthState, DepthView, StencilOp, D3D11_DEPTH_STENCIL_DESC},
+        depth::{ComparisonFunc, DepthState, DepthView, StencilOp, D3D11_DEPTH_STENCIL_DESC},
         prelude::*,
         raster::{CullMode, RasterizerState, RenderTargetView, RenderTargetViews, D3D11_RASTERIZER_DESC},
     },
@@ -29,12 +25,6 @@ pub struct DepthHandler {
     pub depth_stencil_state_readonly: OMDepthState,
     pub depth_stencil_state_map: OMDepthState,
     pub depth_stencil_state_mask: OMDepthState,
-    #[cfg(feature = "goggles2")]
-    #[cfg(deleteme)]
-    pub(crate) inherit_render: usize,
-    #[cfg(feature = "goggles2")]
-    #[cfg(deleteme)]
-    pub(crate) inherit_depth: usize,
     #[cfg(feature = "goggles")]
     pub depth_stencil_state_write: OMDepthState,
     #[cfg(feature = "goggles")]
@@ -96,12 +86,6 @@ impl DepthHandler {
                 depth_stencil_state_mask,
                 Self::STENCIL_REF_MASK,
             ),
-            #[cfg(feature = "goggles2")]
-            #[cfg(deleteme)]
-            inherit_render: 0,
-            #[cfg(feature = "goggles2")]
-            #[cfg(deleteme)]
-            inherit_depth: 0,
             #[cfg(feature = "goggles")]
             depth_stencil_state_write: OMDepthState::with_state(
                 depth_stencil_state_write,
@@ -191,34 +175,6 @@ impl DepthHandler {
 
     const BUFFER_DESC: D3D11_TEXTURE2D_DESC = DepthView::BUFFER2D_DESC_UNSIZED;
 
-    #[cfg(todo)]
-    pub fn setup(&self, device_context: &Dx11Context, desc: &DrawDescSpace) {
-        let dsview = self.depth_stencil_view_with(desc);
-        self.rasterizer_state.set(device_context);
-        if !desc.implicit_render_target() {
-            dsview.set(device_context);
-        }
-        self.depth_stencil_state.set(device_context);
-        #[cfg(todo)]
-        if let Some(clear_depth) = desc.clear_depth() {
-            dsview.clear_depth(
-                device_context,
-                ClearFlags::DEPTH_STENCIL,
-                clear_depth,
-                Self::STENCIL_CLEAR,
-            );
-        }
-    }
-    #[cfg(todo)]
-    pub fn clear_depth(&self, device_context: &Dx11Context) {
-        self.render_target_view.clear_depth(
-            device_context,
-            ClearFlags::DEPTH_STENCIL,
-            DrawDescSpace::CLEAR_DEPTH,
-            Self::STENCIL_CLEAR,
-        );
-    }
-
     pub fn depth_stencil_view_with<'a>(
         &'a self,
         desc: &'a DrawDescSpace,
@@ -253,69 +209,10 @@ impl DepthHandler {
 
         dsview
     }
-    #[cfg(deleteme)]
-    pub fn depth_stencil_view(
-        &self,
-    ) -> (
-        RenderTargetViews<
-            InterfaceRef<'_, d3d11::ID3D11RenderTargetView>,
-            InterfaceRef<'_, d3d11::ID3D11DepthStencilView>,
-        >,
-        Option<f32>,
-    ) {
-        let (dsview, clear_depth) = match self.render_target_view.to_ref() {
-            #[cfg(feature = "goggles2")]
-            _ if self.inherit_render != 0 => unsafe {
-                let view = InterfaceRef::from_raw(core::ptr::NonNull::new_unchecked(
-                    self.inherit_render as *mut _,
-                ));
-                let depth = core::ptr::NonNull::new(self.inherit_depth as *mut _)
-                    .map(|p| InterfaceRef::from_raw(p));
-                let dsview = RenderTargetViews {
-                    //views: transmute::<&Option<InterfaceRef<ID3D11DepthView>>, &Option<DepthView>>(&view_storage),
-                    //depth: transmute::<&Option<InterfaceRef<ID3D11DepthView>>, &Option<DepthView>>(depth_storage),
-                    views: view,
-                    depth,
-                };
-                (dsview, None)
-            },
-            view => (
-                view.map_depth(|d| d.map(|d| d.to_ref()))
-                    .map_views(RenderTargetView::to_ref),
-                Some(1.0f32),
-            ),
-        };
-        #[cfg(feature = "goggles")]
-        let lens = match () {
-            #[cfg(feature = "goggles2")]
-            () if self.inherit_depth != 0 => dsview.depth,
-            () => goggles::current_lens(),
-        };
-        #[cfg(feature = "goggles")]
-        let (dsview, clear_depth) = match lens {
-            Some(depth) => {
-                let dsview = dsview.map_depth(|_| Some(depth));
-                (dsview, None)
-            },
-            None => (dsview, clear_depth),
-        };
-
-        (dsview, clear_depth)
-    }
 
     #[cfg(feature = "goggles")]
     pub fn depth_stencil_view_vtbl() -> Option<&'static d3d11::ID3D11DepthStencilView_Vtbl> {
         DEPTH_STENCIL_VIEW_VTABLE.get().copied()
-    }
-
-    #[cfg(feature = "goggles")]
-    #[cfg(deleteme)]
-    pub fn set_state_obscured(&self, device_context: &Dx11Context, obscured: bool) {
-        let state = match obscured {
-            true => &self.depth_stencil_state_obscured,
-            false => &self.depth_stencil_state,
-        };
-        state.set(device_context);
     }
 
     const RASTER_DESC: D3D11_RASTERIZER_DESC = D3D11_RASTERIZER_DESC {
@@ -328,47 +225,6 @@ impl DepthHandler {
         AntialiasedLineEnable: BOOL(1),
         ..RasterizerState::DESC_DEFAULT
     };
-
-    #[cfg(deleteme)]
-    pub fn setup_map(&self, device_context: &Dx11Context, desc: &DrawDescMap) {
-        self.rasterizer_state.set(device_context);
-        //self.render_target_view.to_ref().without_depth().set(device_context);
-        //self.render_target_view.set(device_context);
-        if !desc.implicit_render_target() {
-            let dsview = self.depth_stencil_view_with(desc);
-            #[cfg(deleteme)]
-            #[cfg(feature = "goggles2-project")]
-            let dsview = if desc.goggles.has_render_view()
-                && desc.goggles.target_depthview.is_none()
-                && !desc.goggles.buffer_compat
-            {
-                RenderTargetViews { depth: None, ..dsview }
-            } else {
-                dsview
-            };
-            dsview.set(device_context);
-        }
-        self.depth_stencil_state_map.set(device_context);
-    }
-
-    #[cfg(deleteme)]
-    pub fn setup_depth_write(
-        &self,
-        device_context: &Dx11Context,
-        fill_depth: Option<bool>,
-        desc: &DrawDescSpace,
-    ) {
-        match fill_depth {
-            #[cfg(feature = "goggles")]
-            Some(true) => &self.depth_stencil_state_write,
-            Some(..) => &self.depth_stencil_state_mask,
-            None => &self.depth_stencil_state,
-        }
-        .set(device_context);
-        if !desc.implicit_render_target() {
-            self.depth_stencil_view_with(desc).set(device_context);
-        }
-    }
 
     pub fn setup_minimap_scissor(&self, device_context: &Dx11Context, bounds: &Box2<ScreenSpace>) {
         let minimap_bounds = Box2::new(
@@ -387,13 +243,6 @@ impl DepthHandler {
         };
         unsafe {
             device_context.RSSetScissorRects(Some(&[bounds]));
-        }
-    }
-
-    #[cfg(deleteme)]
-    pub fn setup_fill(&self, device_context: &Dx11Context) {
-        unsafe {
-            device_context.PSSetShader(None, None);
         }
     }
 

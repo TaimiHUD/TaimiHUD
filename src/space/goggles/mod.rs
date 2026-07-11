@@ -33,7 +33,6 @@ pub use self::{
 #[cfg(feature = "goggles2-camera")]
 pub mod camera;
 pub mod class;
-#[path = "lens2.rs"]
 pub mod lens;
 #[cfg(feature = "goggles2-project")]
 pub mod project;
@@ -260,7 +259,7 @@ unsafe extern "system" fn taimi_update_subresource(
                 // TODO...
                 None
             },
-            _ if src_depth_pitch > 0 => Some({ (0u32, Some(src_depth_pitch)) }),
+            _ if src_depth_pitch > 0 => Some((0u32, Some(src_depth_pitch))),
             _ => Some((0u32, None)),
         };
         #[cfg(feature = "goggles2-camera")]

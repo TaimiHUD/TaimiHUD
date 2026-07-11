@@ -8,13 +8,7 @@ use {
             RenderState,
         },
         settings::{
-            state::ui::{
-                AnchorPosition,
-                PathingWindowState as UiState,
-                PathingWindowTab,
-                UiVec2,
-                WindowOpen,
-            },
+            state::ui::{AnchorPosition, PathingWindowState as UiState, PathingWindowTab, WindowOpen},
             Settings,
         },
         space::engine::Engine,
@@ -247,11 +241,6 @@ impl PathingWindowState {
                     let act = machine.pack_ui_state.draw_interact(ui);
                     if act.navigate_packs {
                         self.ui_tab_pending = Some(PathingWindowTab::INDEX_PACKS);
-                        #[cfg(deleteme)]
-                        {
-                            self.ui_state.tab.focus(PathingWindowTab::INDEX_PACKS);
-                            self.ui_state_pending = true;
-                        }
                     }
                 },
                 #[cfg(feature = "paths-edit")]
@@ -372,48 +361,6 @@ impl PathingWindowState {
             _ => Default::default(),
         };
         let table_token = ui.begin_table_with_flags(c"pathing", 1, table_flags);
-        #[cfg(deleteme)]
-        {
-            ui.table_next_column();
-            for (name, reason) in &engine.packs.unloaded_packs {
-                let node = ui.begin_tree_leaf_wide(name, name, true);
-                let hovered = ui.is_item_hovered();
-                match reason {
-                    #[cfg(todo = "unused")]
-                    UnloadedReason::Disabled => compile_error!("TODO"),
-                    UnloadedReason::UnknownFormat => {
-                        ui.same_line();
-                        with_i18n!("unknown", |msg| ui.text(msg));
-                        if hovered {
-                            ui.tooltip_text("taco zip or folder expected");
-                        }
-                    },
-                    UnloadedReason::LoadingFailed(reason) => {
-                        ui.same_line();
-                        with_i18n!("error", |msg| ui.text(msg));
-                        if hovered {
-                            ui.tooltip_text(reason);
-                        }
-                    },
-                }
-                ui.table_next_column();
-                node.end();
-            }
-            for pack in engine.packs.loaded_packs.values_mut() {
-                let mut recompute = false;
-                pack.draw_categories(
-                    ui,
-                    self.filter_state,
-                    &mut self.open_items,
-                    &mut recompute,
-                    &self.search_state,
-                );
-                if recompute {
-                    let external = PathingController::external_filter_state();
-                    pack.recompute_enabled(external.as_ref());
-                }
-            }
-        }
         if let Some(_token) = table_token {
             ui.table_next_column();
             machine.pack_ui_state.draw(ui);

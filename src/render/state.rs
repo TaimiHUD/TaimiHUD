@@ -48,7 +48,7 @@ use crate::marker::format::MarkerSet;
 use crate::render::machine::FrameState;
 #[cfg(feature = "paths")]
 use crate::render::{
-    message_window::{MessageAttrValue, MessageItemDesc, MessageKey, MessageWindowState},
+    message_window::{MessageItemDesc, MessageKey, MessageWindowState},
     PathingWindowState,
 };
 #[cfg(feature = "space")]
@@ -114,11 +114,6 @@ pub enum RenderEvent {
     Quit(Interruption),
     #[cfg(any(feature = "markers", feature = "space"))]
     UiMapOpen(taimi_meta::ui::MapOpen),
-    /// The buffer we were using has disappeared
-    #[cfg(feature = "goggles")]
-    UiDepthReleased(),
-    #[cfg(feature = "goggles")]
-    UiDepthAcquired(),
 }
 impl RenderEvent {
     pub const INITIATE_QUIT_REASON: Interruption = match () {
@@ -309,22 +304,6 @@ impl RenderState {
                         if self.machine.set_map_open(open) {
                             self.machine.act_map_open();
                         },
-                    #[cfg(feature = "goggles")]
-                    UiDepthReleased() => {
-                        self.machine.turn_depth_event(false);
-                        #[cfg(deleteme)]
-                        if self.machine.gameplay.gameplay_map().is_some()
-                            && crate::space::goggles::lens::read_lens() == core::ptr::dangling_mut()
-                        {
-                            if let Some(Ok(engine)) = &mut self.engine {
-                                engine.goggles_lens_reset(0, false);
-                            }
-                        }
-                    },
-                    #[cfg(feature = "goggles")]
-                    UiDepthAcquired() => {
-                        self.machine.turn_depth_event(true);
-                    },
                     event @ (Reload | ReloadAll) => {
                         self.reload(matches!(event, Reload));
                         return true

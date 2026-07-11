@@ -459,12 +459,6 @@ impl PathingConfig {
 
         if ui.checkbox(fl!("pathing-render-toggle"), &mut visible_space) {
             Self::set_pathing(|s| s.space.visible_space = Some(visible_space));
-            #[cfg(deleteme)]
-            #[cfg(feature = "goggles")]
-            Engine::try_send(match visible_space {
-                true => SpaceEvent::GogglesRefreshLens { force: false, delay_override: Some(2) },
-                false => SpaceEvent::GogglesClearLens,
-            });
         }
         ui.same_line();
         if ui.checkbox(fl!("pathing-config-textured"), &mut trail_textured_space) {

@@ -17,7 +17,7 @@ use {
         render::machine::{frame_log, FrameState, RenderMachine},
         settings::goggles::GogglesEnables,
         space::{
-            engine::{DrawDescGoggles, DrawDescSpace, FrameContext},
+            engine::{DrawDescGoggles, FrameContext},
             pack::render::Drawing,
         },
         RENDER_STATE,
@@ -37,10 +37,7 @@ use {
         time::Instant,
     },
     taimi_d3d::dx11::{context::DeviceContext0, prelude::*, DepthView, RenderTargetView},
-    taimi_hoard::{
-        flags::{BitSlice, BitsNative},
-        lazyfmt,
-    },
+    taimi_hoard::lazyfmt,
     taimi_meta::ui::{LocalContext, MapOpen},
 };
 
@@ -272,11 +269,11 @@ impl ProjectShared {
             .flatten();
         rtv.and_then(|rtv| {
             let dv = ClassShared::with_current_dv(|_k, buf| {
-                ((
+                (
                     buf.winner.then_some(buf.classification),
                     buf.depth_binds_count_write(),
                     buf.depth_binds_count_disabled(),
-                ))
+                )
             });
             let (empty, rt) = match &dv {
                 None | Some((None, ..)) => {
@@ -1157,57 +1154,6 @@ struct MethodAction {
     after_depthless: u8,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, strum::IntoStaticStr, strum::VariantArray)]
-#[repr(u8)]
-#[cfg(deleteme)]
-pub enum ProjectAction {
-    Nop = 1,
-    DebugDetect,
-    DrawObscured,
-    Draw,
-    DrawMinimap,
-    DrawMap,
-    Shadowbox,
-}
-#[cfg(deleteme)]
-impl ProjectAction {
-    #[inline(always)]
-    pub const fn index(self) -> u8 {
-        self as _
-    }
-    #[inline]
-    pub const fn bit(self) -> u16 {
-        1u16 << self.index() as u32
-    }
-    pub fn iter_bits(mut bits: u16) -> impl Iterator<Item = Self> {
-        iter::from_fn(move || {
-            while bits != 0 {
-                let bit = bits.trailing_zeros();
-                bits &= !1u16.unbounded_shl(bit);
-                if let Some(v) = Self::from_index(bit as _) {
-                    return Some(v)
-                }
-            }
-            None
-        })
-    }
-    const INDEX_MIN: u8 = Self::Nop.index() as _;
-    const INDEX_MAX: u8 = Self::Shadowbox.index() as _;
-    pub const fn from_index(index: u8) -> Option<Self> {
-        match index {
-            Self::INDEX_MIN..=Self::INDEX_MAX => Some(unsafe { Self::from_index_unchecked(index) }),
-            _ => None,
-        }
-    }
-    #[inline]
-    pub const fn is_in(self, bits: u16) -> bool {
-        bits & self.bit() != 0
-    }
-    #[inline(always)]
-    pub const unsafe fn from_index_unchecked(index: u8) -> Self {
-        mem::transmute(index)
-    }
-}
 /// TODO: deleteme
 pub struct ProjectAction;
 /// TODO: deleteme
@@ -1234,19 +1180,6 @@ impl Drawing {
     #[inline(always)]
     fn bit(self) -> Self {
         self
-    }
-    #[cfg(deleteme)]
-    fn to_pass(self) -> u32 {
-        match self.get_pass() {
-            Drawing::GLOBALMAP => DrawDescSpace::PASS_MAP,
-            Drawing::MINIMAP => DrawDescSpace::PASS_MINIMAP,
-            Drawing::OBSCURED => DrawDescSpace::PASS_OBSCURED,
-            Drawing::OBSCURED_SHADOWED => DrawDescSpace::PASS_OBSCURED_SHADOWED,
-            Drawing::SHADOWBOX => DrawDescSpace::PASS_SHADOWBOXING,
-            Drawing::REFLECT => DrawDescSpace::PASS_REFLECTING,
-            Drawing::REFLECT_BELOW => DrawDescSpace::PASS_REFLECTING_BELOW,
-            Drawing::SPACE | _ => DrawDescSpace::PASS_SPACE,
-        }
     }
 }
 

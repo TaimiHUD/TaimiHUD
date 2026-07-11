@@ -48,9 +48,6 @@ pub struct GogglesShared {
     #[cfg(feature = "goggles2-camera")]
     pub cam: super::camera::CameraShared,
     #[cfg(feature = "goggles2-project")]
-    #[cfg(deleteme)]
-    pub project: super::project::ProjectFerret,
-    #[cfg(feature = "goggles2-project")]
     pub project2: super::project::ProjectShared,
 }
 impl GogglesShared {
@@ -66,9 +63,6 @@ impl GogglesShared {
         lens: super::lens::LensShared::EMPTY,
         #[cfg(feature = "goggles2-camera")]
         cam: super::camera::CameraShared::EMPTY,
-        #[cfg(deleteme)]
-        #[cfg(feature = "goggles2-project")]
-        project: super::project::ProjectFerret::EMPTY,
         #[cfg(feature = "goggles2-project")]
         project2: super::project::ProjectShared::EMPTY,
     };
@@ -439,11 +433,6 @@ impl GogglesState {
         {
             self.camera.act_render_post();
         }
-        #[cfg(feature = "goggles2-project")]
-        #[cfg(deleteme)]
-        if self.is_enabled(GogglesEnables::PROJECT_ENABLE) {
-            self.project.act_render_post();
-        }
     }
     pub(crate) fn act_render_post_late(&mut self) {
         #[cfg(feature = "goggles2-project")]
@@ -533,11 +522,6 @@ impl GogglesState {
         {
             self.camera.act_pre_render(has_engine);
         }
-        #[cfg(feature = "goggles2-project")]
-        #[cfg(deleteme)]
-        if self.is_enabled(GogglesEnables::PROJECT_ENABLE) {
-            self.project.act_pre_render(has_engine);
-        }
         if !has_engine {
             g2!(*&mut ferret.is_ingame = has_engine);
         }
@@ -549,10 +533,6 @@ impl GogglesState {
             enables.insert(
                 GogglesEnables::ENABLE | GogglesEnables::CAMERA_ENABLE | GogglesEnables::CAMERA_DIR,
             );
-        }
-        #[cfg(deleteme)]
-        if settings.goggles.enabled() {
-            enables.insert(GogglesEnables::ENABLE);
         }
         enables
     }

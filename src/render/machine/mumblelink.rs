@@ -76,98 +76,7 @@ impl RenderMachine {
         }
     }
     #[cfg(feature = "space")]
-    #[cfg(deleteme)]
-    pub fn get_camera_mumblelink(&self) -> Option<RenderPosition> {
-        let mumblelink_camera = self.get_camera_mumblelink_verbatim()?;
-        Some(
-            match (
-                self.mumblelink_camera_frame
-                    .wrapping_sub(self.mumblelink_camera_prev_frame),
-                self.mumblelink_frame_skip,
-            ) {
-                (jump @ 2..=3, skip) | (jump @ 1..=4, skip @ 1..=3) => {
-                    let (pos0, front0) = self.mumblelink_camera_prev;
-                    let (pos1, front1, up) = mumblelink_camera;
-                    let interp_ahead = Self::CAMERA_SMOOTHING_PER_FRAME * 0.5;
-                    //let interp_ahead = 0.38f32;
-                    let interp_ahead = 0.28f32;
-                    let jump_back = interp_ahead;
-                    let skip_ahead = interp_ahead * skip as f32;
-                    let skip_ahead = interp_ahead * (skip as f32 + /*0.75f32*/ 0.5f32)/*.min(0.45f32)*/ - jump/*.saturating_sub(1)*/ as f32 * jump_back;
-                    let scale = 1.0f32 / jump as f32;
-                    let scale_ahead = skip_ahead * scale;
-
-                    /*let prev_skip = jump/*.saturating_sub(1)*/ as f32 + skip.saturating_sub(1) as f32;
-                    let target = (1.0f32 - 0.5f32 * scale + prev_skip * scale * 0.1f32).min(1.0f32);
-                    let factor = target + scale_ahead;*/
-                    let factor = 1.0f32 + scale_ahead;
-                    // jump=1 => target=prev+1.0 or pos0+1.0 or pos1+0
-                    // skip=1 => target=prev+0.5 or pos0+1.5 or pos1+0.5
-                    // jump=2 => target=prev+0.2 or pos0+0.7 or pos1-0.3
-                    // jump=2 skip=1 => target=prev+0.5 or pos0+2.5 or pos1+0.5/2
-                    //let factor = target - jump.saturating_sub(1) as f32 * Self::CAMERA_SMOOTHING_PER_FRAME;
-                    let pos = pos0.lerp(pos1, factor);
-                    let front = front0.slerp(front1, factor);
-                    (pos, front.normalize(), up)
-                },
-                _ => mumblelink_camera,
-            },
-        )
-    }
-    #[cfg(feature = "space")]
     pub(crate) fn lastminute_mumblelink_update(&mut self) {
-        use taimi_meta::spatial::record::frame_is_lt;
-
-        #[cfg(deleteme)]
-        let ml = rt::mumble_link_ptr().ok().map(|ml| {
-            let tick = ml.read_ui_tick();
-            (ml, tick, tick != self.mumblelink_frame)
-        });
-        #[cfg(deleteme)]
-        if let Some((_, tick, _)) = ml {
-            #[cfg(deleteme)]
-            let tick = tick.wrapping_sub(1);
-            if frame_is_lt(self.mumblelink_frames.times.position, tick) {
-                self.mumblelink_frames.times.advance_to(tick);
-            }
-        }
-        #[cfg(deleteme)]
-        let mut camera = None;
-        #[cfg(feature = "extension-nexus")]
-        #[cfg(deleteme)]
-        if let Some(rtapi) = self
-            .rtapi
-            .as_ref()
-            .and_then(|rtapi| rtapi.is_active().then_some(rtapi))
-        {
-            use taimi_hoard::vec::vec32_eq;
-
-            let rt_tick = match ml {
-                #[cfg(todo)]
-                Some((_, tick, true)) => tick.wrapping_sub(1),
-                #[cfg(todo)]
-                _ => self
-                    .mumblelink_frame
-                    .wrapping_add(self.mumblelink_frame_skip.min(1)),
-                _ => self.mumblelink_frames.latest_render_tick(),
-            };
-            let rt_tick_missed = || self.camera.mumblelink.get_at(rt_tick).is_none();
-            if self.rtapi_state.has_camera() && rt_tick_missed() {
-                let rtapi_prev = self.rtapi_state.camera;
-                let (camera_rtapi, _fov) = super::RenderStateRtapi::read_camera(rtapi);
-                if !vec32_eq(camera_rtapi.0, rtapi_prev.0) && !vec32_eq(camera_rtapi.1, rtapi_prev.1) {
-                    let matches_ml = ml.map(|(ml, ..)| {
-                        vec32_eq(camera.insert(Self::read_camera_mumblelink(ml)).0, camera_rtapi.0)
-                    });
-                    if matches_ml != Some(true) {
-                        self.camera
-                            .record_mumblelink(rt_tick, (camera_rtapi.0, camera_rtapi.1, Vector3::ZERO));
-                    }
-                }
-            }
-        }
-        #[cfg(deleteme)]
-        let ml = ml.and_then(|(ml, tick, new_tick)| new_tick.then_some((ml, tick)));
         let tryagain = self.mumblelink_frames.is_early();
         #[cfg(feature = "goggles2-project")]
         let tryagain = tryagain || self.goggles.active.contains(GogglesEnables::PROJECT_ENABLE);
@@ -176,30 +85,6 @@ impl RenderMachine {
             #[cfg(todo)]
             if _new_tick.is_some() && self.goggles.project_is_projecting() {
                 resyncidk();
-            }
-        }
-        #[cfg(feature = "goggles2-camera")]
-        #[cfg(deleteme)]
-        {
-            self.update_camera_goggles2();
-        }
-        #[cfg(deleteme)]
-        let needs_ml_cam = ml.is_some()
-            && self
-                .camera
-                .mumblelink
-                .get_at(self.mumblelink_frames.latest_render_tick())
-                .is_none();
-        #[cfg(deleteme)]
-        if let Some((ml, tick)) = needs_ml_cam.then_some(ml).flatten() {
-            let camera = camera.unwrap_or_else(|| Self::read_camera_mumblelink(ml));
-            self.camera.record_mumblelink(tick, camera);
-            #[cfg(deleteme)]
-            {
-                self.mumblelink_camera = Self::read_camera_mumblelink(ml);
-                self.mumblelink_camera_frame = tick;
-                // TODO: bleh...
-                self.mumblelink_frame_skip = 0;
             }
         }
     }

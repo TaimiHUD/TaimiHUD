@@ -269,16 +269,6 @@ impl PerspectiveHandler {
         };
 
         let mid = Vec3::new(centre_local.x, bounds.center().y, centre_local.y);
-        #[cfg(feature = "goggles2-project")]
-        #[cfg(deleteme)]
-        let mid = if desc.goggles.is_project()
-            && display_viewport.viewport.Width == display_viewport.viewport.Height
-            && desc.depth_read
-        {
-            mid.with_y(mid.y + crate::space::goggles::g2!(*&ferret.project.minimap_depth_offset))
-        } else {
-            mid
-        };
         let (map_rotation, counter_rot) = match machine.map.rotation() {
             #[cfg(feature = "goggles2-project")]
             Some(amt)
