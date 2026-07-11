@@ -4,13 +4,6 @@ use {
     crate::settings::pathing::TriggerKind,
     tokio::sync::broadcast,
 };
-#[cfg(deleteme)]
-#[cfg(feature = "paths-lua")]
-use {
-    crate::controller::script::PackPlugShared,
-    std::collections::BTreeSet,
-    taimi_pack::{attributes::cell::PackKeyId, script::pathing::imp::MarkerLoc},
-};
 use {
     crate::{
         controller::{
@@ -129,48 +122,8 @@ pub enum SpaceEvent {
     /// attr change requires regenerating geometry vertex buffer
     #[cfg(feature = "paths-dyn")]
     DirtyTrailV(LoadedMarkerPath<PackMapPath>),
-    #[cfg(deleteme)]
-    #[cfg(feature = "goggles")]
-    GogglesRefreshLens {
-        delay_override: Option<u32>,
-        force: bool,
-    },
-    #[cfg(deleteme)]
-    #[cfg(feature = "goggles")]
-    GogglesClearLens,
     #[cfg(feature = "goggles")]
     RefreshEdgeScale,
-    #[cfg(deleteme)]
-    #[cfg(feature = "paths-lua")]
-    ScriptStart {
-        generation: usize,
-        pack_idx: usize,
-        shared: Arc<PackPlugShared>,
-    },
-    #[cfg(deleteme)]
-    #[cfg(feature = "paths-lua")]
-    ScriptOverrideUpdate {
-        generation: usize,
-        pack_idx: usize,
-        marker_path: MarkerLoc,
-        #[cfg(todo)]
-        overrides: MarkerOverridesShared,
-        changed: (Option<PackKeyId>, BTreeSet<PackKeyId>),
-    },
-    #[cfg(deleteme)]
-    #[cfg(feature = "paths-lua")]
-    ScriptCreate {
-        generation: usize,
-        pack_idx: usize,
-        marker_path: MarkerLoc,
-    },
-    #[cfg(deleteme)]
-    #[cfg(feature = "paths-lua")]
-    ScriptMask {
-        generation: usize,
-        pack_idx: usize,
-        marker_path: MarkerLoc,
-    },
 }
 impl SpaceEvent {
     #[inline]
@@ -229,10 +182,6 @@ pub struct Engine {
     pub object_kinds: HashMap<Arc<str>, Arc<ObjectBacking>>,
     phase_states: Vec<Arc<PhaseState>>,
     associated_entities: HashMap<String, Vec<Entity>>,
-
-    #[cfg(feature = "goggles")]
-    #[cfg(deleteme)]
-    goggles_select_lens_delay: Option<(u32, bool)>,
 
     schedule: Schedule,
 
@@ -320,9 +269,6 @@ impl Engine {
             packs,
             arcdata: ArcrenderSettings::DEFAULT,
             drawing: Default::default(),
-            #[cfg(feature = "goggles")]
-            #[cfg(deleteme)]
-            goggles_select_lens_delay: Some((Self::GOGGLES_START_DELAY_TICKS, true)),
             #[cfg(feature = "paths-interact")]
             interact_rx: None,
             settings: None,
@@ -637,26 +583,6 @@ impl Engine {
                             log::error!("{e:#}");
                         }
                     },
-                    #[cfg(feature = "goggles")]
-                    #[cfg(deleteme)]
-                    GogglesClearLens if !goggles::is_enabled() => (),
-                    #[cfg(feature = "goggles")]
-                    #[cfg(deleteme)]
-                    GogglesRefreshLens { force, delay_override } => {
-                        if self.map_settings(|s| s.space.goggles.enabled()) {
-                            self.goggles_enter(machine, force);
-                        }
-                        if let (Some(delay_override), Some((delay, ..))) =
-                            (delay_override, &mut self.goggles_select_lens_delay)
-                        {
-                            *delay = 8 * delay_override;
-                        }
-                    },
-                    #[cfg(feature = "goggles")]
-                    #[cfg(deleteme)]
-                    GogglesClearLens => {
-                        goggles::clear_lens();
-                    },
                     MarkerFeed(phase_state) => self.new_phase(phase_state).context("marker new phase")?,
                     MarkerReset(timer) => self.remove_phase(timer).context("marker remove phase")?,
                     #[cfg(feature = "paths-dyn")]
@@ -670,57 +596,6 @@ impl Engine {
                     #[cfg(feature = "paths-dyn")]
                     DirtyTrailV(lpath) => {
                         self.packs.invalidate_trail_vb(lpath);
-                        return Ok(Some(false))
-                    },
-                    #[cfg(feature = "paths-lua")]
-                    #[cfg(deleteme)]
-                    ScriptStart { generation, pack_idx, shared } => {
-                        self.packs.script_start(
-                            &self.render_backend.device,
-                            machine,
-                            (generation, pack_idx),
-                            shared,
-                        );
-                        return Ok(Some(false))
-                    },
-                    #[cfg(feature = "paths-lua")]
-                    #[cfg(deleteme)]
-                    ScriptOverrideUpdate {
-                        generation,
-                        pack_idx,
-                        marker_path,
-                        changed: (changed, changed_rest),
-                    } => {
-                        let mut changed = changed.into_iter().chain(changed_rest);
-                        self.packs.script_update_marker(
-                            &self.render_backend.device,
-                            machine,
-                            (generation, pack_idx),
-                            marker_path,
-                            &mut changed,
-                        );
-                        return Ok(Some(false))
-                    },
-                    #[cfg(feature = "paths-lua")]
-                    #[cfg(deleteme)]
-                    ScriptCreate { generation, pack_idx, marker_path } => {
-                        self.packs.script_create(
-                            &self.render_backend.device,
-                            machine,
-                            (generation, pack_idx),
-                            marker_path,
-                        );
-                        return Ok(Some(false))
-                    },
-                    #[cfg(feature = "paths-lua")]
-                    #[cfg(deleteme)]
-                    ScriptMask { generation, pack_idx, marker_path } => {
-                        self.packs.script_mask(
-                            &self.render_backend.device,
-                            machine,
-                            (generation, pack_idx),
-                            marker_path,
-                        );
                         return Ok(Some(false))
                     },
                 }
@@ -766,11 +641,6 @@ impl Engine {
             } => {
                 #[cfg(taimi_debug)]
                 log::debug!("leaving map {_prev}");
-                #[cfg(deleteme)]
-                {
-                    self.goggles_exit();
-                    //self.gameplay_map_exit(device_context()?, prev)
-                }
                 Ok(())
             },
             GameplayState::Intermission {
@@ -890,7 +760,7 @@ impl Engine {
                 return Err(e)
             },
         }
-        #[cfg(all(todo, deletemenotreally))]
+        #[cfg(todo)]
         {
             self.packs
                 .update(machine, &self.render_backend.device, &device_context);
@@ -1105,25 +975,6 @@ impl Engine {
         if can_inherit {
             desc.goggles.inherit = true;
         }
-        #[cfg(deleteme)]
-        {
-            self.render_backend.depth_handler.inherit_depth =
-                match machine.goggles.project.inherit_render {
-                    true if goggles::current_lens().is_some() => None,
-                    true => depth_view.map(|v| v.as_d3d_raw().as_ptr() as usize),
-                    false => None,
-                }
-                .unwrap_or(0);
-            self.render_backend.depth_handler.inherit_render = match machine.goggles.project.inherit_render
-            {
-                _ if FerretResource::project_hack_shadowbox() => None,
-                true => target,
-                false if goggles::current_lens().is_some() => target,
-                false => None,
-            }
-            .map(|v| v.as_d3d_raw().as_ptr() as usize)
-            .unwrap_or(0);
-        }
         let mut buffer_compat = desc.goggles.buffer_compat;
         let (display_size, viewport) = (self.render_backend.display_size, self.render_backend.viewport);
         if let Some(vp_rect) = vp_rect {
@@ -1140,68 +991,8 @@ impl Engine {
             self.render_backend.viewport.viewport.TopLeftX = vp_rect.origin.x;
             self.render_backend.viewport.viewport.TopLeftY = vp_rect.origin.y;
         }
-        #[cfg(deleteme)]
-        match dv_size_u32 {
-            Some((w, h)) if rt_size_u32.is_some() && rt_size_u32 != dv_size_u32 => {
-                frame_log!("depth buffer incompatible!");
-                let dv_ok = w as f32 == viewport.viewport.Width && h == viewport.viewport.Height as u32;
-                if dv_ok
-                    && (desc.pass_is_obscured()
-                        || matches!(ctx, LocalContext::World)
-                        || desc.goggles.target_renderview.is_none())
-                {
-                    self.render_backend.display_size = display_size;
-                    self.render_backend.viewport = viewport;
-                    desc.goggles.target_renderview = None;
-                } else if desc.pass_is_obscured() || desc.colour_write {
-                    return
-                }
-                buffer_compat = dv_ok;
-            },
-            _ => (),
-        }
         desc.goggles.buffer_compat = buffer_compat;
-        #[cfg(deleteme)]
-        let mut cls = None;
-        #[cfg(deleteme)]
-        if let Some(rtv) = desc.goggles.target_renderview {
-            goggles::class::ClassShared::with_seen(rtv, |buf| {
-                cls = Some(buf.classification);
-            });
-        }
-        #[cfg(deleteme)]
-        let descmap = (machine.get_map_open_state().is_visible()
-            && cls == Some(goggles::class::BufferClass::Target))
-        .then(|| desc.clone());
-        #[cfg(deleteme)]
-        let ctx = if cls == Some(goggles::class::BufferClass::Minimap) {
-            if self.drawing.frame_count % 1000 == 0 {
-                log::debug!("minimap vp: {:?}", vp);
-            }
-            LocalContext::MINIMAP
-        } else {
-            ctx
-        };
-        #[cfg(deleteme)]
-        if let LocalContext::Map(..) = ctx {
-            desc.depth_write = false;
-            desc.depth_read = false;
-        }
         self.draw2(machine, device_context, desc, ctx);
-        #[cfg(deleteme)]
-        if let Some(mut desc) = descmap {
-            //desc.goggles.target_depthview = None;
-            desc.goggles.inherit = false;
-            desc.depth_read = false;
-            desc.depth_write = false;
-            self.draw2(machine, device_context, desc, LocalContext::GLOBAL);
-        }
-        #[cfg(deleteme)]
-        {
-            self.draw(machine, device_context, true);
-            self.render_backend.depth_handler.inherit_render = 0;
-            self.render_backend.depth_handler.inherit_depth = 0;
-        }
         self.render_backend.display_size = display_size;
         self.render_backend.viewport = viewport;
         if machine.goggles.project_wants_flush() {
@@ -1222,12 +1013,6 @@ impl Engine {
             desc.depth_write = false;
         }
         let mut state = DrawStateSpace::default();
-        #[cfg(deleteme)]
-        let mut setup = || {
-            state.set_raster(device_context, &self.render_backend);
-            state.set_sampler(device_context, &self.render_backend);
-            state.set_viewport(device_context, &self.render_backend);
-        };
         match ctx {
             LocalContext::World => {
                 let (draw_trails, textured_trails, draw_pois, textured_pois) = self.map_settings(|s| {
@@ -1252,10 +1037,6 @@ impl Engine {
                 }
                 self.setup_frame(machine, device_context);
                 state.setup_target(device_context, &self.render_backend, &desc);
-                #[cfg(deleteme)]
-                {
-                    self.clear_scissor(device_context, &desc);
-                }
 
                 state.set_minimap_scissor(device_context, &self.render_backend, None);
                 match desc.pass.get_pass() {
@@ -1338,35 +1119,6 @@ impl Engine {
     }
     const PERSPECTIVE_SLOT: u32 = 0;
     const TEXTURE_TRAIL_SLOT: u32 = 0;
-    #[cfg(deleteme)]
-    pub fn setup_draw(
-        &mut self,
-        machine: &mut RenderMachine,
-        device_context: &Dx11Context,
-        desc: &DrawDescSpace,
-    ) {
-        self.render_backend
-            .sampler_state
-            .set(&device_context, Self::TEXTURE_TRAIL_SLOT);
-        let (set_blend, set_viewport) = match () {
-            #[cfg(feature = "goggles2-project")]
-            _ if desc.goggles.is_project() => (!machine.goggles.project.project_blend_force, true),
-            _ => (true, true),
-        };
-        if set_blend {
-            let blend_state = match () {
-                #[cfg(feature = "goggles2-project")]
-                _ if desc.goggles.is_project() && machine.goggles.project.project_shadow =>
-                    &self.render_backend.blend_state_shadow,
-                _ => &self.render_backend.blend_state,
-            };
-            blend_state.set(&device_context);
-        }
-        self.render_backend.depth_handler.setup(&device_context, &desc);
-        if set_viewport {
-            self.render_backend.viewport.set(&device_context);
-        }
-    }
     pub fn setup_draw_space_legacy(
         &mut self,
         _machine: &mut RenderMachine,
@@ -1481,75 +1233,6 @@ impl Engine {
         self.render_backend
             .depth_handler
             .set_scissor(&device_context, Box2::from_size(self.render_backend.display_size));
-    }
-    #[cfg(deleteme)]
-    pub fn apply_masks(
-        &mut self,
-        machine: &mut RenderMachine,
-        device_context: &Dx11Context,
-        desc: &mut DrawDescSpace,
-        minimap_visible: bool,
-    ) {
-        let masking_corners = self.render_backend.depth_handler.fill_edge.is_some();
-        let masking = minimap_visible || masking_corners;
-        let masking = masking && !machine.is_ui_hidden();
-        #[cfg(feature = "goggles2-project")]
-        let masking = masking && !desc.goggles.is_project();
-        let masking = match masking {
-            #[cfg(todo)]
-            true if desc.stencil_write => Some(false),
-            true if desc.depth_write => Some(true),
-            #[cfg(todo = "unnecessary")]
-            #[cfg(feature = "goggles")]
-            true if desc.goggles.target_depthview.is_some() => match desc.goggles.depth_invert {
-                // writing to stencil of game's buffer is a bad idea and won't clear
-                #[cfg(todo)]
-                false => Some(false),
-                _ => Some(true),
-            },
-            _ => None,
-        };
-        match masking {
-            Some(false) => {
-                desc.stencil_write = true;
-                desc.stencil_read = true;
-            },
-            _ => {
-                desc.stencil_write = false;
-                desc.stencil_read = false;
-            },
-        }
-        if let Some(depth_fill) = masking {
-            let backend = &mut self.render_backend;
-            backend
-                .depth_handler
-                .setup_depth_write(&device_context, Some(depth_fill), &desc);
-
-            if let Some((shader, layout)) = backend.shaders.vertex.get("mask") {
-                layout.set(&device_context);
-                shader.set(&device_context);
-            }
-            backend.depth_handler.setup_fill(&device_context);
-        }
-
-        if minimap_visible {
-            if masking.is_some() {
-                self.render_backend.depth_handler.fill_clipped(&device_context);
-            }
-            self.clear_scissor(device_context, desc);
-        }
-
-        if let Some(depth_fill) = masking {
-            if masking_corners {
-                self.render_backend
-                    .depth_handler
-                    .fill_corners(&device_context, depth_fill);
-            }
-
-            self.render_backend
-                .depth_handler
-                .setup_depth_write(&device_context, None, &desc);
-        }
     }
     pub fn draw_map(
         &mut self,
@@ -1808,33 +1491,9 @@ impl Engine {
                     frame_log!("reflection surface distant");
                     return
                 }
-                match ang {
-                    #[cfg(deleteme)]
-                    ang if ang < 0.0f32 => {
-                        // TODO: beware positive dir.y - indicates looking up and not at the water!
-                        let skewed = dir / magnitude;
-                        let offset = skewed * pos.y;
-                        //cam_alt = (pos - offset * 2.0, -dir, RenderMachine::LOCAL_UP);
-                        //cam_alt = (pos + offset.with_y(-offset.y) * 2.0, -dir, RenderMachine::LOCAL_UP);
-                        //cam_alt = (pos.with_x(pos.x+0.5), dir, RenderMachine::LOCAL_UP);
-                        //cam_alt = (pos - offset, dir.with_y(-dir.y), RenderMachine::LOCAL_UP);
-                        cam_alt = (
-                            pos - offset - glamour::Vector3::ZERO.with_y(dist),
-                            glamour::Vector3::Y,
-                            glamour::Vector3::Z,
-                        );
-                        far = match () {
-                            //#[cfg(todo = "unnecessary")]
-                            _ => offset.length(),
-                            _ => dist,
-                        };
-                    },
-                    _ => {
-                        let redir = dir.with_y(-dir.y);
-                        cam_alt = (pos.with_y(-pos.y), redir, RenderMachine::LOCAL_UP);
-                        //far = dist.min(depth.end * 1.5);
-                    },
-                }
+                let redir = dir.with_y(-dir.y);
+                cam_alt = (pos.with_y(-pos.y), redir, RenderMachine::LOCAL_UP);
+                //far = dist.min(depth.end * 1.5);
                 #[cfg(todo)]
                 let near = (far - depth.end).max(depth.start);
                 let near = pos.y.abs().max(depth.start);
@@ -2727,107 +2386,6 @@ impl Engine {
         }
 
         state.cleanup(device_context, &self.render_backend);
-
-        #[cfg(deleteme)]
-        let render_minimap_bounds = match &minimap_bounds {
-            None => None,
-            Some(b) => Some((Box2::from(*b), b)),
-        };
-        #[cfg(deleteme)]
-        for ctx in FrameContext::draw_contexts() {
-            let map_ctx = match ctx {
-                LocalContext::World => {
-                    if let Some((camera, depth, ref cull)) = render_world {
-                        if !self.drawing.has_drawn_context(LocalContext::World) {
-                            frame_log!("engine draw: space");
-                            let minimap_bounds = render_minimap_bounds.as_ref().map(|(b, ..)| b);
-                            state.set_minimap_scissor(device_context, &self.render_backend, minimap_bounds);
-                            self.draw_space(
-                                machine,
-                                device_context,
-                                &desc,
-                                &mut state,
-                                camera,
-                                depth.clone(),
-                                cull,
-                            );
-                        }
-
-                        #[cfg(feature = "space-ecs")]
-                        {
-                            self.draw_ecs(machine, device_context, &desc, camera, depth, cull)
-                        }
-                    }
-                    continue
-                },
-                LocalContext::Map(m) => m,
-            };
-            let local_bounds = match map_ctx {
-                map_ctx if self.drawing.has_drawn_context(map_ctx) => None,
-                map_ctx => self.map_bounds(machine, &desc, map_ctx),
-            };
-            let Some(local_bounds) = local_bounds else { continue };
-            frame_log!("engine draw: {map_ctx:?}");
-            let render_minimap_bounds = match render_minimap_bounds.as_ref() {
-                Some(..) if !matches!(map_ctx, MapContext::Minimap) => None,
-                b => b,
-            };
-            if !is_setup {
-                self.setup_draw(machine, device_context, &desc);
-                is_setup = true;
-            }
-            let screen_bounds = if let Some((render_minimap_bounds, minimap_bounds)) = render_minimap_bounds
-            {
-                self.setup_minimap_scissor(device_context, &desc, render_minimap_bounds);
-                scissor_clear = false;
-                **minimap_bounds
-            } else {
-                if !scissor_clear {
-                    self.clear_scissor(device_context, &desc);
-                    scissor_clear = true;
-                }
-                let r = self.render_backend.viewport.rect();
-                glamour::Rect::new(r.origin.cast(), r.size.cast())
-            };
-            minimap_scissor_bound = !scissor_clear;
-            #[cfg(feature = "goggles2-project")]
-            if desc.depth_read && desc.goggles.target_depthview.is_some() {
-                self.render_backend
-                    .depth_handler
-                    .depth_stencil_state_readonly
-                    .set(&device_context);
-            }
-            self.draw_map(
-                machine,
-                device_context,
-                &desc,
-                map_ctx,
-                screen_bounds,
-                local_bounds,
-            );
-        }
-
-        #[cfg(feature = "goggles")]
-        #[cfg(deleteme)]
-        if let Some(map_id) = machine.is_ingame() {
-            let goggles_tick = self
-                .goggles_select_lens_delay
-                .as_mut()
-                .map(|(d, f)| (d, *f, map_id));
-            match goggles_tick {
-                _ if machine.map_open ^ machine.map_open_timestamp.is_some() => (),
-                Some((0, force, map_id)) if render_world.is_some() => {
-                    self.goggles_start(machine, force, Some(map_id));
-                    let _ = self.goggles_select_lens_delay.take();
-                },
-                Some((ticks, ..)) =>
-                    if let Some(ui_tick) = machine.ui_tick() {
-                        let amt = if ui_tick.is_player() { 6 } else { 1 };
-                        *ticks = ticks.saturating_sub(amt);
-                    },
-                _ => (),
-            }
-        }
     }
     fn draw0_map(
         &mut self,
@@ -3115,61 +2673,6 @@ impl Engine {
         f(settings)
     }
 
-    #[cfg(feature = "goggles")]
-    const GOGGLES_START_DELAY_TICKS: u32 = 8 * 6;
-    #[cfg(deleteme)]
-    pub fn goggles_enter(&mut self, machine: &mut RenderMachine, force: bool) {
-        // fastload or early notifications can throw off the lens selection...
-        self.goggles_lens_reset(Self::GOGGLES_START_DELAY_TICKS, force);
-        machine.goggles.reset_search(force);
-    }
-    #[cfg(deleteme)]
-    pub fn goggles_lens_reset(&mut self, ticks: u32, force: bool) {
-        self.goggles_select_lens_delay = Some((ticks, force));
-    }
-    #[cfg(deleteme)]
-    pub fn goggles_exit(&mut self) {
-        #[cfg(feature = "goggles")]
-        if goggles::is_enabled() {
-            goggles::clear_lens();
-        }
-        let _ = self.goggles_select_lens_delay.take();
-    }
-
-    #[cfg(feature = "goggles")]
-    #[cfg(deleteme)]
-    fn goggles_start(&mut self, machine: &mut RenderMachine, force: bool, map_id: Option<NonZeroU32>) {
-        use crate::render::goggles as render_goggles;
-
-        let settings = self.map_settings_ref(|s| {
-            s.map(|s| {
-                (
-                    s.space.goggles.enabled(),
-                    map_id.map(|map_id| s.space.goggles.map_depth_calibration(map_id.get())),
-                    (),
-                )
-            })
-        });
-
-        if let Some((true, depth)) = settings {
-            if let (false, needs_setup) = render_goggles::get_state() {
-                log::debug!(
-                    "Goggles setup: {}...",
-                    if needs_setup { "initializing" } else { "restarting" }
-                );
-                render_goggles::enable(needs_setup);
-            }
-
-            goggles::pick_lens(force);
-
-            #[cfg(deleteme)]
-            if let Some((min, max)) = depth {
-                let reference = RenderMachine::GOGGLES_DEPTH_RANGE;
-                machine.depth_range = Some(reference.start * min..reference.end * max);
-            }
-        }
-    }
-
     pub(crate) fn setup_stats() {
         use crate::resources::texture;
 
@@ -3321,24 +2824,6 @@ impl DrawDescSpace {
             return true
         }
         false
-    }
-    #[inline]
-    #[cfg(todo)]
-    #[cfg(deleteme)]
-    pub fn clear_depth(&self) -> Option<f32> {
-        #[cfg(feature = "goggles")]
-        if self.goggles.target_depthview.is_some() {
-            return None
-        }
-        #[cfg(feature = "goggles2-project")]
-        if self.goggles.inherit {
-            return None
-        }
-        (self.depth_write && self.pass == 0).then_some(Self::CLEAR_DEPTH)
-    }
-    #[cfg(deleteme)]
-    pub fn clear_depth(&self) -> Option<f32> {
-        None
     }
     pub const CLEAR_DEPTH: f32 = 1.0f32;
 
@@ -3540,10 +3025,6 @@ impl FrameContext {
     pub fn end_frame(&mut self) {
         self.frame_index = self.frame_count;
         self.frame_start = None;
-        #[cfg(deleteme)]
-        {
-            self.discard_frame();
-        }
     }
     pub fn new_frame(&mut self, when: Instant) {
         self.frame_count = self.frame_index.wrapping_add(1);
@@ -3556,15 +3037,6 @@ impl FrameContext {
     }
     pub fn end_scene(&mut self) {
         self.scene_start = None;
-    }
-    #[cfg(deleteme)]
-    pub fn refresh_frame<W>(&mut self, when: W)
-    where
-        W: FnOnce() -> Instant,
-    {
-        if self.is_stale_frame() {
-            self.new_frame(when())
-        }
     }
     pub fn schedule_frame(&mut self, when: Instant) {
         if self.frame_start.is_none() {
@@ -3717,100 +3189,11 @@ impl FrameContext {
 }
 impl FrameContext {
     #[inline]
-    #[cfg(deleteme)]
-    pub fn drawing_bits(&self) -> &BitSlice<u16, BitsNative> {
-        let range = LocalContext::REPR_MIN as usize..LocalContext::REPR_END as usize;
-        unsafe { self.drawing.get_unchecked(range) }
-    }
-    #[inline]
-    #[cfg(deleteme)]
-    pub fn drawing_map_bits(&self) -> &BitSlice<u16, BitsNative> {
-        let range = MapContext::REPR_MIN as usize..MapContext::REPR_END as usize;
-        unsafe { self.drawing.get_unchecked(range) }
-    }
-    #[inline]
-    #[cfg(deleteme)]
-    pub fn drawn_bits(&self) -> &BitSlice<u16, BitsNative> {
-        let range = LocalContext::REPR_MIN as usize..LocalContext::REPR_END as usize;
-        unsafe { self.drawn.get_unchecked(range) }
-    }
-    #[inline]
-    #[cfg(deleteme)]
-    pub fn visible_bits(&self) -> &BitSlice<u16, BitsNative> {
-        let range = LocalContext::REPR_MIN as usize..LocalContext::REPR_END as usize;
-        unsafe { self.visible.get_unchecked(range) }
-    }
-    #[inline]
-    #[cfg(deleteme)]
-    pub fn visible_map_bits(&self) -> &BitSlice<u16, BitsNative> {
-        let range = MapContext::REPR_MIN as usize..MapContext::REPR_END as usize;
-        unsafe { self.visible.get_unchecked(range) }
-    }
-    #[inline]
-    #[cfg(deleteme)]
-    pub fn enabled_bits(&self) -> &BitSlice<u16, BitsNative> {
-        let range = LocalContext::REPR_MIN as usize..LocalContext::REPR_END as usize;
-        unsafe { self.enabled.get_unchecked(range) }
-    }
-    #[inline]
-    #[cfg(deleteme)]
-    pub fn iter_drawing(&self) -> impl ExactSizeIterator<Item = LocalContext> + '_ {
-        let bits = self.drawing_bits();
-        bits.iter_ones()
-            .lazy_map(|i| unsafe { LocalContext::from_repr_unchecked(LocalContext::REPR_MIN + i as u8) })
-    }
-    #[inline]
-    #[cfg(deleteme)]
-    pub fn iter_drawing_map(&self) -> impl ExactSizeIterator<Item = MapContext> + '_ {
-        let bits = self.drawing_map_bits();
-        bits.iter_ones()
-            .lazy_map(|i| unsafe { MapContext::from_repr_unchecked(MapContext::REPR_MIN + i as u8) })
-    }
-    #[inline]
-    #[cfg(deleteme)]
-    pub fn iter_drawn(&self) -> impl ExactSizeIterator<Item = LocalContext> + '_ {
-        let bits = self.drawn_bits();
-        bits.iter_ones()
-            .lazy_map(|i| unsafe { LocalContext::from_repr_unchecked(LocalContext::REPR_MIN + i as u8) })
-    }
-    #[inline]
-    #[cfg(deleteme)]
-    pub fn iter_visible(&self) -> impl ExactSizeIterator<Item = LocalContext> + '_ {
-        let bits = self.visible_bits();
-        bits.iter_ones()
-            .lazy_map(|i| unsafe { LocalContext::from_repr_unchecked(LocalContext::REPR_MIN + i as u8) })
-    }
-    #[inline]
-    #[cfg(deleteme)]
-    pub fn iter_visible_map(&self) -> impl ExactSizeIterator<Item = MapContext> + '_ {
-        let bits = self.visible_map_bits();
-        bits.iter_ones()
-            .lazy_map(|i| unsafe { MapContext::from_repr_unchecked(MapContext::REPR_MIN + i as u8) })
-    }
-    #[inline]
     pub fn is_drawing(&self) -> bool {
         !self.drawing.is_empty()
     }
-    #[cfg(deleteme)]
-    pub fn is_drawing_map(&self) -> bool {
-        self.drawing_map_bits().any()
-    }
-    #[cfg(todo)]
-    #[cfg(deleteme)]
-    pub fn is_visible(&self) -> bool {
-        self.visible_bits().any()
-    }
     pub fn is_enabled(&self) -> bool {
         !self.enabled.is_empty()
-    }
-    #[cfg(deleteme)]
-    pub fn is_map_visible(&self) -> bool {
-        self.visible_map_bits().any()
-    }
-    #[cfg(todo)]
-    #[cfg(deleteme)]
-    pub fn has_drawn(&self) -> bool {
-        self.drawn_bits().any()
     }
 
     #[inline]
@@ -3918,10 +3301,6 @@ impl DrawStateSpace {
             None => backend
                 .depth_handler
                 .set_scissor(context, backend.viewport_rect().to_box2()),
-            #[cfg(deleteme)]
-            None => backend
-                .depth_handler
-                .set_scissor(context, Box2::from_size(backend.display_size)),
         }
     }
     pub fn unset_scissor(&mut self, context: &Dx11Context) {

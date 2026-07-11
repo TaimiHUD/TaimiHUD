@@ -101,23 +101,6 @@ use {
         watched::{watch, Watched},
     },
 };
-#[cfg(feature = "paths-lua")]
-#[cfg(deleteme)]
-use {
-    crate::controller::script::{PackPlugShared, ScriptMessage},
-    std::borrow::Cow,
-    taimi_pack::{
-        attributes::cell::{pack_attr, GetAttrDyn, PackKeyId, PackValueCell, SetAttrDyn},
-        script::pathing::imp::{
-            MarkerLoc,
-            MarkerOverrides,
-            MarkerOverridesAttrs,
-            MarkerType,
-            PackOverrides,
-            PackRootCategories,
-        },
-    },
-};
 
 /// Internal rendering data.
 pub struct PackRenderData {
@@ -129,13 +112,6 @@ pub struct PackRenderData {
     pub render_poi_bookmark: usize,
     #[cfg(todo)]
     pub trail_tints: BTreeMap<LoadedTrailIndex, (Vec4, Vec4)>,
-
-    #[cfg(feature = "paths-lua")]
-    #[cfg(deleteme)]
-    pub(crate) script_data: Option<Arc<PackPlugShared>>,
-    #[cfg(feature = "paths-lua")]
-    #[cfg(deleteme)]
-    pub script_capable: bool,
 }
 
 impl PackRenderData {
@@ -147,12 +123,6 @@ impl PackRenderData {
             pois: Default::default(),
             trails: Default::default(),
             render_poi_bookmark: 0,
-            #[cfg(feature = "paths-lua")]
-            #[cfg(deleteme)]
-            script_data: Default::default(),
-            #[cfg(feature = "paths-lua")]
-            #[cfg(deleteme)]
-            script_capable: Default::default(),
         }
     }
 
@@ -190,7 +160,7 @@ impl PackRenderData {
         }
     }
 
-    #[cfg(all(deleteme, notreallythoughjust, todo))]
+    #[cfg(todo)]
     pub fn update(
         &mut self,
         render_list: &mut RenderList,
@@ -220,12 +190,8 @@ impl PackRenderData {
         });
         let dirty_pois = dirty_pois.as_ref().into_iter().flat_map(|p| p.iter_ones());
         for poi_idx in dirty_pois {
-            #[cfg(feature = "paths-lua")]
-            #[cfg(deleteme)]
-            let (bvh, ibd, ibd_map) = ActivePoi::update(self, poi_idx);
             let poi = LazyCell::new(|| unsafe { self.active_pois.get_index(poi_idx).unwrap_unchecked().1 });
-            #[cfg(feature = "paths-lua")]
-            #[cfg(deleteme)]
+            #[cfg(todo)]
             {
                 let ib_update = (ibd && self.render_poi_bookmark > 0)
                     .then_some(poi_common.world_ib.as_ref())
@@ -258,370 +224,6 @@ impl PackRenderData {
                 }
             }
             render_list.update_bounds(poi.render_bookmark as usize, poi.bounds);
-        }
-    }
-
-    #[cfg(feature = "paths-lua")]
-    #[cfg(deleteme)]
-    pub fn has_scripts(&self) -> bool {
-        self.script_data.is_some()
-    }
-
-    /// TODO: go and apply attrs as if a late map load had happened?
-    #[cfg(deleteme)]
-    #[cfg(feature = "paths-lua")]
-    fn script_start(
-        &mut self,
-        _device: &Dx11Device,
-        _machine: &mut RenderMachine,
-        shared: Arc<PackPlugShared>,
-    ) {
-        let _overrides = self.script_data.insert(shared);
-    }
-    #[cfg(deleteme)]
-    #[cfg(feature = "paths-lua")]
-    fn script_create_trail(
-        &mut self,
-        current_map: u32,
-        device: &Dx11Device,
-        bookmark: usize,
-        _machine: &RenderMachine,
-        trail_idx: usize,
-    ) -> bool {
-        let Some(po) = self.script_data.clone() else {
-            log::warn!("received create from untracked script");
-            return false
-        };
-        let path = (MarkerType::Trail, trail_idx);
-        let po = PackOverrides::shared_read(&po.overrides);
-        let Some(o) = po.overrides.get(&path) else {
-            log::warn!("dynamic attrs missing?");
-            return false
-        };
-        let o = MarkerOverrides::shared_read(o);
-
-        let on_map = o
-            .get::<keys::GameMap>()
-            .and_then(|map| map.map(|map| map.get().0 == current_map))
-            .unwrap_or(false);
-        if !on_map {
-            return false
-        }
-
-        let cat_idx = match o.get::<keys::CategoryRef>() {
-            Some(Some(cat)) => self.pack.categories.all_categories.get_index_of(&cat[..]),
-            _ => None,
-        };
-        let cat_idx = cat_idx
-            .or_else(|| {
-                PackRootCategories::from_ref(&self.pack)
-                    .primary_root()
-                    .and_then(|r| {
-                        self.pack
-                            .categories
-                            .all_categories
-                            .get_index_of(r.full_id.as_id())
-                    })
-            })
-            .context("dynamic trail missing category");
-        let Some(cat_idx) = rt::log::warn_ok(cat_idx) else { return false };
-        let new_trail = self.script_build_trail(device, trail_idx, cat_idx, &o, bookmark, None);
-        let Some((_activei, complete)) = rt::log::warn_ok(new_trail) else {
-            return false
-        };
-
-        self.dirty_trails.push(!complete);
-        true
-    }
-    #[cfg(deleteme)]
-    #[cfg(feature = "paths-lua")]
-    fn script_build_trail(
-        &mut self,
-        device: &Dx11Device,
-        trail_idx: usize,
-        cat_idx: usize,
-        o: &MarkerOverrides,
-        bookmark: usize,
-        trail_params: Option<&TrailParams>,
-    ) -> anyhow::Result<(usize, bool)> {
-        let id = match o.get::<keys::Guid>() {
-            Some(Some(guid)) if !self.active_trails.contains_key(guid.get()) => *guid.get(),
-            _ => Uuid::new_v4().into(),
-        };
-
-        let is_complete = GetAttr::<keys::TrailDataFile>::has_attr(&o.attrs)
-            && GetAttr::<keys::TextureFile>::has_attr(&o.attrs);
-        let mut new_trail = match (is_complete, trail_params) {
-            (true, Some(params)) =>
-                ActiveTrail::build(self, None, &o.attrs, trail_idx, cat_idx, params, device, bookmark),
-            _ => ActiveTrail::new_empty(self, &o.attrs, trail_idx, cat_idx, device, bookmark),
-        }
-        .context("preparing dynamic trail")?;
-        if self.enabled_categories.get(cat_idx).map(|v| *v) == Some(false) {
-            new_trail.filtered = true;
-        }
-
-        let active_trail_idx = self.active_trails.len();
-        let _replaced = self.active_trails.insert(id.into(), new_trail);
-        #[cfg(taimi_debug)]
-        assert!(_replaced.is_none());
-        Ok((active_trail_idx, is_complete))
-    }
-    #[cfg(deleteme)]
-    #[cfg(feature = "paths-lua")]
-    fn script_create_poi(
-        &mut self,
-        current_map: u32,
-        device: &Dx11Device,
-        bookmark: usize,
-        _machine: &RenderMachine,
-        poi_idx: usize,
-    ) -> bool {
-        let Some(po) = self.script_data.clone() else {
-            log::warn!("received create from untracked script");
-            return false
-        };
-        let path = (MarkerType::Poi, poi_idx);
-        let po = PackOverrides::shared_read(&po.overrides);
-        let Some(o) = po.overrides.get(&path) else {
-            log::warn!("dynamic attrs missing?");
-            return false
-        };
-        let o = MarkerOverrides::shared_read(o);
-
-        let on_map = o
-            .get::<keys::GameMap>()
-            .and_then(|map| map.map(|map| map.get().0 == current_map))
-            .unwrap_or(false);
-        if !on_map {
-            return false
-        }
-
-        let cat_idx = match o.get::<keys::CategoryRef>() {
-            Some(Some(cat)) => self.pack.categories.all_categories.get_index_of(&cat[..]),
-            _ => None,
-        };
-        let cat_idx = cat_idx
-            .or_else(|| {
-                PackRootCategories::from_ref(&self.pack)
-                    .primary_root()
-                    .and_then(|r| {
-                        self.pack
-                            .categories
-                            .all_categories
-                            .get_index_of(r.full_id.as_id())
-                    })
-            })
-            .context("dynamic poi missing category");
-        let Some(cat_idx) = rt::log::warn_ok(cat_idx) else { return false };
-
-        let new_poi = self.script_build_poi(device, poi_idx, cat_idx, &o, bookmark);
-        let Some((_activeidx, complete)) = rt::log::warn_ok(new_poi) else {
-            return false
-        };
-
-        self.dirty_pois.push(!complete);
-        true
-    }
-    #[cfg(deleteme)]
-    #[cfg(feature = "paths-lua")]
-    fn script_build_poi(
-        &mut self,
-        device: &Dx11Device,
-        poi_idx: usize,
-        cat_idx: usize,
-        o: &MarkerOverrides,
-        bookmark: usize,
-    ) -> anyhow::Result<(usize, bool)> {
-        let id = match o.get::<keys::Guid>() {
-            Some(Some(guid)) if !self.active_pois.contains_key(guid.get()) => *guid.get(),
-            _ => Uuid::new_v4().into(),
-        };
-
-        let is_complete = GetAttr::<keys::IconFile>::has_attr(&o.attrs);
-        let mut new_poi = match is_complete {
-            true => ActivePoi::build(self, &o.attrs, poi_idx, cat_idx, device, bookmark),
-            _ => ActivePoi::new_empty(self, &o.attrs, poi_idx, cat_idx, device, bookmark),
-        }
-        .context("preparing dynamic poi")?;
-        if self.enabled_categories.get(cat_idx).map(|v| *v) == Some(false) {
-            new_poi.filtered = true;
-        }
-
-        let active_poi_idx = self.active_pois.len();
-        let _replaced = self.active_pois.insert(id.into(), new_poi);
-        #[cfg(taimi_debug)]
-        assert!(_replaced.is_none());
-        Ok((active_poi_idx, is_complete))
-    }
-    #[cfg(deleteme)]
-    #[cfg(feature = "paths-lua")]
-    fn script_update_trail(
-        &mut self,
-        device: &Dx11Device,
-        _machine: &RenderMachine,
-        trail_idx: usize,
-        changed_attrs: &mut dyn Iterator<Item = PackKeyId>,
-    ) {
-        let mut trail = {
-            let trails = &mut self.active_trails;
-            LazyCell::new(move || trails.values_mut().find(|t| t.trail_idx == trail_idx))
-        };
-        let po = {
-            let so = self.script_data.as_ref();
-            LazyCell::new(move || so.map(|d| PackOverrides::shared_read(&d.overrides)))
-        };
-        let mo = {
-            let path = (MarkerType::Trail, trail_idx);
-            let po = &po;
-            move || {
-                po.as_ref().and_then(|o| {
-                    (!o.is_masked(path))
-                        .then_some(o.overrides.get(&path))
-                        .flatten()
-                        .map(MarkerOverrides::shared_read)
-                })
-            }
-        };
-        let overrides = std::cell::OnceCell::new();
-        for key in changed_attrs {
-            let interest = match overrides.get() {
-                None if !ActiveTrail::holds_attr_dyn(key) => None,
-                _ => overrides.get_or_init(mo).as_ref(),
-            };
-            let interest = if let Some(o) = interest {
-                if let &mut Some(ref mut trail) = &mut *trail {
-                    let value = match o.get_dyn(key) {
-                        Some(Some(v)) => Some(Cow::Borrowed(v.get_dyn())),
-                        Some(None) => None,
-                        None => self
-                            .pack
-                            .trails
-                            .get(trail_idx)
-                            .and_then(|trail| trail.get_attr_dyn(key)),
-                    }
-                    .map(|v| v.into_owned().into_inner())
-                    .unwrap_or_else(|| PackValueCell::new_empty(key));
-                    trail.set_attr_dyn(value)
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
-            if let (Some(trail), false) = (&mut *trail, interest) {
-                pack_attr! { match =id_is(key) {
-                    = keys::TextureFile => if let Some(Some(tex)) = overrides.get_or_init(mo).as_ref().and_then(|o| o.get::<keys::IconFile>()) {
-                        let h = Self::register_texture_with(
-                            &mut self.texture_list,
-                            &tex,
-                            &mut self.loaded_textures,
-                            &mut self.unused_textures,
-                        );
-                        let tex = Self::get_or_load_texture_with(
-                            &mut self.texture_list,
-                            h,
-                            device,
-                            &self.loader,
-                            &mut self.loaded_textures,
-                            &mut self.unused_textures,
-                        ).cloned().with_context(|| format!("Loading trail texture {tex}"));
-                        if let Some(tex) = rt::log::warn_ok(tex) {
-                            trail.texture = tex;
-                        }
-                    },
-                    = keys::TrailDataFile => {
-                        log::debug!("TODO: dynamic trail data");
-                    },
-                    // TODO? = keys::GameMap => todo!(),
-                } }
-            }
-        }
-    }
-    #[cfg(deleteme)]
-    #[cfg(feature = "paths-lua")]
-    fn script_update_poi(
-        &mut self,
-        device: &Dx11Device,
-        _machine: &RenderMachine,
-        poi_idx: usize,
-        changed_attrs: &mut dyn Iterator<Item = PackKeyId>,
-    ) {
-        let active_poi_idx = self.active_pois.values().position(|poi| poi.poi_idx == poi_idx);
-        let mut poi = {
-            let pois = &mut self.active_pois;
-            LazyCell::new(move || {
-                active_poi_idx.map(|i| unsafe { pois.get_index_mut(i).unwrap_unchecked().1 })
-            })
-        };
-        let po = {
-            let so = self.script_data.as_ref();
-            LazyCell::new(move || so.map(|d| PackOverrides::shared_read(&d.overrides)))
-        };
-        let mo = {
-            let path = (MarkerType::Poi, poi_idx);
-            let po = &po;
-            move || {
-                po.as_ref().and_then(|o| {
-                    (!o.is_masked(path))
-                        .then_some(o.overrides.get(&path))
-                        .flatten()
-                        .map(MarkerOverrides::shared_read)
-                })
-            }
-        };
-        let overrides = std::cell::OnceCell::new();
-        for key in changed_attrs {
-            let interest = match overrides.get() {
-                None if !ActivePoi::holds_attr_dyn(key) => None,
-                _ => overrides.get_or_init(mo).as_ref(),
-            };
-            let interest = if let Some(o) = interest {
-                if let &mut Some(ref mut poi) = &mut *poi {
-                    let value = match o.get_dyn(key) {
-                        Some(Some(v)) => Some(Cow::Borrowed(v.get_dyn())),
-                        Some(None) => None,
-                        None => self.pack.pois.get(poi_idx).and_then(|poi| poi.get_attr_dyn(key)),
-                    }
-                    .map(|v| v.into_owned().into_inner())
-                    .unwrap_or_else(|| PackValueCell::new_empty(key));
-                    let changed = poi.set_attr_dyn(value);
-                    if let (Some(i), true) = (active_poi_idx, changed && poi.is_dirty()) {
-                        if let Some(mut d) = self.dirty_pois.get_mut(i) {
-                            *d = true;
-                        }
-                    }
-                    changed
-                } else {
-                    false
-                }
-            } else {
-                false
-            };
-            if let (Some(poi), false) = (&mut *poi, interest) {
-                pack_attr! { match =id_is(key) {
-                    = keys::IconFile => if let Some(Some(tex)) = overrides.get_or_init(mo).as_ref().and_then(|o| o.get::<keys::IconFile>()) {
-                        let h = Self::register_texture_with(
-                            &mut self.texture_list,
-                            &tex,
-                            &mut self.loaded_textures,
-                            &mut self.unused_textures,
-                        );
-                        let tex = Self::get_or_load_texture_with(
-                            &mut self.texture_list,
-                            h,
-                            device,
-                            &self.loader,
-                            &mut self.loaded_textures,
-                            &mut self.unused_textures,
-                        ).cloned().with_context(|| format!("Loading poi texture {tex}"));
-                        if let Some(tex) = rt::log::warn_ok(tex) {
-                            poi.icon = tex;
-                        }
-                    },
-                    // TODO? = keys::GameMap => todo!(),
-                } }
-            }
         }
     }
 
@@ -1362,208 +964,10 @@ impl PackRender {
         trail.invalidate();
     }
 
-    #[cfg(all(deleteme, notreallythoughjust, todo))]
+    #[cfg(todo)]
     pub fn update(&mut self, machine: &RenderMachine, _: &Dx11Device, context: &Dx11Context) {
         for (_, pack) in &mut self.loaded_packs {
             pack.update(&mut self.render_list, &mut self.poi_common, machine, context);
-        }
-    }
-
-    #[cfg(deleteme)]
-    #[cfg(feature = "paths-lua")]
-    pub(crate) fn script_start(
-        &mut self,
-        device: &Dx11Device,
-        machine: &mut RenderMachine,
-        (generation, pack_idx): (usize, usize),
-        shared: Arc<PackPlugShared>,
-    ) {
-        if generation != self.generation {
-            // TODO: inform it to shut down?
-            return
-        }
-        let Some((_, pack)) = self.loaded_packs.get_index_mut(pack_idx) else {
-            #[cfg(taimi_debug)]
-            log::warn!("received update for missing pack#{pack_idx}");
-            return
-        };
-        pack.script_start(device, machine, shared);
-    }
-    #[cfg(deleteme)]
-    #[cfg(feature = "paths-lua")]
-    pub(crate) fn script_update_marker(
-        &mut self,
-        device: &Dx11Device,
-        machine: &mut RenderMachine,
-        (generation, pack_idx): (usize, usize),
-        (kind, marker_idx): MarkerLoc,
-        changed_attrs: &mut dyn Iterator<Item = PackKeyId>,
-    ) {
-        if generation != self.generation {
-            // XXX: inform it to shut down maybe? could be spammy though...
-            return
-        }
-        let for_trail = match kind {
-            MarkerType::Trail => true,
-            MarkerType::Poi => false,
-            // TODO: consider stashing updates somewhere for ui to see!
-            // TODO: interactive menus in particular could go somewhere on rendermachine!
-            MarkerType::Category => return,
-        };
-        let Some((_, pack)) = self.loaded_packs.get_index_mut(pack_idx) else {
-            #[cfg(taimi_debug)]
-            log::warn!("received update for missing pack#{pack_idx}");
-            return
-        };
-
-        if for_trail {
-            pack.script_update_trail(device, machine, marker_idx, changed_attrs);
-        } else {
-            pack.script_update_poi(device, machine, marker_idx, changed_attrs);
-        }
-    }
-    #[cfg(deleteme)]
-    #[cfg(feature = "paths-lua")]
-    pub(crate) fn script_create(
-        &mut self,
-        device: &Dx11Device,
-        machine: &mut RenderMachine,
-        (generation, pack_idx): (usize, usize),
-        (kind, marker_idx): MarkerLoc,
-    ) {
-        if generation != self.generation {
-            // XXX: inform it to shut down maybe? could be spammy though...
-            return
-        }
-        let Some((_, pack)) = self.loaded_packs.get_index_mut(pack_idx) else {
-            #[cfg(taimi_debug)]
-            log::warn!("received create for missing pack#{pack_idx}");
-            return
-        };
-
-        match kind {
-            MarkerType::Category => {
-                // TODO: consider stashing updates somewhere for ui to see!
-                // TODO: interactive menus in particular could go somewhere on rendermachine!
-                if pack.user_category_state.len() < marker_idx {
-                    pack.user_category_state.resize(marker_idx + 1, false);
-                }
-                let default_toggle = {
-                    let o = pack
-                        .script_data
-                        .as_ref()
-                        .map(|d| PackOverrides::shared_read(&d.overrides))
-                        .as_ref()
-                        .and_then(|o| o.overrides.get(&(kind, marker_idx)))
-                        .cloned();
-                    o.as_ref().map(MarkerOverrides::shared_read).and_then(|o| {
-                        o.get::<keys::DefaultToggle>()
-                            .flatten()
-                            .map(|v| bool::from(*v.get()))
-                    })
-                };
-                if default_toggle != Some(false) {
-                    unsafe {
-                        pack.user_category_state.set_unchecked(marker_idx, true);
-                    }
-                }
-            },
-            MarkerType::Trail => {
-                let Some(current_map) = self.current_map else { return };
-                let bookmark = self.render_list.entities_count();
-                let trail_idx = pack.active_trails.len();
-                if pack.script_create_trail(current_map as _, device, bookmark, machine, marker_idx) {
-                    if let Some((_, new_trail)) = pack.active_trails.last_mut() {
-                        let e = self.render_list.entities_mut();
-                        for (i_section, bounds) in new_trail.section_bounds.iter().copied().enumerate() {
-                            let entity = RenderEntity {
-                                bounds,
-                                position: bounds.center(),
-                                draw_ordered: false,
-                                render_id: Some(RenderId::TrailSection {
-                                    pack_idx,
-                                    trail_idx,
-                                    section: i_section,
-                                }),
-                            };
-                            e.push(entity);
-                        }
-                        if let Some(mut d) = pack.dirty_trails.last_mut() {
-                            d.set(false);
-                        }
-                        self.render_list.entities_mut_end();
-                    }
-                }
-            },
-            MarkerType::Poi => {
-                let Some(current_map) = self.current_map else { return };
-                let bookmark = self.render_list.entities_count();
-                let poi_idx = pack.active_pois.len();
-                if pack.script_create_poi(current_map as _, device, bookmark, machine, marker_idx) {
-                    if let Some((_, new_poi)) = pack.active_pois.last_mut() {
-                        let e = self.render_list.entities_mut();
-                        new_poi.render_bookmark = e.len() as u32;
-                        let render_id = RenderId::Poi { pack_idx, poi_idx };
-                        let has_bounds = !new_poi.bounds_dirty();
-                        let bounds = match has_bounds {
-                            false => RenderList::BOUNDS_NONE,
-                            true => new_poi.bounds,
-                        };
-                        e.push(RenderEntity {
-                            bounds,
-                            position: new_poi.position,
-                            draw_ordered: true,
-                            render_id: Some(render_id),
-                        });
-                        //self.render_list.entities_mut_end();
-                        if let (Some(mut d), true) = (pack.dirty_pois.last_mut(), has_bounds) {
-                            d.set(false);
-                        }
-                    }
-                    self.render_list.entities_mut_end();
-                    self.mark_buffers_dirty();
-                }
-            },
-        }
-    }
-    #[cfg(deleteme)]
-    #[cfg(feature = "paths-lua")]
-    pub(crate) fn script_mask(
-        &mut self,
-        _device: &Dx11Device,
-        _machine: &mut RenderMachine,
-        (generation, pack_idx): (usize, usize),
-        (kind, marker_idx): MarkerLoc,
-    ) {
-        if generation != self.generation {
-            // XXX: inform it to shut down maybe? could be spammy though...
-            return
-        }
-        let for_trail = match kind {
-            MarkerType::Trail => true,
-            MarkerType::Poi => false,
-            // TODO: consider stashing updates somewhere for ui to see!
-            // TODO: interactive menus in particular could go somewhere on rendermachine!
-            MarkerType::Category => return,
-        };
-        let Some((_, pack)) = self.loaded_packs.get_index_mut(pack_idx) else {
-            #[cfg(taimi_debug)]
-            log::warn!("received remove for missing pack#{pack_idx}");
-            return
-        };
-
-        if for_trail {
-            let trail = pack.active_trails.values().find(|t| t.trail_idx == marker_idx);
-            if let Some(trail) = trail {
-                for i_section in 0..trail.section_bounds.len() {
-                    self.render_list.disable(trail.render_bookmark + i_section);
-                }
-            }
-        } else {
-            let poi = pack.active_pois.values_mut().find(|p| p.poi_idx == marker_idx);
-            if let Some(poi) = poi {
-                self.render_list.disable(poi.render_bookmark as _);
-            }
         }
     }
 
@@ -1634,8 +1038,6 @@ impl PackRender {
                         log::warn!("Render ID refers to missing {path} in {}", pack_data.info);
                         continue
                     };
-                    #[cfg(deleteme)]
-                    if trail.filtered || !bool::from(trail.attr_vis_space) {}
                     if !ltrail.visibility.is_visible_for_space() {
                         continue
                     }
@@ -1656,8 +1058,6 @@ impl PackRender {
                         log::error!("Render ID refers to missing {path} in {}", pack_data.info);
                         continue
                     };
-                    #[cfg(deleteme)]
-                    if poi.filtered || !bool::from(poi.attr_vis_space) {}
                     let mut visible = lpoi.visibility.is_visible_for_space();
                     if visible && poi.report_incomplete(&marker_id, draw_state) {
                         continue
@@ -1721,8 +1121,6 @@ impl PackRender {
                         log::error!("Render ID refers to missing {path} in {}", pack_data.info);
                         continue
                     };
-                    #[cfg(deleteme)]
-                    if trail.filtered || !trail.is_visible_for_map(map) {}
                     if !ltrail.visibility.is_visible_for_map(map) {
                         continue
                     }
@@ -1765,8 +1163,6 @@ impl PackRender {
                         log::error!("Render ID refers to missing {path} in {}", pack_data.info);
                         continue
                     };
-                    #[cfg(deleteme)]
-                    if poi.filtered || !poi.is_visible_for_map(map) {}
                     if !lpoi.visibility.is_visible_for_map(map) {
                         continue
                     }
@@ -2005,45 +1401,15 @@ impl PackRenderResources {
                     model: {
                         let scale = glamour::Vector3::splat(icon_size);
                         let pos = poi.lpoi().position.to_vector();
-                        let rot = match attrs {
-                            #[cfg(deleteme)]
-                            _ => {
-                                let rot = attrs.rotate.map(|r| r.map(f32::to_radians));
-                                use glam::EulerRot;
-                                let erot = Self::tmp_rot().get();
-                                let pre = Self::tmp_pre().get() * core::f32::consts::PI;
-                                //let pre = Quat::from_euler(EulerRot::XYZ, pre.x, pre.y, pre.z);
-                                let post = Self::tmp_post().get() * core::f32::consts::PI;
-                                let post = Quat::from_euler(EulerRot::XYZ, post.x, post.y, post.z);
-                                let xyz = (rot * Self::tmp_mul().get()).to_array();
-                                let mut swizz = glam::Vec3::ZERO;
-                                let order = Self::tmp_order().get();
-                                for (i, out) in order.iter().zip([&mut swizz.x, &mut swizz.y, &mut swizz.z])
-                                {
-                                    *out = xyz[*i];
-                                }
-                                //let swizz = rot * Self::tmp_mul().get();
-                                let rot = //pre *
-                                    Quat::from_euler(erot, swizz.x + pre.x, swizz.y + pre.y, swizz.z + pre.z)
-                                    * post
-                                    ;
-                                rot
-                            },
-                            #[cfg(todo)]
-                            attrs => attrs
-                                .rotation()
-                                .map(|rot| rot * Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2)),
-                            attrs => attrs.get_attr_of::<keys::Rotate>().map(|rot| {
-                                let rot = rot.radians();
-                                // can maybe get away with less fancy math idk...
-                                Quat::from_euler(
-                                    glam::EulerRot::XZY,
-                                    rot.x - core::f32::consts::FRAC_PI_2,
-                                    rot.y,
-                                    -rot.z,
-                                )
-                            }),
-                        };
+                        let rot = attrs.get_attr_of::<keys::Rotate>().map(|rot| {
+                            let rot = rot.radians();
+                            Quat::from_euler(
+                                glam::EulerRot::XZY,
+                                rot.x - core::f32::consts::FRAC_PI_2,
+                                rot.y,
+                                -rot.z,
+                            )
+                        });
                         glamour::Matrix4::from_scale_rotation_translation(
                             scale,
                             rot.unwrap_or(Quat::IDENTITY),
@@ -2104,7 +1470,7 @@ impl PackRenderResources {
                     ib.marker.flags |= instance::MarkerInstanceData::FLAG_BILLBOARD;
                 }
                 #[cfg(taimi_debug)]
-                #[cfg(deleteme)]
+                #[cfg(todo)]
                 if !attrs.has_attr_of::<keys::IconFile>() {
                     ib.set_bounce(1.0, 1.0, BounceBehavior::Spin, false, 0.0, anim_start);
                 }
@@ -2202,18 +1568,6 @@ impl PackRenderResources {
         let fadefar = r.attr_or_default::<keys::FadeFar>().inches()
             * taimi_meta::coords::MapLocalScale::METRES_PER_INCH;
         mib.set_fade_range(fadenear, fadefar);
-    }
-    #[cfg(deleteme)]
-    pub fn prepare_shaders(&mut self, shaders: &ShaderLoader) -> anyhow::Result<()> {
-        if self.entities_ib.is_none() {
-            return Ok(())
-        }
-
-        let trail = shaders.pair_named("trail-ng")?;
-        self.shader_trail = Some(trail.0);
-        self.shader_p = trail.1;
-        self.shader_poi = shaders.vertex.get("poi-ng").cloned();
-        Ok(())
     }
     pub fn prepare_shaders_arc(
         &mut self,

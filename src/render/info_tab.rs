@@ -190,66 +190,6 @@ impl InfoTabState {
         if let Ok(tex_count) = TEXTURES.textures.try_read().map(|t| t.len()) {
             ui.text(fl!("textures", count = tex_count));
         }
-        #[cfg(deleteme)]
-        #[cfg(feature = "texture-loader")]
-        if let Some(tex_count) = crate::resources::texture::STATS_TEXTURE_COUNT.get_any() {
-            use crate::resources::texture;
-            ui.text(fl!("d3d-textures", count = tex_count));
-            if let Some(tex_size) = texture::STATS_TEXTURE_SIZE.get_any() {
-                ui.same_line();
-                ui.text(", ");
-                ui.same_line();
-                ui.text(Self::size_frag(tex_size));
-            }
-            if let Some(tex_size_cloned) = texture::STATS_TEXTURE_SIZE_CLONED.get_any() {
-                ui.same_line();
-                ui.text(" - <=");
-                ui.same_line();
-                ui.text(Self::size_frag(tex_size_cloned));
-            }
-        }
-        #[cfg(deleteme)]
-        #[cfg(feature = "allocator")]
-        if let Some(alloc_size) = crate::exports::runtime::allocator::STATS_ALLOC_SIZE.get_any() {
-            let size = Self::size_frag(alloc_size);
-            ui.text(fl!("alloc-size", size = size));
-        }
-    }
-
-    #[cfg(deleteme)]
-    #[cfg(any(feature = "allocator", feature = "texture-loader", feature = "space"))]
-    fn size_frag(size: isize) -> impl ImStrExt + fmt::Display + Copy + Into<fluent::FluentValue<'static>> {
-        // once we have a working formatter...
-        #[cfg(todo)]
-        const SIZE_MB: f64 = 0x10_0000u32 as f64;
-        #[cfg(todo)]
-        const SIZE_KB: f64 = 0x400u32 as f64;
-        const SIZE_KB: f64 = 1000.0;
-        const SIZE_MB: f64 = SIZE_KB * 1000.0;
-        const MIN_MB: f64 = SIZE_MB * 0.9;
-
-        #[cfg(todo)]
-        let opts = fluent::types::FluentNumberOptions {
-            minimum_significant_digits: Some(3),
-            maximum_significant_digits: Some(5),
-            maximum_fraction_digits: Some(4),
-            ..Default::default()
-        };
-        let (id, size) = match size as f64 {
-            size if size >= MIN_MB => {
-                #[cfg(todo)]
-                let value = fluent::types::FluentNumber::new(size / SIZE_MB, opts);
-                let value = (size / SIZE_KB).round() / 1000.0;
-                ("size-frag-mb", value)
-            },
-            size => {
-                #[cfg(todo)]
-                let value = fluent::types::FluentNumber::new(size, opts);
-                let value = size.round() / 1000.0;
-                ("size-frag-kb", value)
-            },
-        };
-        im_fmt!(i18n: id => move size = size)
     }
 
     /// TODO: TreeNode sections

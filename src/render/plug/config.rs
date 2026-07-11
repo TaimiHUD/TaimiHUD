@@ -190,10 +190,6 @@ impl<'a> PlugConfig<'a> {
         let packs = plugs.packs.iter();
         #[cfg(feature = "scripts-lua")]
         for (&path, pack) in packs {
-            #[cfg(deleteme)]
-            if !pack.script_capable {
-                continue
-            }
             let _id = ui.push_id(Arc::as_ptr(pack) as *const ());
             let target: ScriptPath = path.pivot_from();
             let label = im_fmt!("{}", pack.plug.name);
@@ -209,23 +205,11 @@ impl<'a> PlugConfig<'a> {
 
             if ui.button(c"stop") {
                 LuaMessage::Stop { context: target.path }.try_send();
-                #[cfg(deleteme)]
-                {
-                    // TODO: message instead!
-                    pack.script_data = None;
-                }
             }
             #[cfg(todo)]
             {
                 ui.same_line();
                 if ui.button(c"reset") {}
-            }
-            #[cfg(deleteme)]
-            {
-                ui.same_line();
-                if ui.button(c"dbgmarkerrefresh") {
-                    LuaMessage::DebugFlushMarkerChanges(path).try_send();
-                }
             }
             ui.same_line();
             if ui.button(c"initial map markers") {

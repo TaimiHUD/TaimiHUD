@@ -147,49 +147,6 @@ impl GogglesConfig {
             }
         }
 
-        #[cfg(feature = "goggles2-project")]
-        #[cfg(deleteme)]
-        if machine
-            .goggles
-            .enabled_config
-            .contains(GogglesEnables::PROJECT_ENABLE)
-        {
-            if let Some(mut request) = goggles::FerretResource::project_target_request() {
-                let mut delay = *request.delay.start();
-                if imgui::Slider::new("delay", 0u32, 64u32).build(ui, &mut delay) {
-                    request.delay = delay..=delay;
-                    request.manual_delay = true;
-                    goggles::FerretResource::project_set_target_request(Some(request));
-                }
-                let mut miniz = goggles::g2!(*&ferret.project.minimap_depth_offset);
-                if imgui::Slider::new("minimap z-offset", 0.0f32, 8000.0f32).build(ui, &mut miniz) {
-                    goggles::g2!(*&mut ferret.project.minimap_depth_offset = miniz)
-                }
-            }
-        }
-
-        #[cfg(deleteme)]
-        if false {
-            ui.same_line();
-            if ui.button("search") {
-                let min = 144;
-                let min = 60;
-                let max = 224;
-                let max = 320;
-                let max = 0x4080;
-                goggles::FerretResource::set_granularity(4);
-                goggles::FerretResource::set_size_range(min..(max + 1));
-            }
-            ui.same_line();
-            if ui.button("clr") {
-                goggles::FerretResource::set_perspective(goggles::PerspectiveFerret::EMPTY);
-                goggles::FerretResource::set_camera(goggles::CameraFerret::EMPTY);
-                goggles::FerretResource::set_size_range(8..8);
-                goggles::FerretResource::clear_camera_found();
-                goggles::FerretResource::clear_perspective_found();
-                machine.goggles.camera_enabled = false;
-            }
-        }
         #[cfg(feature = "goggles2-camera")]
         {
             let mut camera_b = 0;

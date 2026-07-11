@@ -21,7 +21,7 @@ use {
         settings::state::ui::pathing::PathingFilterFlags,
     },
     taimi_hoard::flags::BitSet,
-    taimi_meta::packs::{CategoryPath, PackPath, VisibilityFlags},
+    taimi_meta::packs::{CategoryPath, VisibilityFlags},
     taimi_pack::category::CategoryFlags,
 };
 

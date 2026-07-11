@@ -1214,12 +1214,6 @@ impl GogglesCamera {
             }
         }
     }
-    #[cfg(deleteme)]
-    pub(crate) fn act_pre_render_post(&mut self, visible: bool) {
-        if visible {
-            self.camera_commit_perspective();
-        }
-    }
     pub(crate) fn reset_search(&mut self) {
         if self.perspective_search {
             self.perspective_lost = self.perspective_lost.min(1);
@@ -1393,15 +1387,6 @@ impl GogglesCamera {
         let had_persp = self.has_persp();
         if self.camera_enabled && !self.camera_paused && !GogglesShared::wants_snatch_perspective() {
             let persp = GogglesShared::snatch_perspective();
-            #[cfg(deleteme)]
-            if self.perspective_params().is_none() {
-                let (h, range) = persp.get_as_perspective();
-                let (_near, far) = (range.start, range.end);
-                let map_id = crate::exports::runtime::mumble_link_ptr()
-                    .map(|ml| ml.read_map_id())
-                    .unwrap_or(0);
-                log::error!("ON.mapid={map_id:04} FOUND NEW PERSP.far = {far:?} ({_near}..{far}) h={h:?}");
-            }
             self.perspective_params = Self::perspective_params_for(&persp);
         }
 

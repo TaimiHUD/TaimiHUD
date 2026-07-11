@@ -179,13 +179,6 @@ impl GogglesSettings {
         }
     }
 
-    #[cfg(feature = "goggles")]
-    #[cfg(deleteme)]
-    pub fn map_depth_calibration(&self, map_id: u32) -> GogglesMapDepth {
-        self.get_map_depth_calibration(map_id)
-            .unwrap_or(GogglesMapDepth::with_tuple(Self::DEFAULT_DEPTH_CALIBRATION))
-    }
-
     pub fn map_depth_calibration_mut(&mut self) -> &mut BTreeMap<u32, (f32, f32)> {
         Arc::make_mut(&mut self.map_depth_calibration)
     }

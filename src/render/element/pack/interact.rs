@@ -1526,24 +1526,6 @@ where
                         let has_tooltip = interest
                             .intersects(TriggerKind::INFO | TriggerKind::COPY | TriggerKind::BEHAVIOUR);
                         if has_tooltip && self.ui.is_item_hovered() {
-                            #[cfg(deleteme)]
-                            let pack_path = mid.get_marker_path_pack_map();
-                            #[cfg(deleteme)]
-                            let lidx = mid.get_marker_index();
-                            #[cfg(deleteme)]
-                            let lpoi_path: Option<LoadedPoiPath> = match lidx.namespace() {
-                                MarkerIndex::NS_POI =>
-                                    Some(LoadedPoiPath::with_path(lidx.index_poi_unchecked())),
-                                _ => None,
-                            };
-                            #[cfg(deleteme)]
-                            let pd = self.pack_state.lookup_ref(&pack_path.root.root);
-                            #[cfg(deleteme)]
-                            let map_info = pd.and_then(|pd| pd.state.map_info.as_ref());
-                            #[cfg(deleteme)]
-                            let info = map_info.and_then(|map_info| {
-                                lpoi_path.and_then(|loc| map_info.pois().lookup_ref(&loc))
-                            });
                             if let Some(attrs) = poi_attrs() {
                                 if let Some(_tt) = self.ui.begin_tooltip() {
                                     let copyable = attrs
@@ -1601,12 +1583,6 @@ where
                     Ok(cat_info) => Cow::Borrowed(cat_info),
                     Err((_cat_id, cat)) => Cow::Owned(CategoryInfo::from_pack_category(cat)),
                 })
-            });
-            #[cfg(deleteme)]
-            let poi_attrs = LazyCell::new(|| {
-                info.and_then(|i| i.get_marker_attrs())
-                    .map(Ok)
-                    .or_else(|| cat_info.as_ref().map(Err))
             });
 
             let mut name_is_cat = false;
@@ -1675,25 +1651,8 @@ where
         if let Some(context) = open_context {
             self.state.context = Some(context);
         }
-        #[cfg(deleteme)]
-        if let Some(context) = open_context {
-            let open = self.state.context.is_none();
-            if open {
-                self.ui.open_popup("poi-context");
-            }
-        }
     }
 
-    #[cfg(deleteme)]
-    pub fn draw_nearby_other(&mut self) {
-        if let Some(spacepacks) = self.spacepacks {
-            //box3 of map space, iter, filter out anything from other sections
-            todo
-        } else {
-            // iter all lpois, filter here too
-            todo
-        }
-    }
     const HEADER_TITLE: &'static str = "pois-map";
     const HEADER_NEARBY: &'static str = "pois-nearby";
     const HEADER_HIDDEN: &'static str = "pois-hidden";

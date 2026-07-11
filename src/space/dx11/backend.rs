@@ -1,5 +1,3 @@
-#[cfg(feature = "goggles2")]
-use taimi_d3d::dx11::blend::{BlendFactor, BlendOp};
 use {
     super::{DepthHandler, PerspectiveHandler},
     crate::{
