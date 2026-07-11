@@ -44,7 +44,7 @@ pub use {
         depth::{DepthState, DepthView, OMDepthState},
         raster::{RasterizerState, RenderTargetView, RenderTargetViews},
         scissor::ScissorRect,
-        shader::{ShaderP, ShaderV},
+        shader::{ShaderC, ShaderD, ShaderG, ShaderH, ShaderP, ShaderV},
         viewport::Viewport,
     },
     windows::Win32::Graphics::Direct3D11 as d3d11,
