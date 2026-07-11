@@ -1,5 +1,6 @@
 ## Common
 
+locale-name = Deutsch
 join-discord = Discord beitreten
 having-issues = Bei Problemen mit TaimiHUD kannst du dich gerne über unseren Discord oder über GitHub-Issues melden!
 height = Höhe
