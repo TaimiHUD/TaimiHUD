@@ -142,7 +142,7 @@ impl PathingWindowState {
             RenderState::draw_open_path_button(ui, fl!("open-button", kind = "folder"), &pathing_dir);
             ui.same_line();
             ui.dummy([4.0; 2]);
-            self.draw_content(ui, machine, engine)
+            self.draw_content(ui, machine, engine);
         }
         let open = match open {
             true if !visible => WindowOpen::Collapsed,

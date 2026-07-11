@@ -12,6 +12,7 @@ pub use self::{
         STATS_ENTITY_DRAW_MAP,
         STATS_ENTITY_DRAW_PASS,
         STATS_ENTITY_INSTANCE_SIZE,
+        STATS_ENTITY_INSTANCE_SIZE_MAP,
     },
     poi::{PoiCommonRenderData, PoiRender, STATS_POI_INSTANCE_SIZE},
     trail::{TrailRender, STATS_TRAIL_VERTEX_SIZE},

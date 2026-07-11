@@ -33,6 +33,7 @@ pub use self::{
 #[cfg(feature = "goggles2-camera")]
 pub mod camera;
 pub mod class;
+pub mod d3d;
 pub mod lens;
 #[cfg(feature = "goggles2-project")]
 pub mod project;

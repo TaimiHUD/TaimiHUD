@@ -255,9 +255,19 @@ impl From<Colour> for Vec4 {
         v.0
     }
 }
+impl From<Colour> for glamour::Vector4<f32> {
+    fn from(v: Colour) -> Self {
+        v.0.into()
+    }
+}
 impl From<Vec4> for Colour {
     fn from(v: Vec4) -> Self {
         Self(v)
+    }
+}
+impl From<glamour::Vector4<f32>> for Colour {
+    fn from(v: glamour::Vector4<f32>) -> Self {
+        Self(v.into())
     }
 }
 impl Borrow<Vec4> for Colour {
@@ -505,6 +515,18 @@ impl From<Vec4> for Tint {
         Self(tint.into())
     }
 }
+impl From<Tint> for Colour {
+    #[inline]
+    fn from(tint: Tint) -> Self {
+        tint.0
+    }
+}
+impl From<Colour> for Tint {
+    #[inline]
+    fn from(tint: Colour) -> Self {
+        Self(tint)
+    }
+}
 
 impl AttrKey for Tint {
     type Storage = Colour;
@@ -557,6 +579,18 @@ impl MapTint {
     #[inline]
     pub fn from_ref(v: &Colour) -> &Self {
         unsafe { mem::transmute(v) }
+    }
+}
+impl From<MapTint> for Colour {
+    #[inline]
+    fn from(tint: MapTint) -> Self {
+        tint.0
+    }
+}
+impl From<Colour> for MapTint {
+    #[inline]
+    fn from(tint: Colour) -> Self {
+        Self(tint)
     }
 }
 

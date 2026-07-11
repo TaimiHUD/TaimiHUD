@@ -73,6 +73,8 @@ use {
 
 #[cfg(feature = "paths-dyn")]
 use crate::controller::pathing::registry::{LoadedMarkerPath, PackMapPath};
+#[cfg(feature = "goggles2-project")]
+use crate::space::goggles::d3d::{RenderSnapshot, RenderSnapshotPreset};
 
 #[derive(Component)]
 struct Render {
@@ -568,6 +570,58 @@ impl Engine {
                             log::debug!("received shader {id}");
                             self.packs.draw_state.shaders_incomplete.remove(&(kind, id));
                         }
+                        #[cfg(all(todo, taimi_imgui = "180"))]
+                        if matches!(kind, ShaderKind::Pixel)
+                            && res.is_ok() && matches!(id, "map2d" | "imgui")
+                            && !self.render_backend.shaders.pixel.contains_key("imgui180")
+                        {
+                            let s = self.render_backend.shaders.pixel.get(&id[..]).cloned();
+                            if let Some(Some(s)) = s {
+                                self.render_backend
+                                    .shaders
+                                    .pixel
+                                    .insert("imgui180".into(), Some(s));
+                            }
+                        }
+                        #[cfg(all(todo, taimi_imgui = "192"))]
+                        if matches!(kind, ShaderKind::Pixel)
+                            && res.is_ok() && matches!(id, "map2d" | "imgui")
+                            && !self.render_backend.shaders.pixel.contains_key("imgui192")
+                        {
+                            let s = self.render_backend.shaders.pixel.get(&id[..]).cloned();
+                            if let Some(Some(s)) = s {
+                                self.render_backend
+                                    .shaders
+                                    .pixel
+                                    .insert("imgui192".into(), Some(s));
+                            }
+                        }
+                        #[cfg(all(todo, taimi_imgui))]
+                        if matches!(kind, ShaderKind::Vertex)
+                            && res.is_ok() && matches!(id, "map2d" | "imgui")
+                        {
+                            use crate::resources::shader::ShaderLayout;
+                            #[cfg(taimi_imgui = "180")]
+                            let reint = self.render_backend.shaders.load_reinterpret(
+                                &self.render_backend.device,
+                                "imgui180",
+                                &bytecode,
+                                ShaderLayout::Map2dIm180,
+                                &id,
+                            );
+                            #[cfg(taimi_imgui = "180")]
+                            let _ = rt::log::warn_ok(reint);
+                            #[cfg(taimi_imgui = "192")]
+                            let reint = self.render_backend.shaders.load_reinterpret(
+                                &self.render_backend.device,
+                                "imgui192",
+                                &bytecode,
+                                ShaderLayout::Map2dIm192,
+                                &id,
+                            );
+                            #[cfg(taimi_imgui = "180")]
+                            let _ = rt::log::warn_ok(reint);
+                        }
                         let _ = rt::log::warn_ok(res);
                     },
                     #[cfg(feature = "goggles")]
@@ -875,54 +929,59 @@ impl Engine {
             true => (),
         }
 
-        self.draw_carefully(machine, &device_context, desc, ctx);
-    }
-    #[cfg(feature = "goggles2-project")]
-    fn draw_carefully(
-        &mut self,
-        machine: &mut RenderMachine,
-        device_context: &Dx11Context,
-        mut desc: DrawDescSpace,
-        ctx: LocalContext,
-    ) {
+        {
+            // TODO: allocate on heap or static to avoid large stack allocation
+            let snapshot = self.start_being_careful(
+                &machine.goggles,
+                device_context,
+                RenderSnapshotPreset::ProjectSpace,
+            );
+            self.draw_carefully(machine, &device_context, &snapshot, desc, ctx);
+            snapshot.pop();
+        }
         if machine.goggles.project_wants_flush() {
             unsafe {
                 device_context.Flush();
             }
         }
+    }
+    /// TODO
+    #[cfg(feature = "goggles2-project")]
+    pub fn start_being_careful<'c>(
+        &mut self,
+        goggles: &goggles::GogglesState,
+        device_context: &'c Dx11Context,
+        preset: RenderSnapshotPreset,
+    ) -> RenderSnapshot<'c> {
+        if goggles.project_wants_flush() {
+            unsafe {
+                device_context.Flush();
+            }
+        }
+        RenderSnapshot::new_snapshot(device_context, preset)
+    }
+    #[cfg(feature = "goggles2-project")]
+    fn draw_carefully<'c>(
+        &mut self,
+        machine: &mut RenderMachine,
+        device_context: &'c Dx11Context,
+        snapshot: &RenderSnapshot<'c>,
+        mut desc: DrawDescSpace,
+        ctx: LocalContext,
+    ) {
         #[cfg(todo)]
         let target = desc.goggles.render_view();
         #[cfg(todo)]
         let depth_view = desc.goggles.depth_view();
-        let _state_prim = device_context.get_snapshot::<taimi_d3d::state::PrimitiveTopology>();
-        let _state_blend = device_context.get_snapshot::<dx11::OMBlendState<Option<dx11::BlendState>>>();
-        let _state_depth = device_context.get_snapshot::<dx11::OMDepthState>();
-        let _state_raster = device_context.get_snapshot::<Option<dx11::RasterizerState>>();
-        let _shaderp = device_context.get_snapshot::<Option<dx11::ShaderP>>();
-        let _shaderv = device_context.get_snapshot::<Option<dx11::ShaderV>>();
-        let _shaderlayout = device_context.get_snapshot::<Option<dx11::shader::InputLayout>>();
-        // TODO: increase to max bleh? or is that 8?
-        let _rendertarget =
-            device_context.get_snapshot::<dx11::RenderTargetViews<[Option<dx11::RenderTargetView>; 8]>>();
-        let _viewport = device_context.get_snapshot::<Vec<dx11::Viewport>>();
-        let _scissor = device_context.get_snapshot::<Vec<dx11::ScissorRect>>();
-        #[cfg(todo = "unnecessary")]
-        let _index = device_context.get_snapshot::<Option<dx11::IndexBuffer>>();
-        let _cbufferv = device_context.get_snapshot_buffers::<Vec<Option<dx11::buffer::ConstantBufferV>>>();
-        let _cbufferp = device_context.get_snapshot_buffers::<Vec<Option<dx11::buffer::ConstantBufferP>>>();
-        let _samplers = device_context.get_snapshot_buffers::<Vec<Option<dx11::buffer::SamplerState>>>();
-        let _vbuffer = device_context.get_snapshot_buffers::<Vec<Option<dx11::VertexBuffer>>>();
-        let _srvp = device_context.get_snapshot_buffers::<Vec<Option<dx11::buffer::ShaderResourceViewP>>>();
-        #[cfg(todo = "unnecessary")]
-        let _srvv = device_context.get_snapshot_buffers::<Vec<Option<dx11::buffer::ShaderResourceViewV>>>();
         let vp_rect = match desc.goggles.target_viewport {
             vp @ Some(..) => Some(vp),
             None if desc.goggles.buffer_compat => Some(None),
             None => {
-                let vp = _viewport
+                let vp = snapshot
+                    .viewports
                     .state
                     .iter()
-                    .zip(_rendertarget.state.views.iter())
+                    .zip(snapshot.rendertarget.state.views.iter())
                     .find(|(_, rt)| {
                         desc.goggles.target_renderview.is_some()
                             && rt.as_ref().map(|rt| *rt.as_d3d_raw()) == desc.goggles.target_renderview
@@ -962,12 +1021,22 @@ impl Engine {
         let can_inherit = match () {
             #[cfg(todo)]
             _ => {
-                let mut rtviews = _rendertarget.state.views.iter().filter_map(|v| v.as_ref());
+                let mut rtviews = snapshot
+                    .rendertarget
+                    .state
+                    .views
+                    .iter()
+                    .filter_map(|v| v.as_ref());
                 let unique_rt = rtviews.next();
                 desc.goggles.target_renderview.is_some()
                     && unique_rt.map(|rtv| *rtv.as_d3d_raw()) == desc.goggles.target_renderview
                     && rtviews.next().is_none()
-                    && _rendertarget.state.depth.as_ref().map(|dv| *dv.as_d3d_raw())
+                    && snapshot
+                        .rendertarget
+                        .state
+                        .depth
+                        .as_ref()
+                        .map(|dv| *dv.as_d3d_raw())
                         == desc.goggles.target_depthview
             },
             _ => false,
@@ -995,11 +1064,6 @@ impl Engine {
         self.draw2(machine, device_context, desc, ctx);
         self.render_backend.display_size = display_size;
         self.render_backend.viewport = viewport;
-        if machine.goggles.project_wants_flush() {
-            unsafe {
-                device_context.Flush();
-            }
-        }
     }
     pub fn draw2(
         &mut self,
@@ -1544,6 +1608,8 @@ impl Engine {
             Drawing::REFLECT | Drawing::REFLECT_BELOW => pack::render::ArcShaderVariant::Reflection,
             #[cfg(feature = "goggles2")]
             Drawing::SHADOWBOX => pack::render::ArcShaderVariant::Shadowboxing,
+            #[cfg(all(feature = "goggles2-project", taimi_imgui))]
+            Drawing::UI_BG => pack::render::ArcShaderVariant::Imgui,
             #[cfg(feature = "goggles")]
             _ if desc.pass_is_obscured() => pack::render::ArcShaderVariant::Obscured,
             _ => pack::render::ArcShaderVariant::Vanilla,
@@ -2705,6 +2771,10 @@ impl Engine {
                 StatsDesc::new(SEC, "stats-engine-instance-entities"),
             ),
             (
+                StatsRef::with_counter(&pack::STATS_ENTITY_INSTANCE_SIZE_MAP, StatsUnit::Size),
+                StatsDesc::new(SEC, "stats-engine-instance-entities-map"),
+            ),
+            (
                 StatsRef::new(&pack::STATS_POI_INSTANCE_SIZE, StatsUnit::Size),
                 StatsDesc::new(SEC3D, "stats-engine-instance-poi"),
             ),
@@ -3135,6 +3205,10 @@ impl FrameContext {
             #[cfg(feature = "goggles2-project")]
             if enables.contains(GogglesEnables::PROJECT_ENABLE | GogglesEnables::PROJECT_REFLECTIONS) {
                 self.enabled.insert(Drawing::PASSES_REFLECT);
+            }
+            #[cfg(feature = "goggles2-project")]
+            if enables.contains(GogglesEnables::PROJECT_ENABLE) && settings.space.goggles.project_ui_bg() {
+                self.enabled.insert(Drawing::UI_BG);
             }
         }
         self.prepare_drawing();

@@ -424,6 +424,115 @@ impl RenderState {
         #[cfg(feature = "paths")]
         self.message_window.post_render();
     }
+    #[cfg(todo)]
+    #[cfg(feature = "goggles2-project")]
+    pub fn draw_ui_bg(&mut self, context: &taimi_d3d::dx11::Dx11Context) {
+        use taimi_d3d::dx11::prelude::*;
+
+        // TODO: mark next frame as actively projecting, clear flag at end
+        let Some(Ok(engine)) = &mut self.engine else { return };
+        let draws = &self.pathing_window.stolen_draws[..];
+        if draws.is_empty() {
+            return
+        }
+        #[derive(Copy, Clone, Default)]
+        struct VertEquiv([u32; const { size_of::<im180::sys::ImDrawVert>() / 4 }]);
+        unsafe impl taimi_d3d::buffer::D3dBufferData for VertEquiv {}
+        const ASSERT: bool = match core::mem::align_of::<VertEquiv>()
+            == core::mem::align_of::<im180::sys::ImDrawVert>()
+            && core::mem::size_of::<VertEquiv>() == core::mem::size_of::<im180::sys::ImDrawVert>()
+        {
+            false => panic!("ohno"),
+            _ => true,
+        };
+        assert!(ASSERT);
+        let buf_size = draws.iter().map(|(_, _, v)| v.len()).max().unwrap_or(0usize);
+        if buf_size == 0 {
+            return
+        }
+        let Ok(shaders) = engine.render_backend.shaders.pair_named("imgui180") else {
+            return
+        };
+        shaders.set(context);
+        let empty: VertEquiv = Default::default();
+        let buf = taimi_d3d::dx11::buffer::BufferOf::<VertEquiv>::new_with_data(
+            &engine.render_backend.device,
+            //Err(buf_size),
+            Ok(&vec![empty; buf_size][..]),
+            (),
+        );
+        let Some(mut buf) = rt::log::warn_ok(buf) else { return };
+        let ib = crate::space::pack::instance::ImMap2dInstanceData::IDENTITY;
+        let buf_ib = taimi_d3d::dx11::buffer::BufferOf::<crate::space::pack::instance::ImMap2dInstanceData>::new_with_data(
+            &engine.render_backend.device,
+            Ok(core::slice::from_ref(&ib)),
+            (),
+        );
+        let Some(buf_ib) = rt::log::warn_ok(buf_ib) else { return };
+        buf_ib.set(context, 1);
+        taimi_d3d::state::PrimitiveTopology::TriangleList.set(context);
+        let cb_p = crate::space::pack::instance::Map2dConstantDataP::IDENTITY;
+        let mut cb_v = crate::space::pack::instance::Map2dConstantDataV::IDENTITY;
+        cb_v.render.projection = glamour::Matrix4::orthographic_lh(
+            engine.render_backend.viewport.viewport.TopLeftX,
+            engine.render_backend.viewport.viewport.TopLeftX
+                + engine.render_backend.viewport.viewport.Width,
+            engine.render_backend.viewport.viewport.TopLeftY
+                + engine.render_backend.viewport.viewport.Height,
+            engine.render_backend.viewport.viewport.TopLeftY,
+            -1.0f32,
+            1.0f32,
+        );
+        let Some(cb_p) = rt::log::warn_ok(taimi_d3d::dx11::buffer::ConstantBufferP::new_with_data(
+            &engine.render_backend.device,
+            &cb_p,
+        )) else {
+            return
+        };
+        let Some(cb_v) = rt::log::warn_ok(taimi_d3d::dx11::buffer::ConstantBufferV::new_with_data(
+            &engine.render_backend.device,
+            &cb_v,
+        )) else {
+            return
+        };
+
+        cb_p.set(context, 0);
+        cb_v.set(context, 0);
+        engine.render_backend.viewport.set(context);
+        engine.render_backend.sampler_state.set(context, 0);
+        engine.render_backend.blend_state.set(context);
+        engine
+            .render_backend
+            .depth_handler
+            .depth_stencil_state_off
+            .set(context);
+        engine.render_backend.depth_handler.rasterizer_state.set(context);
+
+        taimi_d3d::dx11::ScissorRect::with_bounds_rect(engine.render_backend.viewport_rect()).set(context);
+        for (clip, tex, verts) in draws {
+            let vp = &verts[..] as *const [_];
+            let v = vp as *const [VertEquiv];
+            let t = core::ptr::NonNull::new(*tex as *mut _);
+            let t = t
+                .as_ref()
+                .map(|p| unsafe { taimi_d3d::dx11::buffer::ShaderResourceViewP::from_d3d_raw_ref(p) });
+            #[cfg(todo)]
+            taimi_d3d::dx11::ScissorRect::with_bounds_rect(*clip).set(context);
+            if let Some(tex) = t {
+                tex.set(context, 0);
+            }
+            let res = buf
+                .buffer
+                .replace(&engine.render_backend.device, context, unsafe { &*v }, false);
+            if rt::log::warn_ok(res).is_none() {
+                continue
+            }
+            buf.set(context, 0);
+            unsafe {
+                context.DrawInstanced(verts.len() as u32, 1, 0, 0);
+            }
+        }
+    }
     pub fn marker_icon<'ui, U>(ui: &mut U, height: Option<f32>, marker: &MarkerType)
     where
         U: ?Sized + ImDrawWindow<'ui>,

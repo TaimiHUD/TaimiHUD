@@ -1,8 +1,10 @@
+pub mod blit;
 pub mod colours;
 pub mod draw;
 pub mod image;
 pub mod io;
 mod macros;
+pub mod ptr;
 pub mod tables;
 pub mod text;
 pub mod token;
@@ -12,6 +14,7 @@ pub mod widgets;
 
 pub use self::{
     io::ImUi,
+    ptr::ImPtr,
     token::{UiToken, UiTokenDyn, UiTokenMut},
     ui::{ImPos2, ImSize2, ImSpace, ImSpaces, ImVec2, WindowSpace},
 };
@@ -36,8 +39,55 @@ pub mod im192 {
 pub mod im192;
 
 pub mod prelude {
+    #[allow(unused_imports)]
+    pub(crate) use {
+        super::{
+            blit::{ImBlitBatch, ImBlitBatchMut, ImBufferBlobInfo, ImSurfaceTarget},
+            draw::state::InteractSignal,
+            io::{ContextHookCallback, ContextHookRaw, ImContextHookInfo, ImUiContext, UiAllocatorFns},
+            macros::imvec_newtype,
+            ptr::ImPtr,
+            tables::{ImTableLegacy, ImTableStack},
+            text::{IntoImStrId, UiFontDyn, FMT_CSTR, FMT_STR},
+            token::{
+                ImGuard,
+                IntoTokenGuard,
+                UiTokenDrop,
+                UiTokenDyn,
+                UiTokenFn,
+                UiTokenGuard,
+                UiTokenGuarded,
+                UiTokenMut,
+                UiTokenZst,
+            },
+            ui::{ImFrameArena, ImSpaces},
+            widgets::{
+                ImPrimitive,
+                ImPrimitiveArgsRange,
+                ImPrimitiveContainer,
+                ImPrimitiveData,
+                Interacted,
+            },
+        },
+        arcffi::{UserFreeFn, UserMallocFn},
+        core::{
+            mem,
+            ops,
+            ptr::{self, NonNull},
+            slice,
+        },
+        glamour::{Box2, Rect, TransformMap},
+    };
     pub use {
         super::{
+            blit::{
+                ImBufferBlob,
+                ImBufferBlobExt as _,
+                ImBufferBlobInfo as _,
+                ImDrawTarget,
+                ImDrawTargetExt as _,
+                ImDrawTargetStack,
+            },
             colours::{ImColour, ImColourContainer, ImColourIndex, ImColourStack, ImColourStackExt as _},
             draw::{ImContainer, ImContainerExt as _, ImDrawWindow, ImWidget},
             image::{ImTexture, ImTextureExt as _},
@@ -80,7 +130,6 @@ pub mod prelude {
                 ImDraw,
                 ImDrawExt as _,
                 ImDrawItemStack,
-                ImDrawTarget,
                 ImDrawWindowStack,
                 ImPos2,
                 ImSize2,
@@ -102,37 +151,6 @@ pub mod prelude {
             },
         },
         glamour::TransformMap as _,
-    };
-    #[allow(unused_imports)]
-    pub(crate) use {
-        super::{
-            draw::state::InteractSignal,
-            io::{ContextHookCallback, ContextHookRaw, ImContextHookInfo, ImUiContext, UiAllocatorFns},
-            macros::imvec_newtype,
-            tables::{ImTableLegacy, ImTableStack},
-            text::{IntoImStrId, UiFontDyn, FMT_CSTR, FMT_STR},
-            token::{
-                ImGuard,
-                IntoTokenGuard,
-                UiTokenDrop,
-                UiTokenDyn,
-                UiTokenFn,
-                UiTokenGuard,
-                UiTokenGuarded,
-                UiTokenMut,
-                UiTokenZst,
-            },
-            ui::{ImFrameArena, ImSpaces},
-            widgets::{
-                ImPrimitive,
-                ImPrimitiveArgsRange,
-                ImPrimitiveContainer,
-                ImPrimitiveData,
-                Interacted,
-            },
-        },
-        arcffi::{UserFreeFn, UserMallocFn},
-        glamour::TransformMap,
     };
 
     #[cfg(feature = "imgui180")]

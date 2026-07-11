@@ -128,12 +128,19 @@ impl Buffer {
         device: &Dx11Device,
         device_context: &Dx11Context,
         data: &[D],
+        strict: bool,
     ) -> anyhow::Result<bool> {
-        let size = mem::size_of_val(data).next_multiple_of(16) as u32;
+        let datasize = mem::size_of_val(data) as u32;
+        let size = datasize.next_multiple_of(16);
         let mut desc = self.desc();
-        if size == desc.ByteWidth {
+        if datasize == desc.ByteWidth {
             unsafe {
                 self.update_all_unchecked(device_context, data, 0);
+            }
+            Ok(false)
+        } else if size < desc.ByteWidth && (!strict || size == desc.ByteWidth) {
+            unsafe {
+                self.update_at(device_context, data, 0, 0);
             }
             Ok(false)
         } else {
@@ -227,12 +234,18 @@ impl Buffer {
     ) {
         let (dst, row_pitch, depth_pitch) = {
             let offset = offset as u32;
+            #[cfg(todo)]
             let start = Point2::new(0, offset);
+            #[cfg(todo)]
             let end = Point2::new(1, offset + data.len() as u32);
+            let start = Point2::new(offset * D::stride() as u32, 0);
+            let end = Point2::new((offset + data.len() as u32) * D::stride() as u32, 1);
             (
                 Some(Self::offset_box2(Box2::new(start, end))),
-                D::stride() as u32,
-                self.size() as u32,
+                //D::stride() as u32,
+                end.x,
+                //self.size() as u32,
+                0,
             )
         };
         unsafe {

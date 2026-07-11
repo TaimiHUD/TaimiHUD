@@ -80,6 +80,7 @@ fn apply_built_info() {
     );
     if host_arc || host_nexus {
         println!("cargo::rustc-cfg=taimi_has={:?}", "imgui");
+        println!("cargo::rustc-cfg=taimi_imgui");
         // TODO: could maybe source these from imgui-sys crate metadata but nahh
     }
     let imgui_versions_arc = IntoIterator::into_iter(["192", "19270"]);
@@ -92,6 +93,8 @@ fn apply_built_info() {
         }
         let _ = write!(&mut imgui_cfg_values, "{imgui_ver:?}");
     }
+    println!("cargo::rustc-check-cfg=cfg(taimi_has, values({:?}))", "imgui");
+    println!("cargo::rustc-check-cfg=cfg(taimi_imgui)");
     println!("cargo::rustc-check-cfg=cfg(taimi_imgui, values({imgui_cfg_values}))");
     let imgui_versions = imgui_192
         .then_some(imgui_versions_arc)

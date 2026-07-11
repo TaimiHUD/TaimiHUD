@@ -41,6 +41,12 @@ pub enum ShaderLayout {
     VertexInstance,
     SpaceTrail,
     SpacePoi,
+    Map2dMarker,
+    Map2dIm,
+    #[cfg(taimi_imgui = "180")]
+    Map2dIm180,
+    #[cfg(taimi_imgui = "192")]
+    Map2dIm192,
     #[serde(rename = "inputs")]
     Inputs(Vec<InputLayoutElement>),
 }
@@ -70,13 +76,10 @@ impl ShaderDescription {
     }
 
     pub fn input_layout_desc(&self) -> &[D3D11_INPUT_ELEMENT_DESC] {
-        match &self.layout_type {
-            None | Some(ShaderLayout::VertexInstance) => &Self::INPUT_LAYOUT_INSTANCED,
-            Some(ShaderLayout::JustVertex) => &Self::INPUT_LAYOUT_JUST_VERTEX,
-            Some(ShaderLayout::SpaceTrail) => &instance::INPUT_LAYOUT_TRAIL_INSTANCE,
-            Some(ShaderLayout::SpacePoi) => &instance::INPUT_LAYOUT_POI_INSTANCE,
-            Some(ShaderLayout::Inputs(layout)) => InputLayoutElement::slice_as_desc(layout),
-        }
+        self.layout_type
+            .as_ref()
+            .map(|l| l.input_layout_desc())
+            .unwrap_or(&ShaderLayout::INPUT_LAYOUT_INSTANCED)
     }
 
     #[cfg(not(taimi_debug))]
@@ -121,7 +124,9 @@ impl ShaderDescription {
         let prior = self.defs.len();
         self.defs.extend(defs);
     }
+}
 
+impl ShaderLayout {
     const INPUT_LAYOUT_INSTANCED: [D3D11_INPUT_ELEMENT_DESC; 9] = [
         Self::INPUT_LAYOUT_JUST_VERTEX[0], // POSITION0
         Self::INPUT_LAYOUT_JUST_VERTEX[1], // COLOR0
@@ -163,4 +168,19 @@ impl ShaderDescription {
             Some(offset_of!(Vertex, texture)),
         ),
     ];
+
+    pub fn input_layout_desc(&self) -> &[D3D11_INPUT_ELEMENT_DESC] {
+        match self {
+            ShaderLayout::VertexInstance => &Self::INPUT_LAYOUT_INSTANCED,
+            ShaderLayout::JustVertex => &Self::INPUT_LAYOUT_JUST_VERTEX,
+            ShaderLayout::SpaceTrail => &instance::INPUT_LAYOUT_TRAIL_INSTANCE,
+            ShaderLayout::SpacePoi => &instance::INPUT_LAYOUT_POI_INSTANCE,
+            ShaderLayout::Map2dMarker | ShaderLayout::Map2dIm => &instance::INPUT_LAYOUT_MAP2D_INSTANCE,
+            #[cfg(taimi_imgui = "180")]
+            ShaderLayout::Map2dIm180 => &instance::ImMap2dInstanceData::INPUT_LAYOUT_IM180,
+            #[cfg(taimi_imgui = "192")]
+            ShaderLayout::Map2dIm192 => &instance::ImMap2dInstanceData::INPUT_LAYOUT_IM192,
+            ShaderLayout::Inputs(layout) => InputLayoutElement::slice_as_desc(layout),
+        }
+    }
 }

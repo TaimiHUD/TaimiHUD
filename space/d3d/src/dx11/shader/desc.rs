@@ -52,6 +52,7 @@ impl InputLayout {
         }
     }
 
+    #[inline]
     pub const fn for_instance(
         slot: u32,
         name: &CStr,
@@ -59,8 +60,18 @@ impl InputLayout {
         format: dxgi::DXGI_FORMAT,
         offset: Option<usize>,
     ) -> D3D11_INPUT_ELEMENT_DESC {
+        Self::for_instance_step(slot, name, index, format, offset, 1)
+    }
+    pub const fn for_instance_step(
+        slot: u32,
+        name: &CStr,
+        index: u32,
+        format: dxgi::DXGI_FORMAT,
+        offset: Option<usize>,
+        step_rate: u32,
+    ) -> D3D11_INPUT_ELEMENT_DESC {
         D3D11_INPUT_ELEMENT_DESC {
-            InstanceDataStepRate: 1,
+            InstanceDataStepRate: step_rate,
             InputSlotClass: InputClassification::PER_INSTANCE,
             InputSlot: slot,
             SemanticName: PCSTR(name.as_ptr() as *const _),
