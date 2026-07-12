@@ -1,5 +1,5 @@
-//! most of this hopefully is just a temporary staging ground for things
-//! before they're ready to be pulled into [arcffi]...
+//! intended to be a temporary staging ground for things
+//! before they're ready to be pulled into arcffi...
 
 use core::{cell::UnsafeCell, ops};
 

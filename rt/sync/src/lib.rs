@@ -1,3 +1,5 @@
+//! unsorted synchronization primitives for multithreading and async use
+
 pub use std::sync::PoisonError as StdPoisonError;
 
 pub mod arcs;
