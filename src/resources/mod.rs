@@ -6,8 +6,6 @@ pub mod obj_format;
 pub mod shader;
 #[cfg(feature = "texture-loader")]
 pub mod texture;
-#[cfg(feature = "space")]
-pub mod vertex;
 
 #[cfg(feature = "texture-loader")]
 pub use texture::Texture;
@@ -16,5 +14,5 @@ pub use {
     model::{Model, ModelKind},
     obj_format::{ObjFile, ObjInstance, ObjMaterial},
     shader::{PixelShaders, ShaderLoader, ShaderPair, VertexShaders},
-    vertex::Vertex,
+    taimi_space::legacy::Vertex,
 };

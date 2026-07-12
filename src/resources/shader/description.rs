@@ -43,10 +43,6 @@ pub enum ShaderLayout {
     SpacePoi,
     Map2dMarker,
     Map2dIm,
-    #[cfg(taimi_imgui = "180")]
-    Map2dIm180,
-    #[cfg(taimi_imgui = "192")]
-    Map2dIm192,
     #[serde(rename = "inputs")]
     Inputs(Vec<InputLayoutElement>),
 }
@@ -176,10 +172,6 @@ impl ShaderLayout {
             ShaderLayout::SpaceTrail => &instance::INPUT_LAYOUT_TRAIL_INSTANCE,
             ShaderLayout::SpacePoi => &instance::INPUT_LAYOUT_POI_INSTANCE,
             ShaderLayout::Map2dMarker | ShaderLayout::Map2dIm => &instance::INPUT_LAYOUT_MAP2D_INSTANCE,
-            #[cfg(taimi_imgui = "180")]
-            ShaderLayout::Map2dIm180 => &instance::ImMap2dInstanceData::INPUT_LAYOUT_IM180,
-            #[cfg(taimi_imgui = "192")]
-            ShaderLayout::Map2dIm192 => &instance::ImMap2dInstanceData::INPUT_LAYOUT_IM192,
             ShaderLayout::Inputs(layout) => InputLayoutElement::slice_as_desc(layout),
         }
     }

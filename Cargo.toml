@@ -1,17 +1,21 @@
 [workspace]
 resolver = "3"
 members = [
+  "addon/sim",
   "api/client",
   "pathing/pack",
   "pathing/meta",
   "rt/hoard",
   "rt/ffi",
   "rt/input",
+  "rt/log",
   "rt/sync",
   "rt/ui",
   # TODO? "rt/ui/shim/180",
   # TODO? "rt/ui/shim/192",
+  "space/cover",
   "space/d3d",
+  "space/pack",
 ]
 
 [package]
@@ -87,6 +91,8 @@ space = [
   "taimi_meta/spatial",
   "dep:taimi_pack",
   "dep:taimi_d3d",
+  "dep:taimi_cover",
+  "dep:taimi_space",
 ]
 space-ecs = [
   "dep:bevy_ecs",
@@ -210,6 +216,7 @@ extension-arcdps-extern = [
 ]
 extension-arcdps-imgui = [
   "taimi_ui/imgui-arcdps",
+  "taimi_cover?/imgui192",
 ]
 extension-nexus = [
   #"extension-nexus-codegen",
@@ -237,6 +244,7 @@ extension-nexus-extern-todo = [
 ]
 extension-nexus-imgui = [
   "taimi_ui/imgui-nexus",
+  "taimi_cover?/imgui180",
 ]
 dpsapi = [
   "dep:dpsapi",
@@ -257,6 +265,7 @@ windows = [
   "dep:windows",
   "arcffi/windows-061",
   #"dpsapi?/windows-061",
+  "taimi_cover?/windows",
   "taimi_d3d?/windows",
   "taimi_input?/windows",
   "taimi_ui/windows",
@@ -362,6 +371,8 @@ taimi_api_client = { path = "./api/client", optional = true, features = ["reqwes
 taimi_pack = { path = "./pathing/pack", optional = true, features = ["serde"] }
 taimi_meta = { path = "./pathing/meta", optional = true, default-features = false, features = ["serde", "mumblelink-arcloader"] }
 taimi_d3d = { path = "./space/d3d", optional = true, default-features = false, features = ["dx11", "serde", "arcffi"] }
+taimi_space = { path = "./space/pack", optional = true }
+taimi_cover = { path = "./space/cover", optional = true }
 taimi_input = { path = "./rt/input", optional = true, default-features = false, features = ["serde"] }
 taimi_sync = { path = "./rt/sync", default-features = false, features = ["serde"] }
 taimi_hoard = { path = "./rt/hoard", default-features = false, features = ["serde"] }

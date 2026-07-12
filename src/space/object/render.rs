@@ -88,9 +88,10 @@ impl ObjectRenderBacking {
         ])
     }
 
+    /// TODO: is vertices+instances actually correct..?
     pub fn draw(&self, start: u32, device_context: &Dx11Context) {
         let instances = self.instance_buffer().count_of::<InstanceBufferData>();
-        let total = self.vertex_buffer.count + instances as u32;
+        let total = self.vertex_buffer.vertex_count() + instances as u32;
         self.metadata.topology.set(device_context);
         unsafe { device_context.DrawInstanced(total, instances as u32, start, 0) }
     }

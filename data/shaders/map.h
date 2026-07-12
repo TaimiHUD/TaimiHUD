@@ -65,6 +65,9 @@ struct MapRenderSharedV {
     float anim_timestamp;
     // TODO: map offset+compasssize/scale?
 };
+struct MapUiSharedV {
+    column_major float4x4 viewport_ortho;
+};
 struct MapRenderSharedP {
     float4 tint;
 };
@@ -74,6 +77,7 @@ struct MapRenderSharedP {
 cbuffer EntitySharedV : register(b0) {
     MapRenderSharedV v_render;
     MapMarkerSharedV v_marker;
+    MapUiSharedV v_ui;
     MapTrailSharedV v_trail;
     MapPoiSharedV v_poi;
 }

@@ -598,29 +598,17 @@ impl Engine {
                             }
                         }
                         #[cfg(all(todo, taimi_imgui))]
-                        if matches!(kind, ShaderKind::Vertex)
-                            && res.is_ok() && matches!(id, "map2d" | "imgui")
-                        {
+                        if matches!(kind, ShaderKind::Vertex) && res.is_ok() && matches!(id, "map2d") {
                             use crate::resources::shader::ShaderLayout;
-                            #[cfg(taimi_imgui = "180")]
+                            #[cfg(taimi_imgui)]
                             let reint = self.render_backend.shaders.load_reinterpret(
                                 &self.render_backend.device,
-                                "imgui180",
+                                "imgui",
                                 &bytecode,
-                                ShaderLayout::Map2dIm180,
+                                ShaderLayout::Map2dIm,
                                 &id,
                             );
-                            #[cfg(taimi_imgui = "180")]
-                            let _ = rt::log::warn_ok(reint);
-                            #[cfg(taimi_imgui = "192")]
-                            let reint = self.render_backend.shaders.load_reinterpret(
-                                &self.render_backend.device,
-                                "imgui192",
-                                &bytecode,
-                                ShaderLayout::Map2dIm192,
-                                &id,
-                            );
-                            #[cfg(taimi_imgui = "180")]
+                            #[cfg(taimi_imgui)]
                             let _ = rt::log::warn_ok(reint);
                         }
                         let _ = rt::log::warn_ok(res);

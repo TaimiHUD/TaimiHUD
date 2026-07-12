@@ -164,6 +164,9 @@ impl InputLayoutElement {
     pub fn slice_as_desc(inputs: &[Self]) -> &[D3D11_INPUT_ELEMENT_DESC] {
         unsafe { mem::transmute(inputs) }
     }
+    pub fn slice_from_d3d(inputs: &[D3D11_INPUT_ELEMENT_DESC]) -> &[Self] {
+        unsafe { mem::transmute(inputs) }
+    }
 }
 
 #[cfg(feature = "arcffi")]

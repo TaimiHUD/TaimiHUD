@@ -1,0 +1,28 @@
+[package]
+name = "taimi_space"
+authors = [ "kittywitch" ]
+description = "TaimiHUD Geometry"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+arcffi = { path = "../../rt/ffi", package = "taimi_ffi", default-features = false }
+taimi_d3d = { path = "../d3d", default-features = false, features = ["dx11", "arcffi"] }
+taimi_pack = { path = "../../pathing/pack" }
+taimi_meta = { path = "../../pathing/meta", default-features = false, features = ["spatial"] }
+#taimi_ui?
+
+anyhow = "1"
+log = "0.4"
+num-traits = { workspace = true }
+bitflags = { workspace = true }
+glam = { workspace = true }
+glamour = { workspace = true }
+indexmap = { workspace = true }
+bitvec = { workspace = true }

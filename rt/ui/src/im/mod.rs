@@ -16,7 +16,7 @@ pub use self::{
     io::ImUi,
     ptr::ImPtr,
     token::{UiToken, UiTokenDyn, UiTokenMut},
-    ui::{ImPos2, ImSize2, ImSpace, ImSpaces, ImVec2, WindowSpace},
+    ui::{ImPos2, ImSize2, ImSpace, ImSpaces, ImVec2, PixelSpace, WindowSpace},
 };
 
 #[cfg(not(feature = "imgui180"))]
@@ -60,7 +60,7 @@ pub mod prelude {
                 UiTokenMut,
                 UiTokenZst,
             },
-            ui::{ImFrameArena, ImSpaces},
+            ui::{ImFrameArena, ImSpaces, PixelSpace},
             widgets::{
                 ImPrimitive,
                 ImPrimitiveArgsRange,
@@ -96,6 +96,7 @@ pub mod prelude {
                 ImContext,
                 ImContextState,
                 ImContextStateExt as _,
+                ImDisplayDims,
                 ImDrawIo,
                 ImIo,
                 ImIoExt as _,

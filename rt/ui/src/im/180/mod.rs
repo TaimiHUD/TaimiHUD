@@ -87,7 +87,7 @@ pub type Style = ImGuiStyle;
 #[cfg(not(feature = "imgui180-rs"))]
 pub type Io = ImGuiIO;
 //#[cfg(not(feature = "imgui180-rs"))]
-pub type DrawIo = ImDrawData;
+pub type DrawIo<'ui> = ImPtr<'ui, ImDrawData>;
 //#[cfg(not(feature = "imgui180-rs"))]
 pub type DrawList<'ui> = ImPtr<'ui, ImDrawList>;
 
@@ -354,7 +354,20 @@ impl ImIo for Io {
     }
 }
 impl ImPlatformIo for ImGuiIO {}
-impl ImDrawIo for ImDrawData {}
+impl<'ui> ImDrawIo for DrawIo<'ui> {}
+impl<'ui> ImDisplayDims for DrawIo<'ui> {
+    #[inline]
+    fn display_size(&self) -> ImSize2<ImSpace> {
+        ImSpaces(self.as_raw().DisplaySize).into()
+    }
+    #[inline]
+    fn display_pos(&self) -> ImPos2<ImSpace> {
+        ImVec2::from(ImSpaces(self.as_raw().DisplayPos)).to_point()
+    }
+    fn display_scale(&self) -> ImVec2<PixelSpace> {
+        ImSpaces(self.as_raw().FramebufferScale).into()
+    }
+}
 impl ImContextHookInfo for ImGuiContextHook {
     #[inline]
     fn id(&self) -> usize {
@@ -607,7 +620,7 @@ impl<'ui> ImContext for Ui<'ui> {
     type Context = ImGuiContext;
     type Io = Io;
     type PlatformIo = ImGuiPlatformIO;
-    type DrawIo = ImDrawData;
+    type DrawIo = DrawIo<'ui>;
     type DrawList = DrawList<'ui>;
     type Style = Style;
     #[inline]
@@ -621,13 +634,12 @@ impl<'ui> ImContext for Ui<'ui> {
     #[inline]
     fn get_draw_ptr(&self) -> NonNull<Self::DrawIo> {
         unsafe {
-            match sys::igGetDrawData() {
+            ImPtr::with_nn(match sys::igGetDrawData() {
                 #[cfg(debug_assertions)]
                 data => NonNull::new(data).expect("mid-frame"),
                 #[cfg(not(debug_assertions))]
                 data => NonNull::new_unchecked(data),
-            }
-            .cast()
+            })
         }
     }
     #[inline]
@@ -670,8 +682,9 @@ unsafe impl<'ui> ImUiContext for ImGuiContext {
         unsafe {
             match () {
                 #[cfg(feature = "imgui180-imp")]
-                _ =>
-                    NonNull::new_unchecked(&raw const self.DrawData as *mut ImDrawData as *mut dyn ImDrawIo),
+                _ => NonNull::new_unchecked(ImPtr::with_ptr_mut(
+                    &raw const self.DrawData as *mut sys::ImDrawData,
+                ) as *mut dyn ImDrawIo),
                 #[cfg(not(feature = "imgui180-imp"))]
                 _ => Ui::materialize().get_draw_ptr_dyn(),
             }
@@ -1542,7 +1555,11 @@ impl<'ui> ImTableSort for Ui<'ui> {
 impl<'ui> ImTableSortSpecs for sys::ImGuiTableSortSpecs {
     fn specs(&self) -> Box<dyn Iterator<Item = &dyn ImTableSortColumn>> {
         unsafe {
-            let ptrs = slice::from_raw_parts(self.Specs, self.SpecsCount as usize);
+            let p = match self.Specs {
+                p if p.is_null() => ptr::dangling(),
+                p => p,
+            };
+            let ptrs = slice::from_raw_parts(p, self.SpecsCount as usize);
             let iter = ptrs.iter().map(|p| p as &dyn ImTableSortColumn);
             Box::new(iter) as Box<_>
         }

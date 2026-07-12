@@ -1,0 +1,45 @@
+[package]
+name = "taimi_log"
+authors = [ "kittywitch" ]
+description = "TaimiHUD logging utilities"
+version = "0.1.0"
+edition = "2021"
+autobins = false
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+default = [
+  "windows",
+]
+#serde = []
+windows = [
+  "dep:windows",
+  "arcffi/windows-061",
+  "arcffi/winerror",
+]
+
+[dependencies]
+taimi_hoard = { path = "../hoard", default-features = false }
+anyhow = "1"
+log = "0.4"
+bitflags = { workspace = true }
+glam = { workspace = true, features = [ "mint" ] }
+glamour = { workspace = true, features = ["mint"] }
+mint = { workspace = true }
+num-traits = { workspace = true }
+
+arcffi = { path = "../ffi", package = "taimi_ffi", default-features = false }
+
+[target.'cfg(windows)'.dependencies.windows]
+optional = true
+version = "0.61"
+features = [
+  "System",
+  "Foundation",
+  "Win32_System_Memory",
+]

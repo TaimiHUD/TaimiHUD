@@ -18,7 +18,10 @@ pub use self::{
     trail::{TrailRender, STATS_TRAIL_VERTEX_SIZE},
 };
 
-pub mod instance;
+#[deprecated = "taimi_space"]
+pub mod instance {
+    pub use taimi_space::abi::*;
+}
 mod pack;
 mod poi;
 pub mod render;
