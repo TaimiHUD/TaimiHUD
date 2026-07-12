@@ -49,7 +49,6 @@ fixup-fvd = []
 taimi_hoard = { path = "../../rt/hoard" }
 anyhow = "1"
 log = "0.4"
-# TODO? tokio = { version = "1", features = [ "fs", "macros" ] }
 glam = { workspace = true }
 glamour = { workspace = true }
 indexmap = { workspace = true }

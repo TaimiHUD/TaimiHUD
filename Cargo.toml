@@ -295,7 +295,7 @@ semver = "1"
 anyhow = "1"
 env_logger = { version = "0.11", default-features = false, optional = true }
 log = { version = "0.4", features = ["serde"] }
-tokio = { version = "1.43.0", features = [ "fs", "macros" ], default-features = false }
+tokio = { workspace = true, features = [ "fs", "macros" ] }
 arcdps = { workspace = true, features = ["extras", "strum"] }
 glam = { workspace = true, features = [ "serde" ] }
 glamour = { workspace = true }
@@ -312,10 +312,9 @@ tempfile = "3.19.1"
 bytes = "1.10.1"
 async-compression = { version = "0.4.22", features = [ "tokio", "gzip" ] }
 tokio-tar = "0.3.1"
-tokio-stream = { version = "0.1.17", features = [ "sync" ] }
-tokio-util = "0.7.14"
-futures-core = "0.3.31"
-futures = "0.3.31"
+tokio-stream = { workspace = true, features = [ "sync" ] }
+tokio-util = { workspace = true }
+futures = "0.3"
 chrono = { version = "0.4.40", features = [ "serde", "alloc" ] }
 indexmap = { workspace = true }
 relative-path = { version = "1.9.3", features = [ "serde" ] }
@@ -409,19 +408,26 @@ arcloader-mumblelink = { git = "https://codeberg.org/TaimiHUD/arcloader", defaul
 arcdps = { git = "https://codeberg.org/TaimiHUD/arcdps-rs", branch = "0.23.x-taimi", default-features = false }
 nexus = { git = "https://codeberg.org/TaimiHUD/nexus-rs", branch = "0.11.x-taimi", default-features = false }
 #gw2_mumble = { git = "https://codeberg.org/TaimiHUD/gw2-mumble-rs", branch = "0.3.x-taimi", default-features = false }
+
 glam = { version = "0.30", features = ["mint"] }
 glamour = { version = "0.18", features = ["mint"] }
 nalgebra = { version = "0.33", default-features = false, features = ["convert-mint", "mint"] }
 mint = "0.5"
 bvh = { version = "0.11", default-features = false }
+
 num-traits = { version = "0.2", default-features = false }
 bytemuck = { version = "1", default-features = false, features = ["extern_crate_std", "derive"] }
 rustc-hash = "2"
 indexmap = "2.9"
 bitvec = "1"
 bitflags = "2"
+
 macro_rules_attribute = "0.2"
 mlua = { version = "0.11", default-features = false, features = ["luajit", "error-send"] }
+
+tokio = { version = "1.43", default-features = false }
+tokio-util = "0.7.14"
+tokio-stream = { version = "0.1.17" }
 
 # unsure how many of these changes can be contributed back upstream?
 #[patch."https://github.com/zerthox/arcdps-rs"]

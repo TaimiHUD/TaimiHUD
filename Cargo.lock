@@ -3634,7 +3634,6 @@ dependencies = [
  "fluent-syntax",
  "function_name",
  "futures",
- "futures-core",
  "glam 0.30.1",
  "glamour",
  "glob",
