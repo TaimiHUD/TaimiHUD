@@ -21,7 +21,11 @@ impl Blob {
     }
 
     pub fn as_bytes(&self) -> &[u8] {
-        unsafe { slice::from_raw_parts(self.as_ptr() as *const u8, self.size() as usize) }
+        let p = match self.as_ptr() {
+            p if p.is_null() => ptr::dangling(),
+            p => p as *const u8,
+        };
+        unsafe { slice::from_raw_parts(p, self.size() as usize) }
     }
 
     pub fn as_ptr(&self) -> *const ffi::c_void {

@@ -18,7 +18,7 @@ pub struct VertexBuffer {
     pub buffer: Buffer,
     pub stride: u32,
     pub offset: u32,
-    pub count: u32,
+    count: u32,
 }
 
 impl VertexBuffer {
@@ -148,6 +148,15 @@ impl VertexBuffer {
         buffers: &[&dyn D3d11ContextBindableVertexBuffer],
     ) {
         Buffer::set_all_vertex(buffers, device_context, slot)
+    }
+
+    #[inline]
+    pub fn vertex_count(&self) -> u32 {
+        self.count
+    }
+    #[inline]
+    pub unsafe fn set_count(&mut self, count: u32) {
+        self.count = count;
     }
 }
 

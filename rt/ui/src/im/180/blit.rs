@@ -77,6 +77,12 @@ impl<'a, 'p> DrawListAt<'a, 'p> {
         self.draw_cmd.UserCallback.is_some()
     }
     #[inline]
+    pub fn try_call_user(&self) -> Option<()> {
+        let dl = self.draw_list;
+        self.is_callback()
+            .then(move || unsafe { self.draw_cmd.call_user_unchecked(dl.as_ptr()) })
+    }
+    #[inline]
     pub fn list(&self) -> &ImPtr<'p, sys::ImDrawList> {
         self.draw_list
     }
@@ -89,12 +95,12 @@ impl<'a, 'p> DrawListAt<'a, 'p> {
         ImPtr::from_mut(self.draw_cmd.as_raw_mut_unchecked())
     }
     pub fn vertices(&self) -> &[sys::ImDrawVert] {
-        let start = self.draw_cmd.VtxOffset as usize;
+        let start = self.draw_cmd.vtx_offset() as usize;
         let end = start + self.draw_cmd.ElemCount as usize;
         self.draw_list.vtx().vtx_slice().get(start..end).unwrap_or(&[])
     }
     pub unsafe fn vertices_mut_unchecked(&mut self) -> &mut [sys::ImDrawVert] {
-        let start = self.draw_cmd.VtxOffset as usize;
+        let start = self.draw_cmd.vtx_offset() as usize;
         let end = start + self.draw_cmd.ElemCount as usize;
         unsafe {
             let draw_list = ImPtr::from_mut(self.draw_list.as_raw_mut_unchecked());
@@ -106,12 +112,12 @@ impl<'a, 'p> DrawListAt<'a, 'p> {
         }
     }
     pub fn indices(&self) -> &[sys::ImDrawIdx] {
-        let start = self.draw_cmd.IdxOffset as usize;
+        let start = self.draw_cmd.idx_offset() as usize;
         let end = start + self.draw_cmd.ElemCount as usize;
         self.draw_list.idx().idx_slice().get(start..end).unwrap_or(&[])
     }
     pub unsafe fn indices_mut_unchecked(&mut self) -> &mut [sys::ImDrawIdx] {
-        let start = self.draw_cmd.IdxOffset as usize;
+        let start = self.draw_cmd.idx_offset() as usize;
         let end = start + self.draw_cmd.ElemCount as usize;
         unsafe {
             let draw_list = ImPtr::from_mut(self.draw_list.as_raw_mut_unchecked());
@@ -176,7 +182,7 @@ impl ImBufferBlobInfo for DrawListAtIndices<'_, '_> {
 }
 impl ImBufferBlob for DrawListAtIndices<'_, '_> {
     fn blob_ptr(&self) -> NonNull<()> {
-        let off = self.0.draw_cmd.VtxOffset;
+        let off = self.0.draw_cmd.vtx_offset();
         let ptr = NonNull::new(self.0.draw_list.IdxBuffer.get_ptr());
         ptr.map(|p| unsafe { p.add(off as usize) })
             .unwrap_or(NonNull::dangling())
@@ -253,6 +259,70 @@ impl ImBufferBlob for ImPtr<'_, sys::ImVector_ImDrawIdx> {
 #[cfg(todo)]
 pub struct DrawListAtVertices<'a>(pub DrawListAt<'a>);
 
+pub type DrawCallbackRaw = unsafe extern "C" fn(*const sys::ImDrawList, *const sys::ImDrawCmd);
+pub type DrawCallback<'ui> =
+    for<'a> extern "C" fn(&'a ImPtr<'ui, sys::ImDrawList>, &'a ImPtr<'ui, sys::ImDrawCmd>);
+impl<'a> ImPtr<'a, sys::ImDrawCmd> {
+    pub unsafe fn try_call_user(&self, dl: *const sys::ImDrawList) -> Option<()> {
+        self.UserCallback
+            .is_some()
+            .then(move || self.call_user_unchecked(dl))
+    }
+    #[inline]
+    pub unsafe fn call_user_unchecked(&self, dl: *const sys::ImDrawList) {
+        let cb = self.UserCallback.unwrap_unchecked();
+        cb(dl, self.as_ptr())
+    }
+    #[inline]
+    pub unsafe fn set_user_data(&self, ud: usize) {
+        let dest = &raw mut (*self.get_ptr()).UserCallbackData;
+        ptr::write(dest, dest as *mut _);
+    }
+    #[inline]
+    pub unsafe fn user_data(&self) -> usize {
+        let ud = &raw const (*self.as_ptr()).UserCallbackData;
+        ptr::read(ud) as usize
+    }
+    #[inline]
+    pub unsafe fn clear_callback_unchecked(&self) {
+        let dest = &raw mut (*self.get_ptr()).UserCallback;
+        ptr::write_volatile(dest, None);
+    }
+    #[inline]
+    pub fn set_callback(&mut self, cb: DrawCallback, ud: usize) {
+        unsafe { self.set_callback_unchecked(mem::transmute(cb), ud) }
+    }
+    #[inline]
+    pub unsafe fn set_callback_unchecked(&self, cb: DrawCallbackRaw, ud: usize) {
+        let dest = &raw mut (*self.get_ptr()).UserCallback;
+        ptr::write(dest, Some(cb));
+        self.set_user_data(ud);
+    }
+    #[inline]
+    pub fn idx_count(&self) -> u32 {
+        self.as_raw().ElemCount
+    }
+    #[inline]
+    pub fn vtx_offset(&self) -> u32 {
+        self.as_raw().VtxOffset
+    }
+    #[inline]
+    pub fn idx_offset(&self) -> u32 {
+        self.as_raw().IdxOffset
+    }
+    #[inline]
+    pub fn clip_rect(&self) -> Box2<ImSpace> {
+        match self.as_raw().ClipRect {
+            #[cfg(todo = "unnecessary")]
+            ref clip => Box2::new(ImPos2::new(clip.x, clip.y), ImPos2::new(clip.z, clip.w)),
+            clip => unsafe {
+                let [tl, br] = mem::transmute::<sys::ImVec4, [ImPos2<ImSpace>; 2]>(clip);
+                Box2::new(tl, br)
+            },
+        }
+    }
+}
+
 impl<'a> ImSurfaceTarget for ImPtr<'a, sys::ImDrawCmd> {
     #[inline]
     fn clip_rect_min(&self) -> ImPos2<ImSpace> {
@@ -285,6 +355,14 @@ impl<'a> ImSurfaceTarget for ImPtr<'a, sys::ImDrawList> {
     }
 }
 impl<'l> ImPtr<'l, sys::ImDrawList> {
+    #[inline]
+    pub fn cmd_buffers<'a>(&'a self) -> impl Iterator<Item = DrawListAt<'a, 'l>> {
+        let cmds = unsafe { self.CmdBuffer.data() };
+        cmds.iter().map(|cmd| DrawListAt {
+            draw_list: &*self,
+            draw_cmd: unsafe { ImPtr::from_ref(cmd) },
+        })
+    }
     pub fn cmd_buffers_mut<'a>(&'a mut self) -> impl Iterator<Item = DrawListAtMut<'a, 'l>> {
         let cmds = unsafe { self.CmdBuffer.data() };
         cmds.iter().map(|cmd| DrawListAtMut {
@@ -333,5 +411,51 @@ impl<'a> ImBlitBatch for ImPtr<'a, sys::ImDrawList> {
     #[inline]
     fn buffer_index_dyn(&self) -> Option<&dyn ImBufferBlob> {
         Some(self.idx() as &dyn ImBufferBlob)
+    }
+}
+
+impl<'l> ImPtr<'l, sys::ImDrawData> {
+    #[inline]
+    pub fn draw_ptrs(&self) -> &[*mut ImPtr<'l, sys::ImDrawList>] {
+        let raw = self.as_raw();
+        #[cfg(debug_assertions)]
+        if !raw.Valid {
+            log::debug!("ImDrawData invalid");
+        }
+        let p = raw.CmdLists as *const *mut ImPtr<'l, sys::ImDrawList>;
+        let p = match p {
+            p if p.is_null() => ptr::dangling(),
+            p => p,
+        };
+        unsafe { slice::from_raw_parts(p, raw.CmdListsCount as usize) }
+    }
+    #[inline]
+    pub fn draw_ptrs_mut(&mut self) -> &mut [*mut ImPtr<'l, sys::ImDrawList>] {
+        unsafe {
+            let raw = self.as_raw_mut();
+            #[cfg(debug_assertions)]
+            if !raw.Valid {
+                log::debug!("ImDrawData invalid");
+            }
+            let p = raw.CmdLists as *mut *mut ImPtr<'l, sys::ImDrawList>;
+            let p = match p {
+                p if p.is_null() => ptr::dangling_mut(),
+                p => p,
+            };
+            slice::from_raw_parts_mut(p, raw.CmdListsCount as usize)
+        }
+    }
+    #[inline(always)]
+    pub fn draw_lists<'a>(&'a self) -> &'a [&'l ImPtr<'l, sys::ImDrawList>] {
+        unsafe {
+            mem::transmute::<&'a [*mut ImPtr<'l, _>], &'a [&'l ImPtr<'l, sys::ImDrawList>]>(
+                self.draw_ptrs(),
+            )
+        }
+    }
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        let raw = self.as_raw();
+        !raw.Valid || raw.TotalIdxCount <= 0
     }
 }

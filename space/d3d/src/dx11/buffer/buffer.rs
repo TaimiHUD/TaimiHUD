@@ -75,9 +75,9 @@ impl Buffer {
         desc: &D3D11_BUFFER_DESC,
         initial: Option<&[D]>,
     ) -> anyhow::Result<Self> {
-        let initial_desc = D3D11_SUBRESOURCE_DATA {
-            pSysMem: match &initial {
-                &Some(data) => {
+        let initial_desc = match &initial {
+            &Some(data) => Some(D3D11_SUBRESOURCE_DATA {
+                pSysMem: {
                     if desc.ByteWidth as usize > (data.len() * D::stride()).next_multiple_of(16) {
                         anyhow::bail!(
                             "initial buffer {}x{} is too small for size={}",
@@ -88,16 +88,16 @@ impl Buffer {
                     }
                     data.as_ptr().cast()
                 },
-                None => ptr::null(),
-            },
-            SysMemPitch: 0,
-            SysMemSlicePitch: 0,
+                SysMemPitch: 0,
+                SysMemSlicePitch: 0,
+            }),
+            None => None,
         };
         let mut out: Option<ID3D11Buffer> = None;
         unsafe {
             device.CreateBuffer(
                 desc,
-                Some(&initial_desc), //.map(|d| d as *const _),
+                initial_desc.as_ref().map(|d| d as *const _), //.map(|d| d as *const _),
                 Some(&mut out),
             )
         }
@@ -150,6 +150,24 @@ impl Buffer {
         }
     }
 
+    pub fn replace_reallocate<D: D3dBufferData>(
+        &mut self,
+        device: &Dx11Device,
+        _context: &Dx11Context,
+        data: Result<&[D], usize>,
+    ) -> anyhow::Result<()> {
+        let mut desc = self.desc();
+        desc.ByteWidth = {
+            let size = match data {
+                Ok(d) => d.len(),
+                Err(count) => count,
+            } * D::stride();
+            size as u32
+        };
+        *self = Self::new_with_desc(device, &desc, data.ok())?;
+        Ok(())
+    }
+
     pub fn update_all<D: D3dBufferData>(&self, device_context: &Dx11Context, data: &[D]) {
         debug_assert_eq!(mem::size_of_val(data).next_multiple_of(16), self.size());
         unsafe { self.update_all_unchecked(device_context, data, 0) }
@@ -193,6 +211,7 @@ impl Buffer {
         }
     }
 
+    #[cfg(todo = "unnecessary")]
     pub unsafe fn update_element_at<D: D3dBufferData>(
         &self,
         device_context: &Dx11Context,
@@ -223,6 +242,16 @@ impl Buffer {
                 depth_pitch,
             );
         }
+    }
+    #[inline(always)]
+    pub unsafe fn update_element_at<D: D3dBufferData>(
+        &self,
+        device_context: &Dx11Context,
+        data: &D,
+        offset: usize,
+        subresource: u32,
+    ) {
+        self.update_at::<D>(device_context, slice::from_ref(data), offset, subresource)
     }
 
     pub unsafe fn update_at<D: D3dBufferData>(

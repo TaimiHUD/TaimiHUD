@@ -307,8 +307,29 @@ where
 /// TODO
 pub trait ImPlatformIo {}
 impl ImPlatformIo for () {}
+
+pub trait ImDisplayDims {
+    fn display_size(&self) -> ImSize2<ImSpace>;
+    fn display_pos(&self) -> ImPos2<ImSpace>;
+    /// pixels per [ImSpace] unit
+    fn display_scale(&self) -> ImVec2<PixelSpace>;
+}
+#[cfg(todo)]
+pub trait ImViewport: ImDisplayDims {}
+impl ImDisplayDims for () {
+    fn display_size(&self) -> ImSize2<ImSpace> {
+        ImSize2::ZERO
+    }
+    fn display_pos(&self) -> ImPos2<ImSpace> {
+        ImPos2::ZERO
+    }
+    fn display_scale(&self) -> ImVec2<PixelSpace> {
+        ImVec2::ONE
+    }
+}
+
 /// TODO
-pub trait ImDrawIo {}
+pub trait ImDrawIo: ImDisplayDims {}
 impl ImDrawIo for () {}
 
 pub trait AsUi<'ui, U: ?Sized + ImUi + ImContext> {

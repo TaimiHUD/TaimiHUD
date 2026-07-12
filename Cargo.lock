@@ -3566,6 +3566,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "taimi_cover"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitflags 2.9.0",
+ "bitvec",
+ "glam 0.30.1",
+ "glamour",
+ "include_dir",
+ "json-strip-comments",
+ "num-traits",
+ "rustc-hash 2.1.1",
+ "serde",
+ "serde_json",
+ "taimi_d3d",
+ "taimi_ffi",
+ "taimi_log",
+ "taimi_meta",
+ "taimi_ui",
+ "windows",
+]
+
+[[package]]
 name = "taimi_d3d"
 version = "0.1.0"
 dependencies = [
@@ -3671,12 +3694,14 @@ dependencies = [
  "strum 0.27.1",
  "sync-unsafe-cell",
  "taimi_api_client",
+ "taimi_cover",
  "taimi_d3d",
  "taimi_ffi",
  "taimi_hoard",
  "taimi_input",
  "taimi_meta",
  "taimi_pack",
+ "taimi_space",
  "taimi_sync",
  "taimi_ui",
  "tempfile",
@@ -3706,6 +3731,22 @@ dependencies = [
  "log",
  "serde",
  "taimi_ffi",
+ "windows",
+]
+
+[[package]]
+name = "taimi_log"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitflags 2.9.0",
+ "glam 0.30.1",
+ "glamour",
+ "log",
+ "mint",
+ "num-traits",
+ "taimi_ffi",
+ "taimi_hoard",
  "windows",
 ]
 
@@ -3759,6 +3800,46 @@ dependencies = [
  "uuid",
  "xml-rs",
  "zip",
+]
+
+[[package]]
+name = "taimi_sim"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "env_logger",
+ "glam 0.30.1",
+ "glamour",
+ "include_dir",
+ "log",
+ "serde_json",
+ "taimi_cover",
+ "taimi_d3d",
+ "taimi_hoard",
+ "taimi_hud",
+ "taimi_log",
+ "taimi_meta",
+ "taimi_space",
+ "taimi_ui",
+ "windows",
+]
+
+[[package]]
+name = "taimi_space"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bitflags 2.9.0",
+ "bitvec",
+ "glam 0.30.1",
+ "glamour",
+ "indexmap",
+ "log",
+ "num-traits",
+ "taimi_d3d",
+ "taimi_ffi",
+ "taimi_meta",
+ "taimi_pack",
 ]
 
 [[package]]

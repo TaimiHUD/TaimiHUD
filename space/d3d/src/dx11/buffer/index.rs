@@ -18,6 +18,7 @@ pub struct IndexBuffer {
     pub buffer: Buffer,
     pub format: DXGI_FORMAT,
     pub offset: u32,
+    count: u32,
 }
 
 impl IndexBuffer {
@@ -29,11 +30,15 @@ impl IndexBuffer {
         B: Into<Buffer>,
         F: Into<DXGI_FORMAT>,
     {
-        Self {
-            buffer: buffer.into(),
+        let buffer = buffer.into();
+        let mut this = Self {
+            buffer,
             format: format.into(),
             offset: offset as u32,
-        }
+            count: 0,
+        };
+        this.count = (this.buffer.size() * this.stride()) as u32;
+        this
     }
 
     pub fn stride(&self) -> usize {
@@ -103,6 +108,15 @@ impl IndexBuffer {
 
             out.map(|buffer| Self::with_parts(buffer, format, offset as usize))
         }
+    }
+
+    #[inline]
+    pub fn index_count(&self) -> u32 {
+        self.count
+    }
+    #[inline]
+    pub unsafe fn set_count(&mut self, count: u32) {
+        self.count = count;
     }
 }
 

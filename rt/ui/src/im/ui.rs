@@ -657,6 +657,9 @@ pub trait ImStyleExt: ImStyle {}
 impl<U: ?Sized + ImStyle> ImStyleExt for U {}
 
 imvec_newtype! {
+    pub struct PixelSpace([f32; 2]);
+}
+imvec_newtype! {
     pub struct ImSpace([f32; 2]);
 }
 imvec_newtype! {
@@ -688,7 +691,17 @@ imvec_newtype! {
         #[inline(always)]
         fn map(&self, v) { self.0.to_window_space(v) }
     }
+    impl{U: ?Sized + ImDisplayDims} TransformMap<PixelSpace, Output = Vector2<ImSpace>> for ImSpaces<U> {
+        #[inline(always)]
+        fn map(&self, v) { (v / self.0.display_scale()).cast() }
+    }
 }
+#[cfg(todo)]
+impl<U: ?Sized + ImDisplayDims + ImUiWindow> TransformMap<WindowSpace, Output = Vector2<PixelSpace>>
+    for ImSpaces<U>
+{
+}
+
 pub type ImSize2<U = WindowSpace> = Size2<U>;
 pub type ImPos2<U = WindowSpace> = Point2<U>;
 pub type ImVec2<U = WindowSpace> = Vector2<U>;
