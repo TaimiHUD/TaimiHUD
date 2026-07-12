@@ -1,3 +1,5 @@
+//! misc utilities used by other crates in the workspace
+
 use std::{
     borrow::{Borrow, Cow},
     hash,
