@@ -177,6 +177,7 @@ pub struct ActivePoi {
     pub filtered: bool,
     pub bounds: Box3<DrawSpace>,
     pub position: Point3<DrawSpace>,
+    pub height_offset: f32,
     pub rotation: Option<Quat>,
     pub tint: Vec4,
     pub opacity: f32,
@@ -213,6 +214,7 @@ impl ActivePoi {
             + GetAttr<keys::IconFile>
             + GetAttr<keys::IconSize>
             + GetAttr<keys::MapDisplaySize>
+            + GetAttr<keys::HeightOffset>
             + GetAttr<keys::PositionX>
             + GetAttr<keys::PositionY>
             + GetAttr<keys::PositionZ>
@@ -230,6 +232,8 @@ impl ActivePoi {
             .get_or_load_texture(icon_handle, device)
             .context("Loading poi texture")?;
 
+        let height_offset =
+            f32::from(GetAttr::<keys::HeightOffset>::get_attr_or_default(attrs).into_owned());
         let position = Point3::new(
             f32::from(GetAttr::<keys::PositionX>::get_attr_or_default(attrs).into_owned()),
             f32::from(GetAttr::<keys::PositionY>::get_attr_or_default(attrs).into_owned()),
@@ -252,7 +256,7 @@ impl ActivePoi {
         let tint = Vec4::from(GetAttr::<keys::Tint>::get_attr_or_default(attrs).into_owned());
         let opacity = f32::from(GetAttr::<keys::Alpha>::get_attr_or_default(attrs).into_owned());
 
-        let bounds = Self::bounds_for(position, scale);
+        let bounds = Self::bounds_for(position, height_offset, scale);
 
         Ok(ActivePoi {
             poi_idx,
@@ -260,6 +264,7 @@ impl ActivePoi {
             filtered: false,
             bounds,
             position,
+            height_offset,
             rotation,
             tint,
             opacity,
@@ -291,6 +296,7 @@ impl ActivePoi {
             + GetAttr<keys::IconFile>
             + GetAttr<keys::IconSize>
             + GetAttr<keys::MapDisplaySize>
+            + GetAttr<keys::HeightOffset>
             + GetAttr<keys::PositionX>
             + GetAttr<keys::PositionY>
             + GetAttr<keys::PositionZ>
@@ -324,6 +330,8 @@ impl ActivePoi {
                 .context("Preparing empty texture")
             })?;
 
+        let height_offset =
+            f32::from(GetAttr::<keys::HeightOffset>::get_attr_or_default(attrs).into_owned());
         let position = Point3::new(
             f32::from(GetAttr::<keys::PositionX>::get_attr_or_default(attrs).into_owned()),
             f32::from(GetAttr::<keys::PositionY>::get_attr_or_default(attrs).into_owned()),
@@ -344,7 +352,7 @@ impl ActivePoi {
         let scale = f32::from(GetAttr::<keys::IconSize>::get_attr_or_default(attrs).into_owned());
 
         let bounds = match GetAttr::<keys::PositionX>::has_attr(attrs) {
-            true => Self::bounds_for(position, scale),
+            true => Self::bounds_for(position, height_offset, scale),
             false => Self::DIRTY_BOUNDS,
         };
 
@@ -354,6 +362,7 @@ impl ActivePoi {
             filtered: false,
             bounds,
             position,
+            height_offset,
             tint: Vec4::from(GetAttr::<keys::Tint>::get_attr_or_default(attrs).into_owned()),
             opacity: f32::from(GetAttr::<keys::Alpha>::get_attr_or_default(attrs).into_owned()),
             scale,
@@ -398,11 +407,13 @@ impl ActivePoi {
     }
 
     pub fn instance_data(&self) -> InstanceBufferData {
+        let mut position = self.position;
+        position.y += self.height_offset;
         InstanceBufferData {
             world: Mat4::from_scale_rotation_translation(
                 Vec3::splat(self.scale),
                 self.rotation.unwrap_or_default(),
-                self.position.into(),
+                position.into(),
             ),
             colour: self.tint(),
         }
@@ -467,9 +478,10 @@ impl ActivePoi {
         }
     }
 
-    fn bounds_for(position: Point3<DrawSpace>, icon_scale: f32) -> Box3<DrawSpace> {
+    fn bounds_for(mut position: Point3<DrawSpace>, height_offset: f32, icon_scale: f32) -> Box3<DrawSpace> {
         let edge_len = icon_scale * 2.0;
         let max_diagonal = (edge_len.powi(2) * 2.0).sqrt();
+        position.y += height_offset;
         Box3::from_origin_and_size(position, glamour::size3!(max_diagonal))
     }
     pub(crate) fn is_dirty(&self) -> bool {
@@ -486,7 +498,7 @@ impl ActivePoi {
         self.bounds = Self::DIRTY_BOUNDS;
     }
     fn regen_bounds(&mut self) {
-        self.bounds = Self::bounds_for(self.position, self.scale);
+        self.bounds = Self::bounds_for(self.position, self.height_offset, self.scale);
     }
 
     #[cfg(feature = "paths-lua")]
@@ -536,6 +548,7 @@ pack_attr! {
     impl Attr{keys::InGameVisibility} for &struct{ActivePoi}.attr_vis_space {}
     impl Attr{keys::MapVisibility} for &struct{ActivePoi}.attr_vis_map {}
     impl Attr{keys::MinimapVisibility} for &struct{ActivePoi}.attr_vis_minimap {}
+    impl Attr{keys::HeightOffset} for &struct{ActivePoi}.height_offset {}
 }
 impl GetAttr<keys::PositionX> for ActivePoi {
     #[inline]
@@ -825,6 +838,7 @@ impl GetAttrDyn for ActivePoi {
             keys::Tint,
             keys::IconSize,
             keys::MapDisplaySize,
+            keys::HeightOffset,
             // keys::Position,
             keys::PositionX, keys::PositionY, keys::PositionZ,
             keys::Rotate, keys::RotateX, keys::RotateY, keys::RotateZ,
@@ -837,6 +851,7 @@ impl GetAttrDyn for ActivePoi {
             keys::Tint,
             keys::IconSize,
             keys::MapDisplaySize,
+            keys::HeightOffset,
             keys::PositionX, keys::PositionY, keys::PositionZ,
             keys::RotateX, keys::RotateY, keys::RotateZ,
             keys::Rotate,
@@ -850,6 +865,7 @@ impl GetAttrDyn for ActivePoi {
             keys::Tint,
             keys::IconSize,
             keys::MapDisplaySize,
+            keys::HeightOffset,
             keys::PositionX, keys::PositionY, keys::PositionZ,
             keys::InGameVisibility, keys::MapVisibility, keys::MinimapVisibility,
         ] }
@@ -867,6 +883,7 @@ impl GetAttrDyn for ActivePoi {
             keys::Tint,
             keys::IconSize,
             keys::MapDisplaySize,
+            keys::HeightOffset,
             keys::PositionX, keys::PositionY, keys::PositionZ,
             keys::Rotate, keys::RotateX, keys::RotateY, keys::RotateZ,
             keys::InGameVisibility, keys::MapVisibility, keys::MinimapVisibility,
@@ -880,6 +897,7 @@ impl SetAttrDyn for ActivePoi {
             keys::Tint,
             keys::IconSize,
             keys::MapDisplaySize,
+            keys::HeightOffset,
             keys::PositionX, keys::PositionY, keys::PositionZ,
             keys::RotateX, keys::RotateY, keys::RotateZ,
             keys::Rotate,

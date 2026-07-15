@@ -706,7 +706,15 @@ impl ScriptApiSpaceQuery for LuaPackDesc {
     /// TODO: lookup in interact cache
     /// TODO: ensure marker is on the same map?
     fn get_distance_to_player(&self, marker: &Self::Poi) -> script::Result<f32> {
-        let pos = marker.get_pos()?;
+        let mut pos = marker.get_pos()?;
+        pos.y += f32::from(
+            marker
+                .marker
+                .lookup_attr::<keys::HeightOffset>()
+                .map(|v| v.into_owned())
+                .unwrap_or_default(),
+        );
+
         let ml = crate::exports::runtime::mumble_link_ptr().map_err(|e| script::format_err!("{e}"))?;
         let playerpos = Vec3::from_array(unsafe { *&raw const (*ml.as_ptr()).avatar.position });
         Ok(pos.distance(playerpos))

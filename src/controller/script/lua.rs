@@ -466,7 +466,13 @@ impl LuaController {
                             (Some(poi), None) => poi as &_,
                             (None, None) => continue,
                         };
-                        let pos = glam::Vec3A::new(
+                        let height_offset = f32::from(
+                            attrs
+                                .clone_attr_dyn_of::<keys::HeightOffset>()
+                                .and_then(|v| v.into_value())
+                                .unwrap_or_default(),
+                        );
+                        let mut pos = glam::Vec3A::new(
                             attrs
                                 .clone_attr_dyn_of::<keys::PositionX>()
                                 .and_then(|v| v.into_value())
@@ -483,6 +489,7 @@ impl LuaController {
                                 .unwrap_or_default()
                                 .into(),
                         );
+                        pos.y += height_offset;
                         let range = attrs
                             .clone_attr_dyn_of::<keys::TriggerRange>()
                             .and_then(|v| v.into_value())
@@ -606,7 +613,13 @@ impl LuaController {
                         if !seems_interactive && !auto_trigger() {
                             continue
                         }
-                        let pos = glam::Vec3A::new(
+                        let height_offset = f32::from(
+                            attrs
+                                .clone_attr_dyn_of::<keys::HeightOffset>()
+                                .and_then(|v| v.into_value())
+                                .unwrap_or_default(),
+                        );
+                        let mut pos = glam::Vec3A::new(
                             attrs
                                 .clone_attr_dyn_of::<keys::PositionX>()
                                 .and_then(|v| v.into_value())
@@ -623,6 +636,7 @@ impl LuaController {
                                 .unwrap_or_default()
                                 .into(),
                         );
+                        pos.y += height_offset;
                         let range = attrs
                             .clone_attr_dyn_of::<keys::TriggerRange>()
                             .and_then(|v| v.into_value())
