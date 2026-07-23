@@ -8,7 +8,6 @@ use {
         settings::state::BootstrapState,
         Interruption,
     },
-    ::log::info,
     anyhow::Context,
     rand::{rng, seq::SliceRandom},
     std::{
