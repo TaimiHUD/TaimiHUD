@@ -1,0 +1,28 @@
+[package]
+name = "taimi_hosted"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[features]
+default = [
+  "arcffi/default",
+  "log/default",
+  "taimi_hoard/default",
+]
+
+[dependencies]
+arcffi = { path = "../ffi", package = "taimi_ffi", default-features = false }
+log = { path = "../log", package = "taimi_log", default-features = false }
+taimi_hoard = { path = "../hoard", default-features = false }
+
+anyhow = "1"
+futures-core = "0.3"
+futures-util = { version = "0.3", default-features = false }
+glam = { workspace = true }
+glamour = { workspace = true }

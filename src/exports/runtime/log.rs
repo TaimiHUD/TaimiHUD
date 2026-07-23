@@ -228,6 +228,16 @@ impl Log for TaimiLog {
 pub fn log_record(logger: &TaimiLog, record: &Record) -> rt::RuntimeResult<()> {
     #![allow(unreachable_patterns)]
 
+    #[cfg(feature = "extension-dyn")]
+    {
+        let hosted = exports::hosted::singleton();
+        if let Some(taimi_hosted::logs::LogMessageStyle::Display) = hosted.logs.log_filter(record) {
+            if hosted.logs.log_record_c(record, None) {
+                return Ok(())
+            }
+        }
+    }
+
     let res = logger.with_log_buffer(|buffer, _persistent| -> rt::RuntimeResult<Option<()>> {
         let buffer = buffer.append();
         if !buffer.is_empty() {

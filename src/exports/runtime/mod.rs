@@ -109,8 +109,32 @@ pub fn arcdps_available() -> bool {
         _ => false,
     }
 }
+#[inline]
+pub fn dyn_available() -> bool {
+    match () {
+        #[cfg(feature = "extension-dyn")]
+        () => exports::hosted::singleton().host.available(),
+        #[cfg(not(feature = "extension-dyn"))]
+        _ => false,
+    }
+}
 
-pub(crate) static GAME_DIR: LazyLock<Option<PathBuf>> = LazyLock::new(|| env::current_dir().ok());
+pub(crate) static GAME_DIR: LazyLock<Option<PathBuf>> = LazyLock::new(|| {
+    #[cfg(feature = "extension-dyn")]
+    {
+        let hosted = exports::hosted::singleton();
+        let game_dir = hosted
+            .host
+            .available()
+            .then(move || hosted.storage.game_dir())
+            .transpose()
+            .context("detecting game directory");
+        if let Some(Some(path)) = log::error_ok(game_dir) {
+            return Some(path.into())
+        }
+    }
+    env::current_dir().ok()
+});
 
 pub fn relative_path(path: &Path) -> &Path {
     match path.is_relative() {
@@ -131,6 +155,11 @@ pub fn try_addon_dir() -> RuntimeResult<PathBuf> {
 
     #[cfg(feature = "extension-arcdps")]
     if let Some(path) = exports::arcdps::addon_dir()? {
+        return Ok(path)
+    }
+
+    #[cfg(feature = "extension-dyn")]
+    if let Some(path) = log::error_ok(exports::hosted::singleton().storage.init_addon_dir()) {
         return Ok(path)
     }
 
@@ -236,6 +265,13 @@ pub fn detect_language() -> RuntimeResult<LanguageIdentifier> {
         return Ok(lang)
     }
 
+    #[cfg(feature = "extension-dyn")]
+    if let Ok(Some(lang)) =
+        parse_game_language(exports::hosted::singleton().game_info.game_language_id().0 as _)
+    {
+        return Ok(lang)
+    }
+
     game_language().transpose().unwrap_or(Err(RT_UNAVAILABLE))
 }
 
@@ -325,6 +361,11 @@ pub fn get_mumble_link_ptr() -> RuntimeResult<Option<NonNull<MumbleLink>>> {
         return Ok(Some(ml.cast()))
     }
 
+    #[cfg(feature = "extension-dyn")]
+    if let Some(ml) = exports::hosted::singleton().game_info.mumblelink_ptr() {
+        return Ok(Some(ml.cast()))
+    }
+
     Ok(None)
 }
 
@@ -339,11 +380,12 @@ pub fn nexus_link_ptr() -> RuntimeResult<NonNull<NexusLink>> {
         return Ok(nl)
     }
 
-    Err(RT_UNAVAILABLE)
-}
+    #[cfg(all(feature = "extension-dyn", feature = "extension-nexus"))]
+    if let Some(nl) = exports::hosted::singleton().addonapi.nexuslink_ptr() {
+        return Ok(nl.cast())
+    }
 
-pub fn read_nexus_link() -> RuntimeResult<NexusLink> {
-    nexus_link_ptr().map(|p| unsafe { p.read_volatile() })
+    Err(RT_UNAVAILABLE)
 }
 
 pub fn is_ingame() -> RuntimeResult<bool> {
@@ -357,6 +399,11 @@ pub fn is_ingame() -> RuntimeResult<bool> {
 
     #[cfg(feature = "extension-arcdps")]
     if let Some(ingame) = exports::arcdps::is_ingame() {
+        return Ok(ingame)
+    }
+
+    #[cfg(feature = "extension-dyn")]
+    if let Some(ingame) = exports::hosted::singleton().game_info.is_ingame() {
         return Ok(ingame)
     }
 
@@ -409,6 +456,12 @@ pub fn rtapi() -> RuntimeResult<Option<RealTimeApi>> {
         return Ok(Some(rtapi))
     }
 
+    #[cfg(all(feature = "extension-dyn", feature = "extension-nexus"))]
+    if let Some(rtapi) = exports::hosted::singleton().addonapi.rtapi_ptr() {
+        let rtapi = unsafe { mem::transmute::<_, RealTimeApi>(rtapi) };
+        return Ok(Some(rtapi))
+    }
+
     Err(RT_UNAVAILABLE)
 }
 
@@ -425,6 +478,11 @@ pub async fn press_marker_bind(
 
     #[cfg(feature = "extension-arcdps")]
     if let Some(res) = exports::arcdps::press_marker_bind(marker, target, down, position).await? {
+        return Ok(res)
+    }
+
+    #[cfg(feature = "extension-dyn")]
+    if let Ok(Some(res)) = exports::hosted::press_marker_bind(marker, target, down, position) {
         return Ok(res)
     }
 
@@ -481,6 +539,13 @@ pub fn with_dxgi_swap_chain<R, F: FnOnce(&SwapChain) -> R>(f: F) -> Option<R> {
     if let Some(Some(swap_chain)) = exports::nexus::dxgi_swap_chain_ref() {
         return Some(f(swap_chain))
     }
+    #[cfg(feature = "extension-dyn")]
+    #[allow(deprecated)]
+    if let Some(swap_chain) = exports::hosted::singleton().game_window.dxgi_swap_chain() {
+        let raw = swap_chain.cast();
+        let sc = unsafe { SwapChain::from_d3d_raw_ref(&raw) };
+        return Some(f(sc))
+    }
     // TODO: f.take() if need additional callbacks besides this...
     #[cfg(feature = "extension-arcdps")]
     if let Some(res) = exports::arcdps::with_dxgi_swap_chain(f) {
@@ -499,6 +564,14 @@ pub fn dxgi_swap_chain() -> RuntimeResult<Option<SwapChain>> {
     #[cfg(feature = "extension-arcdps")]
     if let Some(swap_chain) = exports::arcdps::dxgi_swap_chain()? {
         return Ok(Some(swap_chain))
+    }
+
+    #[cfg(feature = "extension-dyn")]
+    #[allow(deprecated)]
+    if let Some(swap_chain) = exports::hosted::singleton().game_window.dxgi_swap_chain() {
+        let raw = swap_chain.cast();
+        let owned = unsafe { SwapChain::from_d3d_raw_ref(&raw) }.clone();
+        return Ok(Some(owned))
     }
 
     Err(RT_UNAVAILABLE)
@@ -612,6 +685,11 @@ where
 }
 
 pub fn window_handle() -> RuntimeResult<HWND> {
+    #[cfg(feature = "extension-dyn")]
+    if let Some(handle) = exports::hosted::singleton().game_window.game_window_handle() {
+        return Ok(HWND(handle.cast().as_ptr()))
+    }
+
     let sc = dxgi_swap_chain()?.ok_or("swap chain unavailable")?;
 
     let desc = sc.get_desc0().map_err(|_| "swap chain descriptor missing")?;

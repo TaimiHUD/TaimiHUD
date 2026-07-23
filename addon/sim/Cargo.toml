@@ -21,7 +21,11 @@ workspace = true
 [features]
 default = [
   "windows",
-  # TODO: "taimi_hud",
+  # TODO: "taimi", # requires crate-type=lib which can't be toggled that easily :<
+]
+taimi = [
+  "dep:taimi_hud",
+  "arcloader-mumblelink",
 ]
 windows = [
   "dep:windows",
@@ -33,11 +37,15 @@ windows = [
 [dependencies]
 taimi_hud = { path = "../..", optional = true, default-features = false, features = [
   "texture-loader", "statistics", "log-filter", "timers", "markers",
-  "render-rt",
+  "extension-dyn", "render-rt",
   # TODO: make these optional and actually work when off!
   "space", "timers-space", "markers-edit", "paths",
   "meta-cache", "updates", "extension-nexus",
+  # when working on these, but heavy weh :<
+  "paths-api", "paths-interact", "paths-lua",
 ] }
+arcffi = { path = "../../rt/ffi", package = "taimi_ffi", default-features = false }
+taimi_hosted = { path = "../../rt/hosted", default-features = false }
 taimi_hoard = { path = "../../rt/hoard", default-features = false }
 taimi_ui = { path = "../../rt/ui", default-features = false }
 taimi_log = { path = "../../rt/log", default-features = false }
@@ -45,6 +53,7 @@ taimi_d3d = { path = "../../space/d3d", default-features = false, features = ["d
 taimi_cover = { path = "../../space/cover", default-features = false, features = ["imgui180", "serde"] }
 taimi_space = { path = "../../space/pack", default-features = false }
 taimi_meta = { path = "../../pathing/meta", default-features = false }
+arcloader-mumblelink = { git = "https://codeberg.org/TaimiHUD/arcloader", optional = true, default-features = false }
 
 anyhow = "1"
 log = "0.4"

@@ -1,6 +1,9 @@
 pub use taimi_input::win::keyboard::*;
 use {
-    crate::exports::runtime::{self as rt, RuntimeResult},
+    crate::{
+        exports::runtime::{self as rt, RuntimeResult},
+        settings::{InvokeMethod, Settings},
+    },
     anyhow::Context,
     taimi_input::win::keyboard,
 };
@@ -43,25 +46,61 @@ pub fn send_key_input<I: Into<KeyInput>>(input: I) -> RuntimeResult<()> {
         })
 }
 
-pub async fn press_bind(
+pub(crate) async fn invoke_method_setting() -> InvokeMethod {
+    Settings::async_read()
+        .await
+        .ok()
+        .and_then(|s| s.arc().gamebind_invoke)
+        .unwrap_or_default()
+}
+/// TODO: deleteme
+pub(crate) fn invoke_method_setting_try() -> InvokeMethod {
+    Settings::try_read()
+        .and_then(|s| s.arc().gamebind_invoke)
+        .unwrap_or_default()
+}
+pub async fn press_bind_async(
     control: rt::bindings::Control,
     down: bool,
     position: Option<rt::MousePosition>,
 ) -> RuntimeResult<Option<()>> {
-    use crate::{
-        exports::runtime::mouse::MouseInput,
-        settings::{state::SaveState, InvokeMethod, Settings},
+    let method = invoke_method_setting().await;
+    press_bind_with(control, down, position, method)
+}
+pub(crate) fn press_bind(
+    control: rt::bindings::Control,
+    down: bool,
+    position: Option<rt::MousePosition>,
+) -> RuntimeResult<Option<()>> {
+    let method = invoke_method_setting_try();
+    press_bind_with(control, down, position, method)
+}
+
+pub fn press_bind_with(
+    control: rt::bindings::Control,
+    down: bool,
+    position: Option<rt::MousePosition>,
+    method: InvokeMethod,
+) -> RuntimeResult<Option<()>> {
+    use crate::settings::state::SaveState;
+
+    let (vk, mods) = SaveState::read_with(|s| s.game_binds.get(control, None)).ok_or("unknown keybind")?;
+
+    press_key_with(vk.0, mods, down, position, method)
+}
+pub fn press_key_with(
+    vk: u16,
+    mut mods: KeyState,
+    down: bool,
+    position: Option<rt::MousePosition>,
+    method: InvokeMethod,
+) -> RuntimeResult<Option<()>> {
+    use {
+        crate::exports::runtime::mouse::MouseInput,
+        windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY,
     };
 
-    let method = Settings::async_read()
-        .await
-        .ok()
-        .and_then(|s| s.arc().gamebind_invoke)
-        .unwrap_or_default();
-
-    let (vk, mut mods) =
-        SaveState::read_with(|s| s.game_binds.get(control, None)).ok_or("unknown keybind")?;
-
+    let vk = VIRTUAL_KEY(vk.into());
     match rt::bindings::GameBinds::vk_is_button(vk) {
         false => {
             if let Some(position) = position {
@@ -127,9 +166,17 @@ pub async fn press_marker_bind(
     down: bool,
     position: Option<rt::MousePosition>,
 ) -> RuntimeResult<Option<()>> {
-    let control = match target {
+    let control = control_for_marker(marker, target);
+    press_bind_async(control, down, position).await
+}
+#[cfg(feature = "markers")]
+pub fn control_for_marker(
+    marker: crate::marker::format::MarkerType,
+    target: bool,
+) -> rt::bindings::Control {
+    match target {
         true => marker.control_object(),
         false => marker.control_location(),
-    };
-    press_bind(control.into(), down, position).await
+    }
+    .into()
 }

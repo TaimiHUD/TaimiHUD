@@ -1,8 +1,8 @@
-mod controller;
-mod exports;
-mod render;
+pub mod controller;
+pub mod exports;
+pub mod render;
 pub mod resources;
-mod settings;
+pub mod settings;
 mod timer;
 
 #[cfg(feature = "markers")]
@@ -278,7 +278,7 @@ pub(crate) fn pre_init_for(host: AddonHostName) -> Result<bool, &'static str> {
 ///
 /// nexus export for example cannot request itself to be unloaded, so will
 /// always "succeed"
-pub(crate) fn post_init_for(host: AddonHostName, success: bool) {
+pub fn post_init_for(host: AddonHostName, success: bool) {
     #[cfg(todo)]
     let is_primary = success && _host.is_active();
 
@@ -342,7 +342,7 @@ pub(crate) fn post_uninit_for(host: AddonHostName) {
     RenderState::try_send(RenderEvent::RefreshHost);
 }
 
-fn init() -> Result<(), &'static str> {
+pub fn init() -> Result<(), &'static str> {
     crate_init();
 
     let loaded = rt::LOADER_LOCK.lock();
@@ -833,7 +833,7 @@ where
 
 /// it's a bad idea to take too long to unload on quit due to issues on nexus,
 /// so instead we perform slow/blocking shutdown in wndproc :<
-fn notify_quit() {
+pub fn notify_quit() {
     // if !RenderState::is_running() { return }
 
     log::info!("Preparing for game exit");

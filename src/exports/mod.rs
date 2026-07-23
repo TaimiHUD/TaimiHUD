@@ -3,6 +3,7 @@ pub mod arcdps;
 #[cfg(feature = "extension-nexus")]
 pub mod nexus;
 
+pub mod hosted;
 pub mod runtime;
 
 /// Update URL provided as a literal to appease `nexus::export!`
