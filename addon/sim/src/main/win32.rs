@@ -1,17 +1,31 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+#[cfg(feature = "taimi")]
+use taimi_hud::{
+    exports::runtime as rt,
+    render::{
+        element::im::{UiContextCell, UiFrameContainer, UiFrameViewport},
+        machine::RenderMachine,
+        RenderState,
+    },
+    settings::state::AddonHostName,
+};
 #[cfg(todo)]
 use taimi_ui::im::im192;
 use {
     anyhow::Context,
-    glamour::{Point2, Size2},
+    glamour::{Point2, Point3, Size2, Vector3},
     std::{
         env,
         ffi::{CStr, CString, OsStr},
         mem,
         path::Path,
         ptr,
-        sync::Arc,
+        sync::{
+            atomic::{AtomicPtr, Ordering},
+            Arc,
+            RwLock,
+        },
         thread,
         time::{Duration, Instant},
     },
@@ -58,8 +72,12 @@ use {
 #[derive(Debug, Clone)]
 pub struct Opts {
     pub dpi_aware: bool,
+    #[cfg(feature = "taimi")]
+    pub taimi_shim: bool,
     pub debug: bool,
     pub ini_path: Option<String>,
+    pub game_dir: Option<String>,
+    pub addon_dir: Option<String>,
     pub size: Size2<i32>,
     pub offset: Point2<i32>,
 }
@@ -67,8 +85,12 @@ impl Opts {
     pub fn from_env() -> Self {
         Self {
             dpi_aware: opt_var_on(env::var_os("TAIMISIM_DPIAWARE")).unwrap_or(false),
+            #[cfg(feature = "taimi")]
+            taimi_shim: opt_var_on(env::var_os("TAIMISIM_SHIM")).unwrap_or(true),
             debug: opt_var_on(env::var_os("TAIMISIM_D3DDEBUG")).unwrap_or(false),
             ini_path: env::var("TAIMISIM_INIPATH").ok(),
+            game_dir: env::var("TAIMISIM_GAMEDIR").ok(),
+            addon_dir: env::var("TAIMISIM_ADDONDIR").ok(),
             size: Size2::new(1280i32, 720),
             offset: Point2::new(64i32, 64),
         }
@@ -120,8 +142,6 @@ impl Window {
             lpszClassName: Self::class_name_ascii(),
             hInstance: module,
             lpfnWndProc: Some(WNDPROC),
-            #[cfg(todo)]
-            hCursor: default_cursor,
             ..Default::default()
         };
         let class_atom = unsafe { wm::RegisterClassExA(&class) };
@@ -131,9 +151,14 @@ impl Window {
         }
         .context("RegisterClassEx")?;
         unsafe {
+            let classname = match () {
+                #[cfg(todo)]
+                _ => MAKEINTATOM(class_atom),
+                _ => class.lpszClassName,
+            };
             wm::CreateWindowExA(
                 style_ex,
-                class.lpszClassName,
+                classname,
                 Self::title_ascii(),
                 style,
                 opts.offset.x,
@@ -283,6 +308,10 @@ pub struct Renderer {
     pub render: ImRenderer180<'static>,
     pub window: Window,
     pub main_thread: u32,
+    pub ui_ctx: usize,
+    pub ui_alloc: taimi_ui::im::io::WinHeapAllocator,
+    #[cfg(feature = "taimi")]
+    pub ui_cell: UiContextCell<'static, taimi_ui::im::io::WinHeapAllocator>,
     pub message_streak: u8,
     pub pause: f32,
     pub prev: Instant,
@@ -290,6 +319,12 @@ pub struct Renderer {
     pub mapcompat_v: Option<ConstantBufferV>,
     pub mapcompat_p: Option<ConstantBufferP>,
     pub shader: Option<ShaderPair>,
+    #[cfg(feature = "taimi")]
+    pub mumble_sim: SharedMumbleSim,
+    #[cfg(feature = "taimi")]
+    pub hosted: Option<&'static HostedShim>,
+    #[cfg(feature = "taimi")]
+    pub taimi_rendering: bool,
 }
 impl Renderer {
     fn new(
@@ -301,9 +336,15 @@ impl Renderer {
         let render = window_renderer(opts, &window)?;
 
         let dpi_scale = window.get_dpi_scale();
-        unsafe {
+        let ui_alloc = taimi_ui::im::io::WinHeapAllocator::process_heap().context("GetProcessHeap")?;
+        let ui_ctx = unsafe {
+            use taimi_ui::im::io::UiAllocatorRaw;
+
+            let (malloc, free, user_data) = ui_alloc.get_allocator_raw();
+            imsys::igSetAllocatorFunctions(malloc, free, user_data);
+
             let shared_font = ptr::null_mut();
-            imsys::igCreateContext(shared_font);
+            let ctx = imsys::igCreateContext(shared_font);
 
             let io = imsys::igGetIO();
             (&mut *io).ConfigFlags |= (imsys::ImGuiConfigFlags_NavEnableKeyboard
@@ -318,7 +359,8 @@ impl Renderer {
                 (&mut *style).FontScaleDpi = dpi_scale;
             }
             imsys::ImGuiStyle_ScaleAllSizes(style, dpi_scale);
-        }
+            ctx
+        };
         let render = unsafe {
             let io = ptr::NonNull::new(imsys::igGetIO()).context("ImGuiIO null")?;
             ImRenderer180::new180_unchecked(render, io)
@@ -368,12 +410,25 @@ impl Renderer {
             running: true,
             resizing: None,
             main_thread,
+            #[cfg(feature = "taimi")]
+            ui_cell: unsafe {
+                let ctx = ptr::NonNull::new_unchecked(ui_ctx.cast());
+                UiContextCell::with_parts(im180::VERSION_NUM, ctx, ui_alloc, false)
+            },
+            ui_ctx: ui_ctx as usize,
+            ui_alloc,
             message_streak: 0u8,
             pause: Self::PAUSE_STARTUP,
             prev: Instant::now(),
             mapcompat_v: None,
             mapcompat_p: None,
             shader: None,
+            #[cfg(feature = "taimi")]
+            mumble_sim: Default::default(),
+            #[cfg(feature = "taimi")]
+            hosted: None,
+            #[cfg(feature = "taimi")]
+            taimi_rendering: false,
         })
     }
 
@@ -563,10 +618,12 @@ impl Renderer {
         // reset streak after rendering a frame
         self.message_streak = 0;
 
-        if self.resizing.is_some()
-            && self.render.backend.viewport.viewport.Width.to_bits() == 0.0f32.to_bits()
-        {
-            self.pause_at_least(Self::PAUSE_RESIZE);
+        match self.resizing {
+            Some(r) if r.width == 0 => {
+                // hold off while minimized
+                self.pause_at_least(Self::PAUSE_RESIZE);
+            },
+            _ => (),
         }
 
         if !self.unpause() {
@@ -589,8 +646,19 @@ impl Renderer {
                     dx::DXGI_SWAP_CHAIN_FLAG::default(),
                 )?;
             }
+            #[cfg(todo)]
+            let _ = unsafe { gdi::UpdateWindow(self.window.handle) };
+            #[cfg(feature = "taimi")]
+            self.taimi_resize();
         }
+
         self.setup_frame()?;
+        if let (Some(rt), Some(context)) = (&self.render.rt, &self.render.backend.context) {
+            rt.clear_rgba(context, glam::Vec3::splat(0.6f32).extend(1.0f32));
+        }
+
+        #[cfg(feature = "taimi")]
+        self.taimi_frame_pre();
 
         self.update_im_display();
         self.update_im_timers();
@@ -600,21 +668,187 @@ impl Renderer {
         unsafe { imsys::igNewFrame() }
 
         // TODO: imgui draw dyn callback or something lol
-        unsafe {
+        let vis = unsafe {
             let vis = imsys::igBegin(c"heya".as_ptr() as *const _, ptr::null_mut(), 0);
             if vis {
                 imsys::igText(c"%s".as_ptr() as *const _, c"wheeee".as_ptr());
             }
-            imsys::igEnd();
+            vis
+        };
+        #[cfg(feature = "taimi")]
+        unsafe {
+            use taimi_hud::exports::runtime::bindings::{TaimiControls, CONTROLS};
+
+            if vis {
+                if imsys::igButton(c"primary".as_ptr() as *const _, imsys::ImVec2::ZERO) {
+                    taimi_hud::controller::ControllerEvent::WindowState(
+                        taimi_hud::WINDOW_PRIMARY.into(),
+                        None,
+                    )
+                    .try_send();
+                }
+                imsys::igSameLine(0.0f32, -1.0f32);
+                if imsys::igButton(c"packs".as_ptr() as *const _, imsys::ImVec2::ZERO) {
+                    taimi_hud::controller::ControllerEvent::WindowState(
+                        taimi_hud::WINDOW_PATHING.into(),
+                        None,
+                    )
+                    .try_send();
+                }
+                imsys::igSameLine(0.0f32, -1.0f32);
+                if imsys::igButton(c"space".as_ptr() as *const _, imsys::ImVec2::ZERO) {
+                    CONTROLS.notify_press(
+                        TaimiControls::PATHING_SPACE.to_vk_dummy(),
+                        TaimiControls::PATHING_SPACE,
+                    );
+                } else if imsys::igIsMouseReleased(imsys::ImGuiMouseButton_Left as _) {
+                    CONTROLS.notify_release(TaimiControls::PATHING_SPACE.to_vk_dummy());
+                }
+                imsys::igSameLine(0.0f32, -1.0f32);
+                if imsys::igButton(c"menu".as_ptr() as *const _, imsys::ImVec2::ZERO) {
+                    CONTROLS.notify_press(
+                        TaimiControls::MENU_PRIMARY.to_vk_dummy(),
+                        TaimiControls::MENU_PRIMARY,
+                    );
+                } else if imsys::igIsMouseReleased(imsys::ImGuiMouseButton_Left as _) {
+                    CONTROLS.notify_release(TaimiControls::MENU_PRIMARY.to_vk_dummy());
+                }
+
+                if let Some(hosted) = &self.hosted {
+                    let (map, mut loading) = hosted.with_sim(|sim| (sim.map, !sim.running));
+                    let map_id = arcffi::cstr::String0::format(map);
+                    if imsys::igBeginCombo(c"map".as_ptr() as *const _, map_id.as_ptr() as *const _, 0) {
+                        let (la, arbor, lounge) = (50, 1428, 1465);
+                        if imsys::igSelectable_Bool(c"none".as_ptr() as _, map == 0, 0, imsys::ImVec2::ZERO)
+                        {
+                            hosted.with_sim_mut(|sim| sim.set_map(0));
+                        }
+                        if imsys::igSelectable_Bool(
+                            c"lions arch".as_ptr() as _,
+                            map == la,
+                            0,
+                            imsys::ImVec2::ZERO,
+                        ) {
+                            hosted.with_sim_mut(|sim| sim.set_map(la));
+                        }
+                        if imsys::igSelectable_Bool(
+                            c"arborstone".as_ptr() as _,
+                            map == arbor,
+                            0,
+                            imsys::ImVec2::ZERO,
+                        ) {
+                            hosted.with_sim_mut(|sim| sim.set_map(arbor));
+                        }
+                        if imsys::igSelectable_Bool(
+                            c"thousand seas".as_ptr() as _,
+                            map == lounge,
+                            0,
+                            imsys::ImVec2::ZERO,
+                        ) {
+                            hosted.with_sim_mut(|sim| sim.set_map(lounge));
+                        }
+                        imsys::igEndCombo();
+                    }
+                    if imsys::igCheckbox(c"loading".as_ptr() as *const _, &mut loading) {
+                        hosted.with_sim_mut(|sim| sim.running = !loading);
+                    }
+                    if !loading {
+                        imsys::igSameLine(0.0f32, -1.0f32);
+                        if imsys::igButton(c"recenter".as_ptr() as *const _, imsys::ImVec2::ZERO) {
+                            hosted.with_sim_mut(|sim| sim.set_pos(Default::default()));
+                        }
+                        let io = self.render.io();
+                        let moveamt = io.DeltaTime * 120.0f32;
+                        let turnamt = io.DeltaTime * 1.0f32;
+                        if io.KeysDown[vk::VK_SHIFT.0 as usize] {
+                            hosted.with_sim_mut(|sim| {
+                                #[cfg(todo)]
+                                let dir = Vector3::Y;
+                                let dir = sim.player_up().normalize();
+                                sim.move_pos(dir * -moveamt)
+                            });
+                        }
+                        if io.KeysDown[vk::VK_SPACE.0 as usize] {
+                            hosted.with_sim_mut(|sim| {
+                                let dir = sim.player_up().normalize();
+                                sim.move_pos(dir * moveamt)
+                            });
+                        }
+                        if io.KeysDown[vk::VK_LEFT.0 as usize] {
+                            hosted.with_sim_mut(|sim| {
+                                let dir = sim.player_dir().cross(Vector3::Y).normalize();
+                                sim.move_pos(dir * moveamt)
+                            });
+                        }
+                        if io.KeysDown[vk::VK_RIGHT.0 as usize] {
+                            hosted.with_sim_mut(|sim| {
+                                let dir = sim.player_dir().cross(Vector3::Y).normalize();
+                                sim.move_pos(dir * -moveamt)
+                            });
+                        }
+                        if io.KeysDown[vk::VK_DOWN.0 as usize] {
+                            hosted.with_sim_mut(|sim| {
+                                let dir = sim.player_dir();
+                                sim.move_pos(dir * -moveamt)
+                            });
+                        }
+                        if io.KeysDown[vk::VK_UP.0 as usize] {
+                            hosted.with_sim_mut(|sim| {
+                                let dir = sim.player_dir();
+                                sim.move_pos(dir * moveamt)
+                            });
+                        }
+                        if io.KeysDown[vk::VK_Z.0 as usize] {
+                            hosted.with_sim_mut(|sim| {
+                                #[cfg(todo)]
+                                let up = sim.player_up().normalize();
+                                let up = Vector3::Y;
+                                sim.move_turn(up * -turnamt)
+                            });
+                        }
+                        if io.KeysDown[vk::VK_X.0 as usize] {
+                            hosted.with_sim_mut(|sim| {
+                                let up = Vector3::Y;
+                                sim.move_turn(up * turnamt)
+                            });
+                        }
+                        if io.KeysDown[vk::VK_A.0 as usize] {
+                            hosted.with_sim_mut(|sim| {
+                                let side = sim.player_right().normalize();
+                                sim.move_turn(side * -turnamt)
+                            });
+                        }
+                        if io.KeysDown[vk::VK_S.0 as usize] {
+                            hosted.with_sim_mut(|sim| {
+                                let side = sim.player_right().normalize();
+                                sim.move_turn(side * turnamt)
+                            });
+                        }
+                        #[cfg(todo)]
+                        if io.KeysDown[vk::VK_Q.0 as usize] {
+                            hosted.with_sim_mut(|sim| sim.move_turn(Vector3::Z * -turnamt));
+                        }
+                        #[cfg(todo)]
+                        if io.KeysDown[vk::VK_W.0 as usize] {
+                            hosted.with_sim_mut(|sim| sim.move_turn(Vector3::Z * turnamt));
+                        }
+                    }
+                }
+            }
         }
+        if vis {
+            unsafe {
+                imsys::igEnd();
+            }
+        }
+
+        #[cfg(feature = "taimi")]
+        self.taimi_ui();
 
         unsafe {
             imsys::igRender();
         }
 
-        if let (Some(rt), Some(context)) = (&self.render.rt, &self.render.backend.context) {
-            rt.clear_rgba(context, glam::Vec3::splat(0.6f32).extend(1.0f32));
-        }
         self.draw_last_frame();
         if let (Some(..), Some(context)) = (&self.render.rt, &self.render.backend.context) {
             // unbind only really matters when resizing, but why not clean up after each frame anyway...
@@ -626,6 +860,9 @@ impl Renderer {
             .backend
             .swap_chain
             .present(vsync_on, Default::default())?;
+
+        #[cfg(feature = "taimi")]
+        self.taimi_frame_post();
 
         Ok(())
     }
@@ -758,7 +995,7 @@ impl Renderer {
         self.mapcompat_v = Some(cb_v);
         self.mapcompat_p = Some(cb_p);
 
-        self.render.setup_depth_state()?;
+        self.render.setup_raster_state()?;
         Ok(())
     }
     fn setup_frame(&mut self) -> anyhow::Result<()> {
@@ -784,7 +1021,113 @@ impl Renderer {
             RenderTargetViews::with_views(rt, None::<&DepthView>).set(context);
         }
     }
-    fn pre_main(&mut self) -> anyhow::Result<()> {
+    #[cfg(feature = "taimi")]
+    fn taimi_setup(&mut self, opts: Opts) -> anyhow::Result<()> {
+        let hosted = HostedShim {
+            opts,
+            hwnd: AtomicPtr::new(self.window.handle.0 as *mut ()),
+            sc: Some(self.render.backend.swap_chain.clone()),
+            keys: self.keys.clone(),
+            mumble_sim: self.mumble_sim.clone(),
+            mumble_sim_data: Box::leak(Box::new([0u32; MumbleSim::DATA_LEN32])),
+        };
+        let hosted = *self.hosted.insert(&*Box::leak(Box::new(hosted)));
+        let hosted_dyn = taimi_hud::exports::hosted::HostedProviderDyn {
+            host: hosted,
+            storage: hosted,
+            logs: hosted,
+            game_info: hosted,
+            addonapi: hosted,
+            game_invoke: hosted,
+            keybinds: hosted,
+            game_window: hosted,
+            game_settings: hosted,
+            game_combat: hosted,
+        };
+        unsafe {
+            log::debug!("registering taimi_hud shim");
+            hosted_dyn.immortalize_globally();
+        }
+
+        #[cfg(todo)]
+        rt::try_init_addon_dir(false, || rt::try_addon_dir().ok());
+        taimi_hud::init().map_err(anyhow::Error::msg)?;
+
+        let host = Self::taimi_host_variant();
+        #[cfg(todo = "unnecessary")]
+        taimi_hud::post_init_for(host, true);
+        RenderState::set_host(host);
+        Ok(())
+    }
+    /// TODO
+    #[cfg(feature = "taimi")]
+    fn taimi_resize(&mut self) {
+        log::debug!("TODO: taimi_resize buffers");
+    }
+    #[cfg(feature = "taimi")]
+    fn taimi_host_variant() -> AddonHostName {
+        match () {
+            #[cfg(todo)]
+            _ => AddonHostName::Sim,
+            _ => AddonHostName::ArcDPS,
+        }
+    }
+    #[cfg(feature = "taimi")]
+    fn taimi_frame_pre(&mut self) {
+        let Some(hosted) = &self.hosted else { return };
+        if self.taimi_rendering {
+            let ml_data = unsafe { &mut *hosted.mumble_sim_data };
+            let running = hosted.with_sim(|sim| {
+                if sim.running {
+                    true
+                } else {
+                    sim.write_to(ml_data);
+                    false
+                }
+            });
+            if running {
+                hosted.with_sim_mut(|sim| {
+                    sim.update_tick();
+                    sim.write_to(ml_data);
+                });
+            }
+        }
+        if let Some(ready) = RenderState::pre_render(Self::taimi_host_variant()) {
+            RenderMachine::turn_render_entry();
+            if !ready {
+                RenderState::render_setup();
+            }
+            self.taimi_rendering = true;
+        } else {
+            self.taimi_rendering = false;
+        }
+    }
+    #[cfg(feature = "taimi")]
+    fn taimi_frame_post(&mut self) {
+        if self.hosted.is_none() {
+            return
+        }
+        RenderState::post_render(Self::taimi_host_variant());
+    }
+    #[cfg(feature = "taimi")]
+    fn taimi_ui(&mut self) {
+        if !self.taimi_rendering {
+            return
+        }
+        let Some(shim) = self.hosted else { return };
+        let host = UiFrameContainer {
+            viewport: UiFrameViewport { host: Self::taimi_host_variant() },
+            kind: UiFrameContainer::TYPE_VIEWPORT_PRESENT,
+        };
+        let frame = RenderMachine::ui_read_context().to_frame_storage(host);
+        let ui = unsafe { self.ui_cell.context_mut().bound_mut_dyn_unchecked() };
+        RenderMachine::turn_ui_entry(ui);
+        RenderState::render_ui(ui, frame.as_ref());
+    }
+    #[cfg(todo)]
+    #[cfg(feature = "taimi")]
+    fn taimi_ui_options(&mut self) {}
+    fn pre_main(&mut self, _opts: Opts) -> anyhow::Result<()> {
         self.setup_d3d()?;
         self.setup_im()?;
         self.setup_font_texture().context("font setup")?;
@@ -793,6 +1136,11 @@ impl Renderer {
         let w = unsafe { GetCurrentThreadId() };
         unsafe { wm::PostThreadMessageA(self.main_thread, wm::WM_USER, WPARAM(w as _), LPARAM::default()) }
             .context("PostThreadMessage")?;
+
+        #[cfg(feature = "taimi")]
+        if _opts.taimi_shim {
+            self.taimi_setup(_opts)?;
+        }
 
         Ok(())
     }
@@ -811,7 +1159,7 @@ impl Renderer {
         thread::spawn(move || {
             let render = Renderer::new(&opts, window.clone_ref(), main_thread, keys);
             let render = match render {
-                Ok(mut render) => render.pre_main().map(move |()| render),
+                Ok(mut render) => render.pre_main(opts).map(move |()| render),
                 res @ Err(..) => res,
             };
             let Some(mut render) = log::error_ok(render) else {
@@ -829,6 +1177,272 @@ impl Renderer {
             );
         })
     }
+}
+#[derive(Debug, Clone, Default)]
+pub struct MumbleSim {
+    pub ui_tick: u32,
+    pub running: bool,
+    pub ui_state: u32,
+    pub map: u32,
+    pub player_pos: Point3,
+    pub player_dir: Vector3,
+}
+type MumbleSimDataArray = [u32; MumbleSim::DATA_LEN32];
+impl MumbleSim {
+    pub const DATA_SIZE: usize = 0x1000;
+    pub const DATA_LEN32: usize = Self::DATA_SIZE / mem::size_of::<u32>();
+    pub fn update_tick(&mut self) {
+        let focused = true;
+        if focused {
+            self.ui_state |= 1 << 3;
+        } else {
+            self.ui_state &= !(1 << 3);
+        }
+        if self.running {
+            self.ui_tick = self.ui_tick.wrapping_add(1);
+        }
+    }
+    #[cfg(feature = "taimi")]
+    pub fn write_to(&self, data: &mut MumbleSimDataArray) {
+        let dest = data
+            .as_mut_ptr()
+            .cast::<arcloader_mumblelink::gw2_mumble::LinkedMem>();
+        unsafe {
+            ptr::write(&raw mut (*dest).context.build_id, 1);
+            ptr::write(
+                &raw mut (*dest).context.ui_state,
+                arcloader_mumblelink::gw2_mumble::UiState::from_bits_truncate(self.ui_state),
+            );
+            let compass_size = self.compass_size();
+            ptr::write(&raw mut (*dest).context.compass_width, compass_size.width);
+            ptr::write(&raw mut (*dest).context.compass_height, compass_size.height);
+            let map_pos = self.player_pos_map();
+            ptr::write(&raw mut (*dest).context_len, 48);
+            ptr::write(&raw mut (*dest).context.map_scale, 0.7f32);
+            ptr::write(&raw mut (*dest).context.player_x, map_pos.x);
+            ptr::write(&raw mut (*dest).context.player_y, map_pos.y);
+            ptr::write(&raw mut (*dest).context.map_center_x, map_pos.x);
+            ptr::write(&raw mut (*dest).context.map_center_y, map_pos.y);
+            ptr::write(&raw mut (*dest).avatar.position, self.player_pos().to_array());
+            ptr::write(&raw mut (*dest).avatar.front, self.player_dir().to_array());
+            ptr::write(&raw mut (*dest).camera.position, self.camera_pos().to_array());
+            ptr::write(&raw mut (*dest).camera.front, self.camera_dir().to_array());
+            ptr::write(&raw mut (*dest).context.map_id, self.map);
+            core::sync::atomic::compiler_fence(Ordering::SeqCst);
+            ptr::write_volatile(&raw mut (*dest).ui_tick, self.ui_tick);
+            {
+                let mut id = arcloader_mumblelink::identity::GW2_IDENTITY_EMPTY;
+                id.fov = 0.8f32;
+                id.name = "arc".into();
+                id.map_id = self.map;
+                let json = serde_json::to_vec(&id).unwrap();
+                let mut dest = &raw mut (*dest).identity[0];
+                for id_c in json {
+                    *dest = id_c as u16;
+                    dest = dest.add(1);
+                }
+                *dest = 0;
+            }
+        }
+    }
+    pub fn player_pos_map(&self) -> Point2 {
+        use glam::Vec3Swizzles;
+        (self.player_pos().xz().to_raw() * glam::Vec2::new(2.0f32 / 39.37f32, -2.0f32 / 39.37f32)).into()
+    }
+    pub fn compass_size(&self) -> Size2<u16> {
+        Size2::new(512, 512)
+    }
+    pub fn player_pos(&self) -> Point3 {
+        self.player_pos
+    }
+    pub fn player_dir(&self) -> Vector3 {
+        self.player_dir.normalize_or(Vector3::Z)
+    }
+    pub fn camera_dir(&self) -> Vector3 {
+        self.player_dir()
+    }
+    pub fn player_right(&self) -> Vector3 {
+        let dir = self.player_dir();
+        dir.cross(Vector3::Y)
+    }
+    pub fn player_up(&self) -> Vector3 {
+        self.player_right().cross(self.player_dir())
+    }
+    const CAMERA_OFFSET: Vector3 = Vector3::new(0.0f32, 9.0f32, -1.0f32);
+    pub fn camera_pos(&self) -> Point3 {
+        self.player_pos() + Self::CAMERA_OFFSET * self.player_up().normalize()
+    }
+    pub fn set_map(&mut self, map: u32) {
+        let prev = mem::replace(&mut self.map, map);
+        if prev != self.map {
+            self.set_pos(Default::default());
+        }
+    }
+    pub fn set_pos(&mut self, pos: Point3) {
+        self.player_pos = pos;
+        self.player_dir = Default::default();
+    }
+    pub fn move_pos(&mut self, amt: Vector3) {
+        self.player_pos += amt;
+    }
+    pub fn move_turn(&mut self, axis_amt: Vector3) {
+        self.player_dir = (glam::Quat::from_axis_angle(axis_amt.normalize().into(), axis_amt.length())
+            * self.player_dir().to_vec3a())
+        .into();
+    }
+}
+type SharedMumbleSim = Arc<RwLock<MumbleSim>>;
+#[derive(Debug)]
+pub struct HostedShim {
+    pub opts: Opts,
+    pub hwnd: AtomicPtr<()>,
+    pub sc: Option<sc::SwapChain0>,
+    pub keys: Arc<KeysDownBroadcast>,
+    pub mumble_sim_data: *mut MumbleSimDataArray,
+    pub mumble_sim: SharedMumbleSim,
+}
+impl HostedShim {
+    #[inline]
+    fn read_hwnd(&self) -> *mut () {
+        self.hwnd.load(Ordering::Relaxed)
+    }
+    fn with_sim<R>(&self, f: impl FnOnce(&MumbleSim) -> R) -> R {
+        f(&*self.mumble_sim.read().unwrap())
+    }
+
+    fn with_sim_mut(&self, f: impl FnOnce(&mut MumbleSim)) {
+        if let Ok(mut sim) = self.mumble_sim.write() {
+            f(&mut *sim)
+        }
+    }
+}
+unsafe impl Sync for HostedShim {}
+unsafe impl Send for HostedShim {}
+impl taimi_hosted::HostedBy for HostedShim {
+    fn available(&self) -> bool {
+        !self.read_hwnd().is_null()
+    }
+}
+impl taimi_hosted::HostedEvtc for HostedShim {
+    fn async_combat_events(&self) -> taimi_hosted::DynStreamOf<taimi_hosted::CombatEvent> {
+        taimi_hosted::HostedEvtc::async_combat_events(taimi_hosted::nop())
+    }
+}
+/// irrelevant if we win the init race anyway
+impl taimi_hosted::HostedLogs for HostedShim {
+    fn log_filter_meta(&self, _: &taimi_log::Metadata<'_>) -> bool {
+        false
+    }
+    fn log_wants_message(&self) -> taimi_hosted::logs::LogMessageStyle {
+        Default::default()
+    }
+    fn log_record(&self, _: &taimi_log::Record<'_>, _: Option<&str>) -> bool {
+        true
+    }
+}
+unsafe impl taimi_hosted::HostedGameInfo for HostedShim {
+    fn game_language_id(&self) -> taimi_hosted::GameLanguageId {
+        taimi_hosted::GameLanguageId::UNKNOWN
+    }
+    fn is_ingame(&self) -> Option<bool> {
+        Some(self.mumble_sim.read().unwrap().map != 0)
+    }
+    fn mumblelink_ptr(&self) -> Option<ptr::NonNull<()>> {
+        ptr::NonNull::new((self.mumble_sim_data as *mut MumbleSimDataArray).cast())
+    }
+}
+/// TODO
+impl taimi_hosted::HostedKeybinds for HostedShim {
+    fn register_bind(
+        &self,
+        ident: &arcffi::cstr::Str0,
+        default: Option<taimi_hosted::KeyState>,
+    ) -> anyhow::Result<taimi_hosted::KeybindId> {
+        taimi_hosted::HostedKeybinds::register_bind(taimi_hosted::nop(), ident, default)
+    }
+    fn update_bind(
+        &self,
+        id: taimi_hosted::KeybindId,
+        new_value: Option<taimi_hosted::KeyState>,
+    ) -> anyhow::Result<()> {
+        taimi_hosted::HostedKeybinds::update_bind(taimi_hosted::nop(), id, new_value)
+    }
+    fn async_binds(&self) -> taimi_hosted::DynStreamOf<(taimi_hosted::KeybindId, Option<bool>)> {
+        taimi_hosted::HostedKeybinds::async_binds(taimi_hosted::nop())
+    }
+}
+impl taimi_hosted::HostedGameInvoke for HostedShim {
+    /// TODO
+    fn press_gamebind(
+        &self,
+        _: taimi_hosted::GameControlIndex,
+        _: bool,
+        _: Option<taimi_hosted::MousePosition>,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+impl taimi_hosted::HostedStorageDir for HostedShim {
+    fn game_dir(&self) -> anyhow::Result<&Path> {
+        self.opts
+            .game_dir
+            .as_ref()
+            .map(Path::new)
+            .context("TAIMISIM_GAMEDIR")
+    }
+    fn init_addon_dir(&self) -> anyhow::Result<std::path::PathBuf> {
+        self.opts
+            .addon_dir
+            .as_ref()
+            .map(|p| Path::new(p).to_owned())
+            .context("TAIMISIM_ADDONDIR")
+    }
+}
+impl taimi_hosted::HostedGameSettings for HostedShim {
+    /// TODO
+    fn lookup_gamebind(
+        &self,
+        _: taimi_hosted::GameControlIndex,
+        _: Option<taimi_hosted::GameControlSlot>,
+    ) -> Option<taimi_hosted::KeyState> {
+        None
+    }
+}
+/// TODO: pull in from arcloader?
+unsafe impl taimi_hosted::HostedAddonApi for HostedShim {
+    /// TODO: sim
+    fn rtapi_ptr(&self) -> Option<ptr::NonNull<()>> {
+        None
+    }
+    fn addonapi_ptr(&self, _: u8) -> Option<ptr::NonNull<()>> {
+        None
+    }
+    fn nexuslink_ptr(&self) -> Option<ptr::NonNull<()>> {
+        None
+    }
+    fn addonapi_version(&self) -> Option<u8> {
+        None
+    }
+}
+unsafe impl taimi_hosted::HostedGameWindow for HostedShim {
+    fn dxgi_swap_chain(&self) -> Option<ptr::NonNull<()>> {
+        self.sc.as_ref().map(|sc| sc.as_d3d_raw().cast())
+    }
+    fn game_window_handle(&self) -> Option<ptr::NonNull<()>> {
+        ptr::NonNull::new(self.read_hwnd())
+    }
+    /// TODO
+    fn async_keys(&self) -> taimi_hosted::DynStreamOf<(u16, bool, taimi_hosted::ModState)> {
+        taimi_hosted::HostedGameWindow::async_keys(taimi_hosted::nop())
+    }
+    /// TODO
+    fn async_window_events(&self) -> taimi_hosted::DynStreamOf<taimi_hosted::WindowEvent> {
+        taimi_hosted::HostedGameWindow::async_window_events(taimi_hosted::nop())
+    }
+    /// TODO
+    fn register_key_interest(&self, _: u16) {}
+    /// TODO
+    fn deregister_key_interest(&self, _: u16) {}
 }
 const EXIT_RENDER_ERR: u32 = 1;
 const EXIT_RENDER_TIMEOUT: u32 = 2;
@@ -894,12 +1508,7 @@ fn try_main(opts: &Opts) -> anyhow::Result<u32> {
             }
             .context("GetMessage");
             let () = res?;
-            #[cfg(debug_assertions)]
-            match msg.message {
-                // omit very spammy messages...
-                wm::WM_SIZE | wm::WM_PAINT => (),
-                _ => log::trace!("rx(T): {}({})", msg.message, msg.wParam.0),
-            }
+            log_msg("T", msg.message, msg.wParam.0, msg.lParam.0);
             let _ = wm::TranslateMessage(&msg);
             wm::DispatchMessageA(&msg);
             (msg.message, msg.wParam, msg.lParam)
@@ -918,6 +1527,7 @@ fn try_main(opts: &Opts) -> anyhow::Result<u32> {
                 log::debug!("render thread notified main of start");
                 window.show();
                 render_id = Some(w.0 as u32);
+                #[cfg(todo)]
                 unsafe {
                     // TODO: remove hack here, set when imgui requests a change
                     let _ = wm::SetCursor(wm::LoadCursorW(None, wm::IDC_ARROW).ok());
@@ -935,6 +1545,8 @@ fn try_main(opts: &Opts) -> anyhow::Result<u32> {
                 if let Some(e) = _res {
                     log::debug!("input(k) event: {e:?}");
                 }
+                #[cfg(feature = "taimi")]
+                rt::bindings::process_key_event(msg, w.0, l.0);
             },
             KeysDown::WM_BUTTON_MIN..=KeysDown::WM_BUTTON_MAX => {
                 let _res = keys.process_button_event_unchecked(msg, w.0, l.0);
@@ -942,6 +1554,8 @@ fn try_main(opts: &Opts) -> anyhow::Result<u32> {
                 if let Some(e) = _res {
                     log::debug!("input(b) event: {e:?}");
                 }
+                #[cfg(feature = "taimi")]
+                rt::bindings::process_button_event(msg, w.0, l.0);
             },
             _ => (),
         }
@@ -954,31 +1568,25 @@ fn try_main(opts: &Opts) -> anyhow::Result<u32> {
 }
 
 unsafe extern "system" fn wnd_proc(h: HWND, msg: u32, w: WPARAM, l: LPARAM) -> LRESULT {
-    #[cfg(debug_assertions)]
+    log_msg("W", msg, w.0, l.0);
+    let mut relay = false;
     match msg {
-        // omit very spammy messages...
-        wm::WM_SIZE
-        | wm::WM_MOVE
-        | wm::WM_MOUSEMOVE
-        | wm::WM_WINDOWPOSCHANGED
-        | wm::WM_WINDOWPOSCHANGING
-        | wm::WM_GETMINMAXINFO
-        | wm::WM_NCCALCSIZE
-        | wm::WM_NCPAINT
-        | wm::WM_ERASEBKGND
-        | wm::WM_PAINT => (),
-        _ => log::trace!("rx(W): {msg}({})", w.0),
-    }
-    match msg {
-        wm::WM_SIZE | wm::WM_CLOSE => {
+        wm::WM_CLOSE => {
+            #[cfg(feature = "taimi")]
+            taimi_hud::notify_quit();
             let res = wm::PostMessageA(None, msg, w, l);
             if log::warn_ok(res).is_some() {
                 return Default::default()
             }
         },
+        wm::WM_SIZE => {
+            relay = true;
+        },
         wm::WM_SETCURSOR if l.0 as u32 & 0xffff == wm::HTCLIENT => unsafe {
-            let _ = wm::SetCursor(wm::LoadCursorW(None, wm::IDC_ARROW).ok());
-            return LRESULT(Foundation::TRUE.0 as _)
+            if let Ok(cursor) = wm::LoadCursorW(None, wm::IDC_ARROW) {
+                let _ = wm::SetCursor(Some(cursor));
+                return LRESULT(Foundation::TRUE.0 as _)
+            }
         },
         wm::WM_SYSCOMMAND if w.0 as u32 & 0xfff0 == wm::SC_KEYMENU =>
         // prevent alt from triggering window menu
@@ -989,6 +1597,10 @@ unsafe extern "system" fn wnd_proc(h: HWND, msg: u32, w: WPARAM, l: LPARAM) -> L
         },
         _ => (),
     }
+    if relay {
+        let res = wm::PostMessageA(None, msg, w, l).context("relay");
+        let _ = log::warn_ok(res);
+    }
     let res = wm::DefWindowProcA(h, msg, w, l);
     match msg {
         #[cfg(todo)]
@@ -997,6 +1609,26 @@ unsafe extern "system" fn wnd_proc(h: HWND, msg: u32, w: WPARAM, l: LPARAM) -> L
             res
         },
         _ => res,
+    }
+}
+/// omits very spammy messages...
+#[inline(always)]
+fn log_msg(_context: &str, _msg: u32, _w: usize, _l: isize) {
+    #[cfg(debug_assertions)]
+    match _msg {
+        wm::WM_SIZE
+        | wm::WM_MOVE
+        | wm::WM_WINDOWPOSCHANGED
+        | wm::WM_WINDOWPOSCHANGING
+        | wm::WM_GETMINMAXINFO
+        | wm::WM_NCCALCSIZE
+        | wm::WM_NCPAINT
+        | wm::WM_ERASEBKGND
+        | wm::WM_PAINT
+        | wm::WM_NCHITTEST
+        | wm::WM_MOUSEMOVE
+        | wm::WM_SETCURSOR => (),
+        _ => log::trace!("rx({_context}): {_msg}({_w:#x}, {_l:#x})"),
     }
 }
 

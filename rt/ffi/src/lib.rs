@@ -1,7 +1,7 @@
 //! intended to be a temporary staging ground for things
 //! before they're ready to be pulled into arcffi...
 
-use core::{cell::UnsafeCell, ops};
+use core::{cell::UnsafeCell, mem, ops};
 
 pub mod cstr;
 pub mod data;
@@ -86,4 +86,35 @@ impl<T: ?Sized> ops::DerefMut for UnsaferCell<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
+}
+
+/// new fields could be added in theory...
+#[cfg(debug_assertions)]
+const STRING_VEC_REPR: bool = match (mem::size_of::<String>(), mem::size_of::<Vec<u8>>()) {
+    (l, r) if l == r => true,
+    _ => panic!("String != Vec<u8>"),
+};
+#[inline(always)]
+pub const fn string_as_vec(s: &String) -> &Vec<u8> {
+    #[cfg(debug_assertions)]
+    if !STRING_VEC_REPR {
+        unreachable!()
+    }
+    unsafe { mem::transmute(s) }
+}
+#[inline(always)]
+pub const unsafe fn vec_as_string(s: &Vec<u8>) -> &String {
+    #[cfg(debug_assertions)]
+    if !STRING_VEC_REPR {
+        unreachable!()
+    }
+    mem::transmute(s)
+}
+#[inline(always)]
+pub const unsafe fn vec_as_string_mut(s: &mut Vec<u8>) -> &mut String {
+    #[cfg(debug_assertions)]
+    if !STRING_VEC_REPR {
+        unreachable!()
+    }
+    mem::transmute(s)
 }

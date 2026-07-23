@@ -6,6 +6,7 @@ members = [
   "pathing/pack",
   "pathing/meta",
   "rt/hoard",
+  "rt/hosted",
   "rt/ffi",
   "rt/input",
   "rt/log",
@@ -52,6 +53,7 @@ default = [
   "paths-space",
   "statistics",
   "extension-arcdps",
+  "extension-dyn",
   "extension-nexus",
   "log-filter",
   "render-rt",
@@ -218,6 +220,9 @@ extension-arcdps-imgui = [
   "taimi_ui/imgui-arcdps",
   "taimi_cover?/imgui192",
 ]
+extension-dyn = [
+  #"taimi_hosted",
+]
 extension-nexus = [
   #"extension-nexus-codegen",
   "extension-nexus-extern-todo",
@@ -274,7 +279,12 @@ windows = [
 ]
 
 [lib]
-crate-type = ["cdylib"] # nexus addons are dynamic system libraries (dll)
+crate-type = [
+  # nexus addons are dynamic system libraries (dll)
+  "cdylib",
+  # for simulator...
+  #"lib",
+]
 path = "src/lib.rs"
 
 [workspace.lints.rust]
@@ -376,6 +386,7 @@ taimi_cover = { path = "./space/cover", optional = true }
 taimi_input = { path = "./rt/input", optional = true, default-features = false, features = ["serde"] }
 taimi_sync = { path = "./rt/sync", default-features = false, features = ["serde"] }
 taimi_hoard = { path = "./rt/hoard", default-features = false, features = ["serde"] }
+taimi_hosted = { path = "./rt/hosted", default-features = false }
 taimi_ui = { path = "./rt/ui", default-features = false, features = ["serde"] }
 
 include_dir = { version = "0.7.4", features = ["glob"] }
