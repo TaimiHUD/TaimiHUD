@@ -1,10 +1,10 @@
 #[cfg(feature = "built-info")]
-use std::{fs, path::PathBuf};
+use std::fs;
 
 use {
     core::fmt::Write,
     semver::{BuildMetadata, Prerelease, Version},
-    std::env,
+    std::{env, path::PathBuf},
 };
 
 const FEATURE_BUILT: &'static str = "CARGO_FEATURE_BUILT_INFO";
@@ -15,6 +15,7 @@ const FEATURE_ARCDPS: &'static str = "CARGO_FEATURE_EXTENSION_ARCDPS";
 const FEATURE_ARCDPS_IMGUI: &'static str = "CARGO_FEATURE_EXTENSION_ARCDPS_IMGUI";
 const FEATURE_NEXUS_IMGUI: &'static str = "CARGO_FEATURE_EXTENSION_NEXUS_IMGUI";
 const FEATURE_UPDATES: &'static str = "CARGO_FEATURE_UPDATES";
+const FEATURE_ASS: &'static str = "CARGO_FEATURE_ASSEMBLY";
 fn main() {
     println!("cargo::rerun-if-env-changed={FEATURE_BUILT}");
     println!("cargo::rerun-if-env-changed={FEATURE_NEXUS_CODEGEN}");
@@ -23,11 +24,17 @@ fn main() {
     println!("cargo::rerun-if-env-changed={FEATURE_NEXUS}");
     println!("cargo::rerun-if-env-changed={FEATURE_ARCDPS}");
     println!("cargo::rerun-if-env-changed={FEATURE_ARCDPS_IMGUI}");
+    println!("cargo::rerun-if-env-changed={FEATURE_UPDATES}");
+    println!("cargo::rerun-if-env-changed={FEATURE_ASS}");
 
     #[cfg(feature = "built-info")]
     write_built_info();
 
     apply_built_info();
+
+    if win32_rc::write_manifest_info() {
+        win32_rc::build_manifest_info();
+    }
 }
 
 const BUILT_ATTR_REF: &'static str = "GIT_HEAD_REF";
@@ -500,10 +507,7 @@ fn apply_built_info() {
     };
 
     println!("cargo::rerun-if-env-changed=CARGO_PKG_AUTHORS");
-    let addon_author = match env::var("CARGO_PKG_AUTHORS") {
-        Ok(authors) => authors.split(":").collect::<Vec<_>>().join(", "),
-        Err(..) => "TaimiHUD".into(),
-    };
+    let addon_author = addon_authors();
     println!("cargo::rustc-cfg=taimi_has={:?}", "author");
     println!("cargo::rustc-env={ADDON_AUTHOR}={addon_author}");
     if env::var_os(FEATURE_NEXUS_CODEGEN).is_some() && !imperative_build {
@@ -551,7 +555,175 @@ fn write_built_info() {
     }
 }
 
-#[cfg(feature = "built-info")]
 fn manifest_dir() -> Option<PathBuf> {
     env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from)
+}
+fn target_is_windows() -> bool {
+    env::var_os("CARGO_CFG_TARGET_OS")
+        .map(|os| os.eq_ignore_ascii_case("windows"))
+        .unwrap_or(false)
+}
+fn addon_authors() -> String {
+    match env::var("CARGO_PKG_AUTHORS") {
+        Ok(authors) => authors.split(":").collect::<Vec<_>>().join(", "),
+        Err(..) => "TaimiHUD".into(),
+    }
+}
+mod win32_rc {
+    use std::{env, fmt, fs, io, path::PathBuf, process::Command};
+
+    pub fn write_manifest_info() -> bool {
+        if !super::target_is_windows() {
+            return false
+        }
+
+        let vinfo = TaimiVersionInfo::new();
+        let Some(out) = env::var_os("OUT_DIR").map(PathBuf::from) else {
+            println!("cargo::warning={}", "OUT_DIR missing");
+            return false
+        };
+
+        let res = fs::File::create(out.join(TaimiVersionInfo::VERINC_NAME))
+            .and_then(|inc| vinfo.write_include(inc));
+        if let Err(e) = res {
+            println!("cargo::warning=failed to prepare version info: {e}");
+            return false
+        }
+        true
+    }
+    pub fn build_manifest_info() {
+        let Some(out) = env::var_os("OUT_DIR").map(PathBuf::from) else {
+            println!("cargo::warning={}", "OUT_DIR missing");
+            return
+        };
+        let (rc, ext, pre, o) = match env::var_os("CARGO_CFG_TARGET_ENV") {
+            Some(e) if e.eq_ignore_ascii_case("gnu") => ("windres", ".o", "-", ""),
+            _ => ("rc", ".lib", "/", "/fo"),
+        };
+        let rc = env::var_os("RC").unwrap_or_else(|| rc.into());
+        let srcdir = super::manifest_dir().unwrap().join(TaimiVersionInfo::RC_DIR);
+        let rc_src = srcdir.join(TaimiVersionInfo::RC_NAME);
+        println!("cargo:rerun-if-changed={}", rc_src.display());
+        let rc_out = out.join(format!("rc{ext}"));
+        let res = Command::new(rc)
+            .arg(format!("{pre}I{}", srcdir.display()))
+            .arg(format!("{pre}I{}", out.display()))
+            .arg(rc_src)
+            .arg(format!("{o}{}", rc_out.display()))
+            .status();
+        match res {
+            Err(e) => {
+                println!("cargo::warning=rc failed: {e}");
+                return
+            },
+            Ok(s) if !s.success() => {
+                println!("cargo::warning=rc failed with exit code {s}");
+                return
+            },
+            Ok(..) => (),
+        }
+        if pre == "/" {
+            #[cfg(todo = "unnecessary")]
+            println!("cargo:rustc-link-search=native={}", out.display());
+            println!("cargo:rustc-link-lib=dylib={}/rc", out.display());
+        } else {
+            println!("cargo:rustc-link-arg-cdylib={}", rc_out.display());
+        }
+    }
+
+    pub struct TaimiVersionInfo {}
+    impl TaimiVersionInfo {
+        pub fn new() -> Self {
+            Self {}
+        }
+        const PRODUCT_NAME: &'static str = "TaimiHUD";
+        const RC_DIR: &'static str = "data/manifest";
+        const RC_NAME: &'static str = "rc.rc";
+        const MANIFEST_NAME: &'static str = "taimi.manifest";
+        const VERINC_NAME: &'static str = "taimi_version.h";
+        const VERSION_TEMPLATE: &'static str = "0.0.0.0";
+        /// TODO: version processing from built stuff
+        pub fn write_include(&self, mut w: impl io::Write) -> io::Result<()> {
+            // TODO: pass any values referencing this via -D cmdline instead?
+            let out = env::var_os("OUT_DIR")
+                .map(PathBuf::from)
+                .ok_or_else(|| io::Error::other("OUT_DIR missing"))?;
+            let src =
+                super::manifest_dir().ok_or_else(|| io::Error::other("CARGO_MANIFEST_DIR missing"))?;
+            #[cfg(todo)]
+            Self::write_def_str(&mut w, "CARGO_OUT_DIR", out.display())?;
+            let version = env::var("CARGO_PKG_VERSION").unwrap();
+            let v0 = env::var("CARGO_PKG_VERSION_MAJOR").unwrap();
+            let v1 = env::var("CARGO_PKG_VERSION_MINOR").unwrap();
+            let v2 = env::var("CARGO_PKG_VERSION_PATCH").unwrap();
+            let v3 = "0";
+            let version4 = format!("{v0}.{v1}.{v2}.{v3}");
+            Self::write_def_str(&mut w, "CARGO_MANIFEST_DIR", src.display())?;
+            Self::write_def(
+                &mut w,
+                "TAIMI_VINFO_VERSION_PARTS",
+                format_args!("{v0},{v1},{v2},{v3}"),
+            )?;
+            Self::write_def_str(&mut w, "TAIMI_VINFO_VERSION_NAME", &version)?;
+            Self::write_def(
+                &mut w,
+                "TAIMI_VINFO_FILEVERSION_PARTS",
+                format_args!("{v0},{v1},{v2},{v3}"),
+            )?;
+            Self::write_def_str(&mut w, "TAIMI_VINFO_FILEVERSION_NAME", &version4)?;
+            let debug = env::var_os("PROFILE") == Some("dev".into())
+                || env::var_os("PROFILE") != Some("release".into());
+            if debug {
+                Self::write_def(&mut w, "TAIMI_VINFO_IS_DEBUG", 1)?;
+            }
+            if !env::var("CARGO_PKG_VERSION_PRE").unwrap_or_default().is_empty() {
+                Self::write_def(&mut w, "TAIMI_VINFO_IS_PRE", 1)?;
+            }
+            let build_private = None::<&str>;
+            if let Some(build) = build_private {
+                Self::write_def_str(&mut w, "TAIMI_VINFO_PRIVATE", build)?;
+            }
+            let build_special = None::<&str>;
+            if let Some(build) = build_special {
+                Self::write_def_str(&mut w, "TAIMI_VINFO_SPECIAL", build)?;
+            }
+            Self::write_def_str(&mut w, "TAIMI_VINFO_NAME", Self::PRODUCT_NAME)?;
+            Self::write_def_str(&mut w, "TAIMI_VINFO_AUTHORS", super::addon_authors())?;
+            let filename = Self::PRODUCT_NAME;
+            let filename = match super::target_is_windows() {
+                true => format!("{filename}.dll"),
+                _ => filename.into(),
+            };
+            Self::write_def_str(&mut w, "TAIMI_VINFO_FILENAME", filename)?;
+            let modname = env::var("CARGO_PKG_NAME").unwrap();
+            Self::write_def_str(&mut w, "TAIMI_VINFO_MODULENAME", modname)?;
+            let desc = env::var("CARGO_PKG_DESCRIPTION").unwrap();
+            let desc = format!("{desc} - TaimiHUD.com");
+            Self::write_def_str(&mut w, "TAIMI_VINFO_DESC", desc)?;
+            let ass_version = env::var_os(super::FEATURE_ASS).map(|_| &version4[..]);
+            if let Some(v) = ass_version {
+                Self::write_def_str(&mut w, "TAIMI_VINFO_ASSVERSION_NAME", v)?;
+                let m_path = src.join(Self::RC_DIR).join(Self::MANIFEST_NAME);
+                println!("cargo:rerun-if-changed={}", m_path.display());
+                let m_src = fs::read_to_string(m_path)?.replace(Self::VERSION_TEMPLATE, &v.to_string());
+                let m_dest = out.join(Self::MANIFEST_NAME);
+                fs::write(&m_dest, m_src)?;
+                Self::write_def_str(&mut w, "TAIMI_RC_SRC_MANIFEST", m_dest.display())?;
+            }
+
+            Ok(())
+        }
+        fn write_def(mut w: impl io::Write, name: &str, value: impl fmt::Display) -> io::Result<()> {
+            writeln!(w, "#define {name} {value}")
+        }
+        fn write_def_str(w: impl io::Write, name: &str, v: impl fmt::Display) -> io::Result<()> {
+            #[cfg(todo)]
+            Self::write_def(w, name, format_args!("{:?}", v.to_string()))?;
+            Self::write_def(
+                w,
+                name,
+                format_args!("\"{}\"", v.to_string().as_bytes().escape_ascii()),
+            )
+        }
+    }
 }
