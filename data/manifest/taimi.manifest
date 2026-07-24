@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+	<assemblyIdentity
+	name="TaimiHud.myDivision.taimi_hud"
+	version="0.0.0.0"
+	processorArchitecture="amd64"
+	/>
+	<!--<assemblyIdentity type="win32" publicKeyToken="strong name shrug"/>-->
+	<clrClass
+	clsid="{FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF}"
+	progid="taimi_hud.TaimiMod"
+	threadingModel="Both"
+	name="taimi_hud.TaimiMod"
+	description="whee"
+	>
+	</clrClass>
+	<!--<clrClass runtimeVersion="v2.0.50727" />-->
+	<!--<clrClass tlbid="" />-->
+	<file name="TaimiHUD.dll">
+		<!--<comClass clsid="{ffffffff-ffff-ffff-ffff-ffffffffffff}" threadingModel="Both" progid="taimi_hud.TaimiBus" />-->
+	</file>
+</assembly>

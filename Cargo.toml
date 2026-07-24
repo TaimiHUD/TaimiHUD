@@ -68,6 +68,9 @@ statistics = [
 updates = [
   "dep:semver",
 ]
+assembly = [
+  # TODO
+]
 api = [
   "dep:taimi_api_client",
 ]
