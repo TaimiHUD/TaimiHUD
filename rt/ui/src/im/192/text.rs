@@ -375,7 +375,13 @@ impl<'ui> ImColourContainer<ImColourIndex> for Ui<'ui> {
 impl From<ImColourIndex> for StyleColor {
     #[inline]
     fn from(colour_id: ImColourIndex) -> StyleColor {
-        let idx = colour_id.index();
+        let idx = match colour_id {
+            // 41(180) -> 43
+            ImColourIndex::PlotHistogram => sys::ImGuiCol_PlotHistogram as _,
+            // 49(180) -> 56
+            ImColourIndex::NavCursor => sys::ImGuiCol_NavCursor as _,
+            c => c.index(),
+        };
         #[cfg(debug_assertions)]
         assert!(
             match (colour_id, idx as sys::ImGuiCol) {

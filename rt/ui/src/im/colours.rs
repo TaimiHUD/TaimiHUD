@@ -20,10 +20,10 @@ where
 pub enum ImColourIndex {
     Text = 0,
     Disabled = 1,
-    Button = 22,
-    ButtonHovered = 23,
+    Button = 21,
+    ButtonHovered = 22,
     PlotHistogram = 41,
-    NavCursor = 50,
+    NavCursor = 49,
 }
 impl ImColourIndex {
     pub const TEXT_DISABLED: Self = Self::Disabled;
