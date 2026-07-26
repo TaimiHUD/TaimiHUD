@@ -243,15 +243,20 @@ impl LuaPackDesc {
         id: ScriptNotification,
         args: impl mlua::IntoLuaMulti,
     ) -> anyhow::Result<()> {
-        let co = self.running()?;
-        match id {
-            ScriptNotification::PathingMapExit => {
+        let co = match (self.running(), id) {
+            (Err(..), ScriptNotification::PathingTick) => return Ok(()),
+            (Err(..), ScriptNotification::PathingMapExit) => {
+                LuaMessage::Stop { context: self.shared().plug.path.path }.try_send();
+                return Ok(())
+            },
+            (co, ScriptNotification::PathingMapExit) => {
                 self.with_stash_mut(|s| {
                     s.prepare_map_exit();
                 });
+                co
             },
-            _ => (),
-        }
+            (co, ..) => co,
+        }?;
         let args = args.into_lua_multi(lua.lua())?;
         let yielded = co.call((LuaPlugBase::signal_with(id, args),));
         self.spun(lua, yielded)
