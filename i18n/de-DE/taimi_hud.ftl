@@ -378,3 +378,9 @@ Squad_Object_Triangle = {gamebind-marker-triangle}{gamebind-marker-object-suffix
 Squad_Object_X = {gamebind-marker-x}{gamebind-marker-object-suffix}
 Squad_ClearAllLocationMarkers = Alle Ortsmarkierungen entfernen
 Squad_ClearAllObjectMarkers = Alle Objektmarkierungen entfernen
+
+locale-name = Deutsch
+#locale-name-de = {locale-name}
+#locale-name-en = Englisch
+#locale-name-fr = Französisch
+#locale-name-es = Spanisch
