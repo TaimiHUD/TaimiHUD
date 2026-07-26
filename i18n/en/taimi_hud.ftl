@@ -621,10 +621,23 @@ Squad_ClearAllObjectMarkers = {gamebind-marker-clear}{gamebind-marker-object-suf
 
 # i18n
 locale-name = English
+#locale-name-en = {locale-name}
+#locale-name-fr = French
 #locale-name-de = German
 #locale-name-de-DE = {locale-name-de} (Germany)
+#locale-name-es = Spanish
 
 # DO NOT COPY INTO NEW LANGUAGES - add entry here instead
 locale-native-fallback = PLACEHOLDER
 locale-native-en = English
+locale-native-fr = Français
 locale-native-de = Deutsch
+locale-native-de-DE = {locale-native-de} (Deutschland)
+locale-native-es = Español
+
+# TODO: es
+#locale-name = Español
+##locale-name-es = {locale-name}
+##locale-name-en = Inglés
+##locale-name-fr = Francés
+##locale-name-de = Alemán

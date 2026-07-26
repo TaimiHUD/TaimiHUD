@@ -403,3 +403,9 @@ Squad_Object_Triangle = {gamebind-marker-triangle}{gamebind-marker-object-suffix
 Squad_Object_X = {gamebind-marker-x}{gamebind-marker-object-suffix}
 Squad_ClearAllLocationMarkers = {gamebind-marker-clear}{gamebind-marker-location-suffix}
 Squad_ClearAllObjectMarkers = {gamebind-marker-clear}{gamebind-marker-object-suffix}
+
+locale-name = Français
+#locale-name-fr = {locale-name}
+#locale-name-en = Anglais
+#locale-name-es = Espagnol
+#locale-name-de = Allemand
