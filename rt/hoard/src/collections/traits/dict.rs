@@ -16,7 +16,7 @@ pub trait TaimiDictMut<K, V>: TaimiDict<K, V> {
     fn dict_retain_mut_count<F: FnMut(&K, &mut V) -> bool>(&mut self, f: F) -> usize {
         let prev_len = self.dict_len();
         self.dict_retain_mut(f);
-        self.dict_len() - prev_len
+        prev_len - self.dict_len()
     }
     /// [Self::retain_mut] but additionally call `damage` for each item being removed
     fn dict_retain_mut_damaged<F: FnMut(&K, &mut V) -> bool, D: FnMut(&K, &mut V)>(
