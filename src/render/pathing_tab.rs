@@ -721,7 +721,18 @@ impl PathingConfig {
                 })?;
                 // ui.checkbox_flags("scripts", enables, PathingEnables::SCRIPTING_LUA)?
                 if ui.checkbox(c"scripts", &mut en) {
-                    Self::set_pathing(|s| s.scripting_enable = en);
+                    Self::set_pathing(|s| {
+                        s.scripting_enable = en;
+                        #[cfg(feature = "paths-interact")]
+                        if en && !s.trigger_allow_interact.contains(TriggerKind::SCRIPT) {
+                            let add = TriggerKind::SCRIPT | TriggerKind::COPY | TriggerKind::INFO;
+                            let msg = "enabling script interaction and auto-copy settings for you\n(turn them back off individually if you didn't want that)";
+                            log::info!("{msg}");
+                            let _ = crate::exports::runtime::send_alert(&*ui, msg);
+                            s.trigger_allow_auto.insert(add);
+                            s.trigger_allow_interact.insert(add);
+                        }
+                    });
                     if en {
                         machine.plug_ui_state.enabled = en;
                     }
