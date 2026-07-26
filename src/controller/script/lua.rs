@@ -345,7 +345,12 @@ impl LuaController {
                     let mut args = Some(args.clone());
                     let args = &mut args as &mut dyn IntoLuaMultiMut;
                     let res = pack.notify_with(lua, id, args).with_context(context);
-                    let _ = rt::log::warn_ok(res);
+                    let res = rt::log::warn_ok(res);
+                    if let (ScriptNotification::PathingTick, None) = (id, res) {
+                        // TODO: this is a hack
+                        log::info!("temporarily disabling script due to error (TODO)");
+                        pack.received = ScriptSignal::Ended;
+                    }
                 }
                 for plug in &mut self.plugs {
                     let mut args = Some(args.clone());
@@ -1329,7 +1334,12 @@ impl LuaPlugDesc {
         id: ScriptNotification,
         args: impl mlua::IntoLuaMulti,
     ) -> anyhow::Result<()> {
-        let co = self.running()?;
+        let co = match (self.running(), id) {
+            // untargeted, don't spam
+            #[cfg(feature = "paths-lua")]
+            (Err(..), ScriptNotification::PathingTick) => return Ok(()),
+            (co, ..) => co?,
+        };
         let args = args.into_lua_multi(lua.lua())?;
         let yielded = co.call((LuaPlugBase::signal_with(id, args),));
         self.spun(lua, yielded)
