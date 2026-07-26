@@ -36,6 +36,7 @@ use {
     taimi_d3d::{
         dx11::{depth::ClearFlags, prelude::*},
         shader::ShaderKind,
+        state::PrimitiveTopology,
     },
     taimi_hoard::{
         flags::{BitArray, BitSet, BitSlice, BitView, BitsNative},
@@ -3297,10 +3298,13 @@ pub struct DrawStateSpace {
     pub bound_blend: DrawStateId,
     pub bound_target_depth: usize,
     pub bound_target_render: usize,
+    pub prim: PrimitiveTopology,
 }
 impl DrawStateSpace {
     pub const SHADER_UNDEF: &'static str = "";
     pub const SHADER_UNSET: &'static str = "NULL";
+    pub const TARGET_UNDEF: usize = 0;
+    pub const TARGET_UNSET: usize = 1;
     pub const ID_EMPTY: DrawStateId = 0;
     pub const SHADER_MASK_NAME: &'static str = "mask";
     /// for drawing maps
@@ -3320,10 +3324,16 @@ impl DrawStateSpace {
     pub const DEPTH_WRITEONLY: DrawStateId = Self::DEPTH_MASK_FILL_FALLBACK;
 
     pub const BLEND_ALPHA: DrawStateId = 1;
+    #[cfg(feature = "goggles2")]
+    pub const BLEND_DEPTHONLY: DrawStateId = 2;
     #[cfg(feature = "goggles2-project")]
-    pub const BLEND_SHADOW: DrawStateId = 2;
+    pub const BLEND_SHADOW: DrawStateId = 3;
     pub const BLEND_WRITEONLY: DrawStateId = Self::BLEND_ALPHA;
-    pub const BLEND_NOP: DrawStateId = Self::BLEND_ALPHA;
+    pub const BLEND_NOP: DrawStateId = match () {
+        #[cfg(todo)]
+        _ => Self::BLEND_DEPTHONLY,
+        _ => Self::BLEND_ALPHA,
+    };
 
     pub fn set_shader_mask(&mut self, context: &Dx11Context, backend: &RenderBackend) -> bool {
         self.unset_shader_p(context, backend);
@@ -3360,6 +3370,14 @@ impl DrawStateSpace {
         }
         self.bound_shader_p = Self::SHADER_UNSET;
         None::<dx11::ShaderP>.set(context);
+    }
+
+    pub fn set_prim(&mut self, context: &Dx11Context, prim: PrimitiveTopology) {
+        if self.prim == prim {
+            return
+        }
+        prim.set(context);
+        self.prim = prim;
     }
 
     pub fn set_minimap_scissor(
@@ -3481,6 +3499,8 @@ impl DrawStateSpace {
         }
         let state = match id {
             Self::BLEND_ALPHA => &backend.blend_state,
+            #[cfg(feature = "goggles2")]
+            Self::BLEND_DEPTHONLY => &backend.blend_state_depthonly,
             #[cfg(feature = "goggles2-project")]
             Self::BLEND_SHADOW => &backend.blend_state_shadow,
             _ => return false,
@@ -3500,7 +3520,9 @@ impl DrawStateSpace {
     const PERSPECTIVE_SLOT: u32 = 0;
 
     pub fn cleanup(&mut self, context: &Dx11Context, backend: &RenderBackend) {
-        self.unset_target(context);
+        if self.bound_target_render != Self::TARGET_UNDEF || self.bound_target_depth != Self::TARGET_UNDEF {
+            self.unset_target(context);
+        }
         self.unsetup(context, backend);
         if !matches!(self.bound_shader_v, Self::SHADER_UNDEF) {
             self.unset_shader_v(context, backend);
@@ -3513,6 +3535,30 @@ impl DrawStateSpace {
         self.set_minimap_scissor(context, backend, None);
     }
 
+    /// TODO: can unbind RT here or just set blending write mask to 0, which is better?
+    pub fn set_target_depthonly(
+        &mut self,
+        context: &Dx11Context,
+        backend: &RenderBackend,
+        desc: &DrawDescSpace,
+    ) {
+        #[cfg(feature = "goggles2")]
+        if desc.implicit_render_target() {
+            // if we can't unbind the RT, prevent writes to it instead
+            self.set_blend_state(context, backend, Self::BLEND_DEPTHONLY);
+            return self.set_target(context, backend, desc)
+        }
+        let mut dsview = backend.depth_handler.depth_stencil_view_with(desc);
+        let target_depth = nn::nonnull_ptr_mut(dsview.depth.map(|v| *v.as_d3d_raw())) as usize;
+        let (prev_depth, prev_render) = (
+            mem::replace(&mut self.bound_target_depth, target_depth),
+            mem::replace(&mut self.bound_target_render, Self::TARGET_UNSET),
+        );
+        dsview.views = None;
+        if prev_depth != target_depth || prev_render != Self::TARGET_UNSET {
+            dsview.set(context);
+        }
+    }
     pub fn set_target(&mut self, context: &Dx11Context, backend: &RenderBackend, desc: &DrawDescSpace) {
         if !desc.implicit_render_target() {
             let dsview = backend.depth_handler.depth_stencil_view_with(desc);
@@ -3528,13 +3574,22 @@ impl DrawStateSpace {
         }
     }
     pub fn unset_target(&mut self, context: &Dx11Context) {
-        if self.bound_target_depth == 0 && self.bound_target_render == 0 {
+        if self.bound_target_depth == Self::TARGET_UNSET && self.bound_target_render == Self::TARGET_UNSET {
             return
         }
-        self.bound_target_depth = 0;
-        self.bound_target_render = 0;
+        self.bound_target_depth = Self::TARGET_UNSET;
+        self.bound_target_render = Self::TARGET_UNSET;
         dx11::RenderTargetViews::with_views(None::<dx11::RenderTargetView>, None::<dx11::DepthView>)
             .set(context);
+    }
+    pub fn setup_target_depthonly(
+        &mut self,
+        context: &Dx11Context,
+        backend: &RenderBackend,
+        desc: &DrawDescSpace,
+    ) {
+        self.setup(context, backend);
+        self.set_target_depthonly(context, backend, desc)
     }
     pub fn setup_target(&mut self, context: &Dx11Context, backend: &RenderBackend, desc: &DrawDescSpace) {
         self.setup(context, backend);
@@ -3677,15 +3732,16 @@ impl FrameStencil {
         if !ok {
             return
         }
+        state.set_prim(context, PrimitiveTopology::TriangleStrip);
 
-        state.setup_target(context, backend, desc);
+        state.setup_target_depthonly(context, backend, desc);
         self.set_minimap_scissor(context, backend, state);
         if let Some(..) = self.minimap {
             backend.depth_handler.fill_clipped(context);
             state.set_minimap_scissor(context, backend, None);
         }
 
-        backend.depth_handler.fill_corners(&context);
+        backend.depth_handler.fill_corners(context);
     }
 }
 impl Default for FrameStencil {
