@@ -21,6 +21,8 @@ pub struct RenderBackend {
     pub perspective_handler: PerspectiveHandler,
     pub blend_state: OMBlendState<BlendState>,
     #[cfg(feature = "goggles2")]
+    pub blend_state_depthonly: OMBlendState<BlendState>,
+    #[cfg(feature = "goggles2")]
     pub blend_state_shadow: OMBlendState<BlendState>,
 
     pub shaders: ShaderLoader,
@@ -52,7 +54,14 @@ impl RenderBackend {
         let blend_desc = BlendState::desc_for_target(Self::BLEND_STATE_DESC_RT, false, false);
         let blend_state =
             BlendState::new_with_desc(&device, &blend_desc).context("Blending setup failed")?;
+        #[cfg(feature = "goggles2")]
+        let blend_desc_depthonly = BlendState::desc_for_target(Self::BLEND_STATE_DESC_DEPTHONLY, false, false);
+        #[cfg(feature = "goggles2")]
+        let blend_state_depthonly =
+            BlendState::new_with_desc(&device, &blend_desc_depthonly).context("Blending setup failed")?;
+        #[cfg(feature = "goggles2")]
         let blend_desc_shadow = BlendState::desc_for_target(Self::BLEND_STATE_DESC_G2_SHADOW, false, false);
+        #[cfg(feature = "goggles2")]
         let blend_state_shadow =
             BlendState::new_with_desc(&device, &blend_desc_shadow).context("Blending setup failed")?;
         //log::info!("Setting up device context");
@@ -70,6 +79,8 @@ impl RenderBackend {
         }*/
         Ok(RenderBackend {
             blend_state: OMBlendState::new(blend_state, None, None),
+            #[cfg(feature = "goggles2")]
+            blend_state_depthonly: OMBlendState::new(blend_state_depthonly, None, None),
             #[cfg(feature = "goggles2")]
             blend_state_shadow: OMBlendState::new(blend_state_shadow, None, None),
             depth_handler,
@@ -168,6 +179,14 @@ impl RenderBackend {
         BlendOpAlpha: taimi_d3d::dx11::blend::BlendOp::MIN,
         //DestBlendAlpha: taimi_d3d::dx11::blend::BlendFactor::SRC_ALPHA,
         ..Self::BLEND_STATE_DESC_RT
+    };
+    #[cfg(feature = "goggles2")]
+    const BLEND_STATE_DESC_DEPTHONLY: D3D11_RENDER_TARGET_BLEND_DESC = D3D11_RENDER_TARGET_BLEND_DESC {
+        RenderTargetWriteMask: 0,
+        // write mask should be applied even when blending is off afaict
+        #[cfg(todo = "unnecessary")]
+        BlendEnable: BOOL(1),
+        ..BlendState::TARGET_DESC_DEFAULT_OFF
     };
 
     const SAMPLER_DESC: D3D11_SAMPLER_DESC = D3D11_SAMPLER_DESC {
