@@ -52,7 +52,6 @@ use {
         ui::{
             gameplay::{GameplayState, GameplayTransition},
             MapContext,
-            UiState,
         },
     },
     taimi_pack::attributes::AttrString,

@@ -155,10 +155,6 @@ impl ScriptController {
                 }
                 if let Some(Some(tx)) = &self.lua_tx {
                     let _ = rt::log::warn_ok(tx.send(msg).await);
-                } else {
-                    #[cfg(taimi_debug)]
-                    #[cfg(deleteme)]
-                    log::debug!("couldn't relay {msg:?}")
                 }
                 Ok(())
             },
@@ -442,18 +438,6 @@ impl ScriptMessage {
         match () {
             #[cfg(feature = "scripts-lua")]
             _ => {
-                #[cfg(deleteme)]
-                if changed.contains(rt::bindings::GameControl::Miscellaneous_Interact)
-                    && state.contains(rt::bindings::GameControl::Miscellaneous_Interact)
-                {
-                    // prepare ahead of time...
-                    let and_interact = true;
-                    LuaMessage::RefreshMarkerFocus { and_interact }.try_send();
-                    if and_interact {
-                        // TODO: if state ^ changed & !Interact == 0?
-                        return None
-                    }
-                }
                 let args = vec![
                     Box::new(Some(state)) as Box<dyn taimi_pack::script::lua::IntoLuaMut + Send>,
                     Box::new(Some(changed)),

@@ -30,7 +30,6 @@ use {
             state::SaveState,
             Settings,
         },
-        space::{engine::SpaceEvent, Engine},
     },
     anyhow::Context,
     std::{
@@ -51,7 +50,6 @@ use {
             PackCategoryNs,
             VisibilityFlags,
         },
-        ui::MapContext,
     },
     taimi_pack::{
         attributes::{FilterAttributes, MarkerAttributes},

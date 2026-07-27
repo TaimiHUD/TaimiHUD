@@ -179,12 +179,6 @@ impl PackPlugStash {
             //pending.clear();
             self.pending_changes.remove(&marker_path);
         }
-        #[cfg(deleteme)]
-        if let (MarkerIndex::NS_TRAIL, Some(changes)) = (marker_path.path.namespace(), &changes) {
-            for c in changes {
-                log::debug!("changing a trail key {}", c.id());
-            }
-        }
         changes.unwrap_or_default()
     }
     #[inline]
@@ -206,14 +200,6 @@ impl PackPlugStash {
             if changes.is_some() {
                 pending.clear();
             }
-            #[cfg(deleteme)]
-            if let (MarkerIndex::NS_TRAIL, Some(changes)) = (path.path.namespace(), &changes) {
-                for c in changes {
-                    log::debug!("changing a trail key {}", c.id());
-                }
-            } else if MarkerIndex::NS_TRAIL == path.path.namespace() {
-                log::debug!("trail#{} changes empty?", path.path.trail_index_unchecked());
-            }
             changes.map(|c| (path, c))
         })
     }
@@ -222,8 +208,6 @@ impl PackPlugStash {
         self.changes_dirty = !self.pending_changes.is_empty();
     }
     pub fn prepare_map_exit(&mut self) {
-        #[cfg(deleteme)]
-        log::debug!("AAAAAKJNASD preparing map exit!");
         self.changes_dirty = false;
         self.pending_changes.clear();
         self.pending_start = Default::default();

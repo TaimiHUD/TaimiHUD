@@ -36,7 +36,6 @@ use {
         },
     },
     taimi_hoard::{
-        cmp::CmpIgnore,
         iters::IterExt as _,
         loc::{LocationMut, Locator},
     },
