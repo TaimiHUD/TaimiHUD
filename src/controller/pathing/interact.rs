@@ -1836,16 +1836,6 @@ impl PathingController {
         };
         self.spawn_alert(alert, delay);
     }
-    #[cfg(deleteme)]
-    pub(super) async fn process_marker_info(
-        &mut self,
-        path: MarkerPath,
-        loaded_path: LoadedMarkerPath<PackMapPath>,
-        message: AttrString,
-    ) {
-        log::debug!("TODO: marker info {}", &message[..]);
-        self.spawn_alert(message[..].into(), Duration::from_secs(7));
-    }
     pub(super) fn process_marker_dismiss(
         &mut self,
         _path: MarkerPath,

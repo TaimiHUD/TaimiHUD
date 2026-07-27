@@ -6,7 +6,7 @@ use {
         state::VisibilityFlagsExt as _,
         PackSpace,
     },
-    glamour::{Box3, Point3, Size3},
+    glamour::{Box3, Point3},
     taimi_meta::packs::{CategoryIndex, CategoryPath, PoiPath, VisibilityFlags},
     taimi_pack::{
         attributes::{cell::GetAttrDynExt, keys, InteractionAttributes, PoiAttributes, RenderAttributes},

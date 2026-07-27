@@ -397,15 +397,7 @@ impl LuaPackDesc {
             .get::<mlua::Table>("ctx")?
             .get::<mlua::Table>("events")?;
 
-        #[cfg(deleteme)]
-        let shared = self.shared_arc();
-        #[cfg(deleteme)]
-        let mut marker_focus = shared.active_markers.try_lock().ok();
         if let Some(map_id) = map_id {
-            #[cfg(deleteme)]
-            if let Some(focus) = &mut marker_focus {
-                focus.clear();
-            }
             // event loop may want to clean up prior to receiving new set of handlers...
             let res = self.notify_with(lua, ScriptNotification::PathingMapExit, (map_id.get(),));
             let abort = res.is_err() | matches!(self.received, ScriptSignal::Ended | ScriptSignal::Restart);
@@ -419,14 +411,6 @@ impl LuaPackDesc {
         let key_once = keys::ScriptOnce::pack_key_of();
         for marker_path in markers {
             let loc = marker_index2loc(marker_path.path);
-            #[cfg(deleteme)]
-            if loc.0 == MarkerType::Trail {
-                log::debug!("Starting trail#{}!! {marker_path}", loc.1);
-            }
-            #[cfg(deleteme)]
-            if let Some(focus) = &mut marker_focus {
-                let _ = focus.entry(marker_path).or_default();
-            }
             let marker = unsafe { PackMarkerRef::new_unchecked(pack.clone(), loc) };
             let overrides = PackOverrides::shared_read(&overrides);
             let attrs_o;
@@ -1560,47 +1544,6 @@ impl PackRoot {
             shared,
         })
     }
-    /// XXX: case-sensitive, ensure callers canonicalize!
-    #[cfg(deleteme)]
-    pub fn category_state(pack: &Pack, id: &FullIdRef) -> script::Result<bool> {
-        let state = crate::SETTINGS.get().map(|s| {
-            let s = s.blocking_read();
-            !s.disabled_paths.contains(id.as_str())
-        });
-        #[cfg(todo = "unnecessary")]
-        let state = state.unwrap_or(|| {
-            LuaPackDesc::lookup_pack_category(&self.root.pack, id).map(|cat| cat.default_toggle())
-        });
-        Ok(state.unwrap_or(true))
-    }
-    /// XXX: case-sensitive, ensure callers canonicalize!
-    #[cfg(deleteme)]
-    pub fn category_state_set(id: &FullIdRef, show_hide: Option<bool>) -> script::Result<bool> {
-        let mut new_state = show_hide;
-        let changed = crate::SETTINGS.get().map(|s| {
-            let mut s = s.blocking_write();
-            let current_state = !s.disabled_paths.contains(id.as_str());
-            let state = match show_hide {
-                Some(state) if current_state == state => None,
-                state => Some(*new_state.insert(state.unwrap_or(!current_state))),
-            };
-            if let Some(state) = state {
-                let disabled_paths = s.disabled_paths_mut();
-                if state {
-                    disabled_paths.remove(id.as_str());
-                } else {
-                    disabled_paths.insert(id.into());
-                }
-            }
-        });
-        #[cfg(deleteme)]
-        if let Some(()) = changed {
-            crate::controller::pathing::PathingEvent::RequestDisabledPaths.try_send();
-        }
-        // this really shouldn't fail...
-        let new_state = new_state.unwrap_or(true);
-        Ok(new_state)
-    }
 }
 impl CategoryHandle for PackRoot {
     type GetCategories<'a> = Box<dyn Iterator<Item = <Self as PackHandleFactory>::Category> + 'a>;
@@ -1829,21 +1772,6 @@ impl CategoryHandleMut for PackCategory {
         );
         Ok(())
     }
-    #[cfg(deleteme)]
-    fn is_visible(&self) -> script::Result<bool> {
-        let id = self.get_id()?;
-        Ok(PackRoot::category_state(&self.marker.marker.pack(), &id).ok() == Some(true))
-    }
-    #[cfg(deleteme)]
-    fn show(&self) -> script::Result<()> {
-        let id = self.get_id()?;
-        PackRoot::category_state_set(&id, Some(true)).map(drop)
-    }
-    #[cfg(deleteme)]
-    fn hide(&self) -> script::Result<()> {
-        let id = self.get_id()?;
-        PackRoot::category_state_set(&id, Some(false)).map(drop)
-    }
 }
 #[derive(Clone)]
 pub struct PackMarkerState {
@@ -1995,13 +1923,6 @@ impl GetAttrDyn for PackMarker {
     }
     #[cfg(todo)]
     fn iter_attrs_dyn(&self) -> impl Iterator<Item = Cow<'_, dyn AttrKeyValue>> + '_ {}
-}
-#[cfg(deleteme)]
-impl ops::Deref for PackMarker {
-    type Target = PackMarkerMut;
-    fn deref(&self) -> &Self::Target {
-        &self.marker
-    }
 }
 impl PathableHandle for PackMarker {
     #[inline]
@@ -2184,16 +2105,6 @@ impl PathableHandleMut for PackPoi {
         let key = v.id();
         self.marker.marker.overrides_write().attrs.set_attr_dyn(v);
         self.marker.notify_change([key]);
-        #[cfg(deleteme)]
-        pack_attr! { match =id_is(key) {
-            = keys::Info => if self.get_focused().unwrap_or(false) {
-                if let Some(info) = self.marker.lookup_attr::<keys::Info>() {
-                    if !info[..].is_empty() {
-                        crate::controller::script::ui::ScriptHostUiX::new().info_notify(&info.0[..], None);
-                    }
-                }
-            },
-        } }
         Ok(())
     }
     #[cfg(feature = "paths-interact")]
@@ -2427,8 +2338,6 @@ impl PathableHandle for PackTrail {
 impl PathableHandleMut for PackTrail {
     fn set_marker_attr_dyn(&self, v: PackValueCell) -> script::Result<()> {
         let key = v.id();
-        #[cfg(deleteme)]
-        log::debug!("trail.{key} = something");
         self.marker.marker.overrides_write().attrs.set_attr_dyn(v);
         self.marker.notify_change([key]);
         Ok(())

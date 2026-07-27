@@ -1,5 +1,5 @@
 use {
-    crate::controller::pathing::{space::DrawSpace, PathingController},
+    crate::controller::pathing::PathingController,
     futures::future::Either,
     glamour::{Box3, FloatUnit, Point3, Size3},
     num_traits::AsPrimitive,

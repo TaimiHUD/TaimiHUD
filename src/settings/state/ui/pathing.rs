@@ -151,14 +151,6 @@ bitflags! {
         const IGNORE_SPACE = 1 << 1;
         const INCLUDE_ID = 1 << 2;
         const PATTERN_REGEX = 1 << 3;
-        #[cfg(deleteme)]
-        const IGNORE_ROOT = 1 << 2;
-        #[cfg(deleteme)]
-        const IGNORE_LEAVES = 1 << 3;
-        #[cfg(deleteme)]
-        const IGNORE_BRANCHES = 1 << 4;
-        #[cfg(deleteme)]
-        const INCLUDE_CHILDREN = 1 << 5;
         const NEGATIVE = 1 << 7;
     }
 }
@@ -178,13 +170,13 @@ impl PathingSearchFlags {
             Self::INCLUDE_ID => "include-id",
             Self::PATTERN_REGEX => "pattern-regex",
             Self::NEGATIVE => "negative",
-            #[cfg(deleteme)]
+            #[cfg(todo = "unused")]
             Self::IGNORE_ROOT => "ignore-root",
-            #[cfg(deleteme)]
+            #[cfg(todo = "unused")]
             Self::IGNORE_LEAVES => "ignore-leaf",
-            #[cfg(deleteme)]
+            #[cfg(todo = "unused")]
             Self::IGNORE_BRANCHES => "ignore-branch",
-            #[cfg(deleteme)]
+            #[cfg(todo = "unused")]
             Self::INCLUDE_CHILDREN => "include-children",
             _ => return None,
         })
@@ -209,14 +201,6 @@ impl FromStr for PathingSearchFlags {
             "include-id" => Self::INCLUDE_ID,
             "pattern-regex" => Self::PATTERN_REGEX,
             "negative" => Self::NEGATIVE,
-            #[cfg(deleteme)]
-            "ignore-root" => Self::IGNORE_ROOT,
-            #[cfg(deleteme)]
-            "ignore-leaf" => Self::IGNORE_LEAVES,
-            #[cfg(deleteme)]
-            "ignore-branch" => Self::IGNORE_BRANCHES,
-            #[cfg(deleteme)]
-            "include-children" => Self::INCLUDE_CHILDREN,
             _ => anyhow::bail!("unsupported search option `{s}`"),
         })
     }

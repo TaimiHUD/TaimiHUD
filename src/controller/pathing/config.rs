@@ -30,7 +30,6 @@ use {
             state::SaveState,
             Settings,
         },
-        space::{engine::SpaceEvent, Engine},
     },
     anyhow::Context,
     std::{
@@ -41,17 +40,14 @@ use {
         sync::Arc,
     },
     taimi_hoard::loc::{indexed::IndexedList, LocationGet, LocationMut, LocationRef, Locator},
-    taimi_meta::{
-        packs::{
-            collections::CategorySet,
-            id::{MarkerId, MarkerPath},
-            CategoryIndex,
-            CategoryPath,
-            MapIndex,
-            PackCategoryNs,
-            VisibilityFlags,
-        },
-        ui::MapContext,
+    taimi_meta::packs::{
+        collections::CategorySet,
+        id::{MarkerId, MarkerPath},
+        CategoryIndex,
+        CategoryPath,
+        MapIndex,
+        PackCategoryNs,
+        VisibilityFlags,
     },
     taimi_pack::{
         attributes::{FilterAttributes, MarkerAttributes},
