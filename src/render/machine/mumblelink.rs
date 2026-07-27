@@ -1,7 +1,7 @@
 #[cfg(all(any(feature = "markers", feature = "space"), not(feature = "extension-nexus")))]
-pub use arcloader_mumblelink::gw2_mumble::Identity as MumbleIdentityUpdate;
+pub use gw2data::gw2_mumble::Identity as MumbleIdentityUpdate;
 #[cfg(all(any(feature = "markers", feature = "space"), feature = "extension-nexus"))]
-pub use arcloader_mumblelink::identity::{
+pub use gw2data::identity::{
     NexusIdentityShare as MumbleIdentityShare,
     NexusIdentityUpdate as MumbleIdentityUpdate,
 };

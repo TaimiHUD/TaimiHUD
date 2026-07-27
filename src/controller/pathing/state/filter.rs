@@ -4,7 +4,7 @@ use {
         exports::runtime as rt,
         render::machine::MumbleIdentityUpdate,
     },
-    arcloader_mumblelink::identity::MumbleIdentityFields,
+    gw2data::identity::MumbleIdentityFields,
     std::{
         collections::BTreeSet,
         hash::Hash,

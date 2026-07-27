@@ -32,11 +32,11 @@ use {
     },
     anyhow::Context,
     arcdps::extras::{ExtrasVersion, UserInfoIter},
-    arcloader_mumblelink::gw2_mumble::{LinkedMem, MumbleLink},
     dpsapi::{
         api::header::ExtensionLoadResult,
         combat::{CombatArgs, CombatEvent},
     },
+    gw2data::gw2_mumble::{LinkedMem, MumbleLink},
     log::Level,
     std::{
         ffi::{c_void, CStr, CString, OsStr},

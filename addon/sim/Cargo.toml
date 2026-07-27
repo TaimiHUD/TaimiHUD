@@ -25,7 +25,7 @@ default = [
 ]
 taimi = [
   "dep:taimi_hud",
-  "arcloader-mumblelink",
+  "gw2data",
 ]
 windows = [
   "dep:windows",
@@ -53,7 +53,8 @@ taimi_d3d = { path = "../../space/d3d", default-features = false, features = ["d
 taimi_cover = { path = "../../space/cover", default-features = false, features = ["imgui180", "serde"] }
 taimi_space = { path = "../../space/pack", default-features = false }
 taimi_meta = { path = "../../pathing/meta", default-features = false }
-arcloader-mumblelink = { git = "https://codeberg.org/TaimiHUD/arcloader", optional = true, default-features = false }
+hostdesc = { path = "../../model/host", package = "taimidata_host", default-features = false }
+gw2data = { path = "../../model/gw2data", package = "taimidata_gw2", optional = true, default-features = false }
 
 anyhow = "1"
 log = "0.4"

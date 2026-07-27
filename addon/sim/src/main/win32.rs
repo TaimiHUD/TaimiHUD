@@ -15,6 +15,7 @@ use taimi_ui::im::im192;
 use {
     anyhow::Context,
     glamour::{Point2, Point3, Size2, Vector3},
+    hostdesc::AddonHostType,
     std::{
         env,
         ffi::{CStr, CString, OsStr},
@@ -1213,14 +1214,12 @@ impl MumbleSim {
     }
     #[cfg(feature = "taimi")]
     pub fn write_to(&self, data: &mut MumbleSimDataArray) {
-        let dest = data
-            .as_mut_ptr()
-            .cast::<arcloader_mumblelink::gw2_mumble::LinkedMem>();
+        let dest = data.as_mut_ptr().cast::<gw2data::gw2_mumble::LinkedMem>();
         unsafe {
             ptr::write(&raw mut (*dest).context.build_id, 1);
             ptr::write(
                 &raw mut (*dest).context.ui_state,
-                arcloader_mumblelink::gw2_mumble::UiState::from_bits_truncate(self.ui_state),
+                gw2data::gw2_mumble::UiState::from_bits_truncate(self.ui_state),
             );
             let compass_size = self.compass_size();
             ptr::write(&raw mut (*dest).context.compass_width, compass_size.width);
@@ -1240,7 +1239,7 @@ impl MumbleSim {
             core::sync::atomic::compiler_fence(Ordering::SeqCst);
             ptr::write_volatile(&raw mut (*dest).ui_tick, self.ui_tick);
             {
-                let mut id = arcloader_mumblelink::identity::GW2_IDENTITY_EMPTY;
+                let mut id = gw2data::identity::GW2_IDENTITY_EMPTY;
                 id.fov = 0.8f32;
                 id.name = "arc".into();
                 id.map_id = self.map;
@@ -1328,6 +1327,9 @@ impl HostedShim {
 unsafe impl Sync for HostedShim {}
 unsafe impl Send for HostedShim {}
 impl taimi_hosted::HostedBy for HostedShim {
+    fn kind(&self) -> AddonHostType {
+        AddonHostType::Sim
+    }
     fn available(&self) -> bool {
         !self.read_hwnd().is_null()
     }

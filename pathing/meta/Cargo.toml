@@ -23,7 +23,7 @@ map-cache = [
 ]
 nexus = [
   "dep:nexus",
-  "arcloader-mumblelink?/nexus",
+  "gw2data/nexus",
 ]
 nexus-rtapi = [
   "nexus",
@@ -31,11 +31,12 @@ nexus-rtapi = [
 ]
 mumblelink-arcloader = [
   "taimi_mumblelink",
-  "dep:arcloader-mumblelink",
+  "gw2data/gw2_mumble",
 ]
 mumblelink-nexus = [
   # deprecated, juggling impls for multiple crate versions isn't worth it...
   "taimi_mumblelink",
+  "gw2data/nexus",
   "nexus?/mumble",
 ]
 spatial = [
@@ -47,6 +48,7 @@ serde = [
   "dep:serde_json",
   "glam/serde",
   "glamour/serde",
+  "gw2data/serde",
   "taimi_hoard/serde",
   #"bvh?/serde",
 ]
@@ -77,7 +79,7 @@ num-traits = { workspace = true }
 serde = { version = "1", features = ["derive"], optional = true }
 serde_json = { version = "1", optional = true }
 
-arcloader-mumblelink = { git = "https://codeberg.org/TaimiHUD/arcloader", default-features = false, optional = true }
+gw2data = { path = "../../model/gw2data", package = "taimidata_gw2", default-features = false }
 nexus = { workspace = true, optional = true }
 
 [build-dependencies]

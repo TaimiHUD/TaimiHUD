@@ -1,0 +1,31 @@
+[package]
+name = "taimidata_host"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[features]
+default = [
+  "arcffi/default",
+  "taimi_hoard/default",
+  "gw2data/default",
+]
+serde = [
+  "arcffi/serde",
+  "taimi_hoard/serde",
+  "gw2data/serde",
+]
+
+[dependencies]
+arcffi = { path = "../../rt/ffi", package = "taimi_ffi", default-features = false }
+gw2data = { path = "../gw2data", package = "taimidata_gw2", default-features = false }
+taimi_hoard = { path = "../../rt/hoard", default-features = false }
+
+anyhow = "1"
+glam = { workspace = true }
+glamour = { workspace = true }

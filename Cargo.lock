@@ -3,6 +3,16 @@
 version = 4
 
 [[package]]
+name = "addonapi"
+version = "0.1.0"
+source = "git+https://codeberg.org/TaimiHUD/arcloader#05825a52cfe48a9ab61f63da50fb525afce78020"
+dependencies = [
+ "arcffi",
+ "bitflags 2.9.0",
+ "nexus",
+]
+
+[[package]]
 name = "addr2line"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -194,7 +204,7 @@ dependencies = [
 [[package]]
 name = "arcffi"
 version = "0.1.0"
-source = "git+https://codeberg.org/TaimiHUD/arcloader#87e9278edd316991d2b6eaf5cfc6eed0fb2e3d16"
+source = "git+https://codeberg.org/TaimiHUD/arcloader#05825a52cfe48a9ab61f63da50fb525afce78020"
 dependencies = [
  "windows",
  "windows-core",
@@ -205,12 +215,13 @@ dependencies = [
 [[package]]
 name = "arcloader-mumblelink"
 version = "0.1.0"
-source = "git+https://codeberg.org/TaimiHUD/arcloader#87e9278edd316991d2b6eaf5cfc6eed0fb2e3d16"
+source = "git+https://codeberg.org/TaimiHUD/arcloader#05825a52cfe48a9ab61f63da50fb525afce78020"
 dependencies = [
  "arcffi",
  "gw2_mumble",
  "log",
  "nexus",
+ "rustc-hash 2.1.1",
  "serde",
  "serde_json",
 ]
@@ -946,7 +957,7 @@ checksum = "ea8a8b81cacc08888170eef4d13b775126db426d0b348bee9d18c2c1eaf123cf"
 [[package]]
 name = "dpsapi"
 version = "0.1.0"
-source = "git+https://codeberg.org/TaimiHUD/arcloader#87e9278edd316991d2b6eaf5cfc6eed0fb2e3d16"
+source = "git+https://codeberg.org/TaimiHUD/arcloader#05825a52cfe48a9ab61f63da50fb525afce78020"
 dependencies = [
  "arcdps",
  "arcffi",
@@ -958,7 +969,7 @@ dependencies = [
 [[package]]
 name = "dyload"
 version = "0.1.0"
-source = "git+https://codeberg.org/TaimiHUD/arcloader#87e9278edd316991d2b6eaf5cfc6eed0fb2e3d16"
+source = "git+https://codeberg.org/TaimiHUD/arcloader#05825a52cfe48a9ab61f63da50fb525afce78020"
 dependencies = [
  "arcffi",
  "windows",
@@ -3644,6 +3655,7 @@ dependencies = [
  "taimi_ffi",
  "taimi_hoard",
  "taimi_log",
+ "taimidata_host",
 ]
 
 [[package]]
@@ -3719,6 +3731,8 @@ dependencies = [
  "taimi_space",
  "taimi_sync",
  "taimi_ui",
+ "taimidata_gw2",
+ "taimidata_host",
  "tempfile",
  "tinystr 0.8.1",
  "tobj",
@@ -3770,7 +3784,6 @@ name = "taimi_meta"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "arcloader-mumblelink",
  "async-compression",
  "bitflags 2.9.0",
  "bitvec",
@@ -3789,6 +3802,7 @@ dependencies = [
  "serde_json",
  "sha1_smol",
  "taimi_hoard",
+ "taimidata_gw2",
  "uuid",
 ]
 
@@ -3822,7 +3836,6 @@ name = "taimi_sim"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "arcloader-mumblelink",
  "env_logger",
  "glam 0.30.1",
  "glamour",
@@ -3839,6 +3852,8 @@ dependencies = [
  "taimi_meta",
  "taimi_space",
  "taimi_ui",
+ "taimidata_gw2",
+ "taimidata_host",
  "windows",
 ]
 
@@ -3893,6 +3908,27 @@ dependencies = [
  "serde",
  "taimi_ffi",
  "windows",
+]
+
+[[package]]
+name = "taimidata_gw2"
+version = "0.1.0"
+dependencies = [
+ "addonapi",
+ "arcloader-mumblelink",
+ "dpsapi",
+]
+
+[[package]]
+name = "taimidata_host"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "glam 0.30.1",
+ "glamour",
+ "taimi_ffi",
+ "taimi_hoard",
+ "taimidata_gw2",
 ]
 
 [[package]]

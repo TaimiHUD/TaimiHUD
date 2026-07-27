@@ -6,6 +6,7 @@ use {
     arcffi::cstr::Str0,
     core::{pin::Pin, ptr::NonNull},
     futures_core::stream::Stream,
+    hostdesc::AddonHostType,
     std::path::{Path, PathBuf},
 };
 
@@ -20,6 +21,7 @@ pub use self::{
 pub type DynStreamOf<T> = Pin<Box<dyn Stream<Item = T> + Sync + Send + 'static>>;
 
 pub trait HostedBy {
+    fn kind(&self) -> AddonHostType;
     fn available(&self) -> bool;
     #[cfg(todo)]
     fn variant_name(&self) -> &'static str;

@@ -1,0 +1,41 @@
+[package]
+name = "taimidata_gw2"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[lints]
+workspace = true
+
+[features]
+default = [
+  "arcloader-mumblelink/default",
+  #"addonapi?/default",
+  #"dpsapi?/default",
+]
+serde = [
+  "arcloader-mumblelink/serde",
+  # "addonapi?/serde",
+  # "dpsapi?/serde",
+]
+gw2_mumble = [
+  "arcloader-mumblelink/gw2_mumble",
+]
+addonapi = [
+  "dep:addonapi",
+]
+dpsapi = [
+  "dep:dpsapi",
+]
+nexus = [
+  # deprecated...
+  "arcloader-mumblelink/nexus",
+  "addonapi?/nexus",
+]
+
+[dependencies]
+arcloader-mumblelink = { workspace = true, default-features = false, features = ["identity", "rustc-hash"] }
+dpsapi = { workspace = true, default-features = false, optional = true }
+addonapi = { workspace = true, default-features = false, optional = true }

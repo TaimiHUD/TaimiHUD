@@ -38,7 +38,7 @@ use crate::ui::mumblelink::gw2_mumble::{Context, Identity};
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(
     feature = "mumblelink-arcloader",
-    doc = "\nSee also: [gw2_mumble::Context](arcloader_mumblelink::gw2_mumble::Context)"
+    doc = "\nSee also: [gw2_mumble::Context](gw2data::gw2_mumble::Context)"
 )]
 pub struct MapCalibration {
     pub compass_position: MinimapPlacement,
@@ -258,7 +258,7 @@ impl MapUnit for WorldmapSpace {
 /// [MumbleLink context](https://wiki.guildwars2.com/wiki/API:MumbleLink#context)
 #[cfg_attr(
     feature = "mumblelink-arcloader",
-    doc = "\nSee also: [gw2_mumble::Context](arcloader_mumblelink::gw2_mumble::Context)"
+    doc = "\nSee also: [gw2_mumble::Context](gw2data::gw2_mumble::Context)"
 )]
 pub struct MapState<M: MapUnit = WorldmapSpace> {
     pub centre: Point2<MapSpace>,
@@ -361,7 +361,7 @@ impl<M: MapUnit> fmt::Debug for MapState<M> {
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(
     feature = "mumblelink-arcloader",
-    doc = "\nSee also: [gw2_mumble::Context](arcloader_mumblelink::gw2_mumble::Context)"
+    doc = "\nSee also: [gw2_mumble::Context](gw2data::gw2_mumble::Context)"
 )]
 pub struct UiMap {
     pub calibration: MapCalibration,
@@ -468,7 +468,7 @@ impl UiMap {
     }
 
     #[cfg(feature = "mumblelink-arcloader")]
-    pub fn update_from_mumblelink(&mut self, mumblelink: arcloader_mumblelink::gw2_mumble::MumblePtr) {
+    pub fn update_from_mumblelink(&mut self, mumblelink: gw2data::gw2_mumble::MumblePtr) {
         if mumblelink.read_ui_version() == 0 {
             return
         }

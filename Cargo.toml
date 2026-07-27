@@ -3,6 +3,8 @@ resolver = "3"
 members = [
   "addon/sim",
   "api/client",
+  "model/host",
+  "model/gw2data",
   "pathing/pack",
   "pathing/meta",
   "rt/hoard",
@@ -82,7 +84,6 @@ api = [
 ]
 
 space = [
-  "dep:arcloader-mumblelink",
   "dep:itertools",
   "dep:tobj",
   "texture-loader",
@@ -117,7 +118,6 @@ goggles2-camera = []
 goggles2-project = []
 
 timers = [
-  "dep:arcloader-mumblelink",
 ]
 timers-space = [
   # visual markers and directions
@@ -127,7 +127,6 @@ timers-space = [
 ]
 
 markers = [
-  "dep:arcloader-mumblelink",
   "dep:itertools",
   "dep:taimi_meta",
   "dep:taimi_input",
@@ -396,7 +395,9 @@ closure-ffi = { version = "3", default-features = false, features = ["std"], opt
 jit-allocator2 = { version = "0.2", optional = true }
 
 nexus = { workspace = true, features = ["imgui"] }
-arcloader-mumblelink = { workspace = true, features = ["gw2_mumble"], optional = true }
+gw2data = { path = "./model/gw2data", package = "taimidata_gw2", default-features = false, features = ["gw2_mumble", "serde"] }
+hostdesc = { path = "./model/host", package = "taimidata_host", default-features = false }
+arcloader-mumblelink = { workspace = true, features = ["log"] }
 dpsapi = { workspace = true, optional = true }
 
 [dependencies.image]
@@ -428,8 +429,9 @@ features = [
 
 [workspace.dependencies]
 arcffi = { git = "https://codeberg.org/TaimiHUD/arcloader", default-features = false, features = ["std"] }
+addonapi = { git = "https://codeberg.org/TaimiHUD/arcloader", default-features = false }
 dpsapi = { git = "https://codeberg.org/TaimiHUD/arcloader", default-features = false }
-arcloader-mumblelink = { git = "https://codeberg.org/TaimiHUD/arcloader", default-features = false, features = ["log", "identity"] }
+arcloader-mumblelink = { git = "https://codeberg.org/TaimiHUD/arcloader", default-features = false, features = ["identity", "rustc-hash"] }
 arcdps = { git = "https://codeberg.org/TaimiHUD/arcdps-rs", branch = "0.23.x-taimi", default-features = false }
 nexus = { git = "https://codeberg.org/TaimiHUD/nexus-rs", branch = "0.11.x-taimi", default-features = false }
 #gw2_mumble = { git = "https://codeberg.org/TaimiHUD/gw2-mumble-rs", branch = "0.3.x-taimi", default-features = false }

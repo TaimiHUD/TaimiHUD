@@ -1,7 +1,7 @@
 #[cfg(any(feature = "markers", feature = "space"))]
 use {
     crate::exports::runtime::bindings::{ControlsReceiver, CONTROLS},
-    arcloader_mumblelink::identity::MumbleIdentityTracker,
+    gw2data::identity::MumbleIdentityTracker,
     std::borrow::Cow,
     taimi_meta::{
         coords::SignObtainer,

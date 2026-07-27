@@ -4,6 +4,7 @@ use {
     crate::Result,
     arcffi::cstr::Str0,
     core::ptr::NonNull,
+    hostdesc::AddonHostType,
     std::path::{Path, PathBuf},
 };
 
@@ -21,6 +22,9 @@ fn unimpl() -> anyhow::Error {
 }
 
 impl crate::HostedBy for Nop {
+    fn kind(&self) -> AddonHostType {
+        AddonHostType::Unknown
+    }
     fn available(&self) -> bool {
         false
     }

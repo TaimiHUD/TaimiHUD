@@ -17,11 +17,11 @@ use {
         settings::{MarkerAutoPlaceSettings, Settings, SettingsLock, SourceKind},
         ACCOUNT_NAME_CELL,
     },
-    anyhow::{anyhow, Context},
+    anyhow::Context,
     arcdps::extras::{UserInfoOwned, UserRole},
-    arcloader_mumblelink::identity::MumbleIdentityFields,
     glam::Vec3,
     glamour::{Box2, Point2, Point3, TransformMap},
+    gw2data::identity::MumbleIdentityFields,
     rand::Rng,
     std::{
         collections::{HashMap, HashSet},

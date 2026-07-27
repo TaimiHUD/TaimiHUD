@@ -66,9 +66,9 @@ pub mod nexus {
 
 #[cfg(feature = "mumblelink-arcloader")]
 mod arcloader {
-    pub use arcloader_mumblelink::gw2_mumble::{self, LinkedMem, MumblePtr, UIScaling, UiState as UIState};
+    pub use gw2data::gw2_mumble::{self, LinkedMem, MumblePtr, UIScaling, UiState as UIState};
     #[cfg(feature = "nexus")]
-    pub use arcloader_mumblelink::identity::ImpIdentity as NexusIdentity;
+    pub use gw2data::identity::NexusIdentityUpdate as NexusIdentity;
     use {
         crate::ui::{MapContext, MinimapPlacement, UiSize, UiState},
         std::mem::transmute,
