@@ -310,10 +310,12 @@ pub fn process_key_event(msg: u32, w: usize, l: isize) -> u32 {
     #[cfg(todo)]
     let prev_down = l & (1 << 30) != 0;
     let repeat = l & 0xff;
-    let is_up = matches!(
-        msg,
-        WindowsAndMessaging::WM_KEYUP | WindowsAndMessaging::WM_SYSKEYUP
-    );
+    let is_up = match msg {
+        WindowsAndMessaging::WM_KEYUP | WindowsAndMessaging::WM_SYSKEYUP => true,
+        WindowsAndMessaging::WM_KEYDOWN | WindowsAndMessaging::WM_SYSKEYDOWN => false,
+        // uninteresting bye
+        _ => return msg,
+    };
     #[cfg(todo)]
     let is_trigger = !is_up && repeat == 1;
     #[cfg(todo)]

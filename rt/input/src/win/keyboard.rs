@@ -1,3 +1,7 @@
+//! scancode fun...
+//!
+//! helpful resource: https://kbdlayout.info/kbdusx/scancodes
+
 #[cfg(feature = "arcdps-extras")]
 use arcdps::extras::{self, keybinds::RawKeybindChange, KeyCode, KeybindChange, MouseCode};
 use {
@@ -75,28 +79,56 @@ impl KeyInput {
         let repeat = 1u16;
         let prev_state = ((!self.down) as isize) << 30;
         let trans_state = ((!self.down) as isize) << 31;
-        let sc = match scan_code(self.vk).map(|sc| sc.get()).unwrap_or(0) {
-            sc @ 0..=0xff => sc as isize,
-            sc => sc as u8 as isize | (sc as isize & 0x8000) >> 7,
-        } << 16;
+        let sc = scan_code_for(self.vk)
+            .map(|sc| scan_code_param(sc).0)
+            .unwrap_or(0);
         let w = self.vk.0 as _;
         let l = prev_state | trans_state | sc | repeat as isize;
         (msg, w, l)
     }
 
+    /// TODO: whether to include vk, vsc, or both is unclear?
     pub fn to_input(self) -> KeyboardAndMouse::INPUT {
-        let flag_down = match self.down {
-            false => KeyboardAndMouse::KEYEVENTF_KEYUP,
-            true => Default::default(),
+        let flag_down = self
+            .down
+            .then_some(KeyboardAndMouse::KEYEVENTF_KEYUP)
+            .unwrap_or_default();
+        let mut sc = scan_code_for(self.vk).map(|sc| sc.get());
+        let sc_ambiguous = match self.vk.0 {
+            self::NP_0..=self::NP_9 => true,
+            _ => false,
         };
-        // TODO: KEYEVENTF_EXTENDED?
+        let flag_sc = match (sc, sc_ambiguous) {
+            #[cfg(todo)]
+            (Some(..), false) => true,
+            _ => false,
+        };
+        let flag_ext = match &mut sc {
+            Some(sc) if *sc & 0xfe00 == 0xe000 => {
+                *sc &= 0xff;
+                true
+            },
+            #[cfg(todo)]
+            &mut Some(sc) if !sc_ambiguous => {
+                let vk = NonZeroU16::new(self.vk.0);
+                let is_ext = scan_code_is_ext(sc as _, vk);
+                scan_code_is_ext(sc as _, vk)
+            },
+            _ => false,
+        };
+        let flag_ext = (flag_ext && flag_sc)
+            .then_some(KeyboardAndMouse::KEYEVENTF_EXTENDEDKEY)
+            .unwrap_or_default();
+        let flag_sc = flag_sc
+            .then_some(KeyboardAndMouse::KEYEVENTF_SCANCODE)
+            .unwrap_or_default();
         KeyboardAndMouse::INPUT {
             r#type: KeyboardAndMouse::INPUT_KEYBOARD,
             Anonymous: KeyboardAndMouse::INPUT_0 {
                 ki: KeyboardAndMouse::KEYBDINPUT {
                     wVk: self.vk,
-                    wScan: scan_code(self.vk).map(|sc| sc.get()).unwrap_or(0),
-                    dwFlags: flag_down,
+                    wScan: sc.unwrap_or(0),
+                    dwFlags: flag_down | flag_sc | flag_ext,
                     time: 0,
                     dwExtraInfo: 0,
                 },
@@ -811,9 +843,54 @@ impl fmt::Display for DisplayAddonApi<&'_ KeyInput> {
     }
 }
 
+/// TODO: "high byte" means 4th right?
 pub fn scan_code(vk: VIRTUAL_KEY) -> Option<NonZeroU16> {
-    let vsc = unsafe { KeyboardAndMouse::MapVirtualKeyA(vk.0.into(), KeyboardAndMouse::MAPVK_VK_TO_VSC) };
-    NonZeroU16::new(vsc as u16)
+    let vsc =
+        unsafe { KeyboardAndMouse::MapVirtualKeyA(vk.0.into(), KeyboardAndMouse::MAPVK_VK_TO_VSC_EX) };
+    // 0xe0/0xe1 indicates code is extended
+    let ext = (vsc & 0xff00_0000u32) >> 16;
+    NonZeroU16::new(vsc as u16).map(|out| out | ext as u16)
+}
+pub fn scan_code_for(vk: VIRTUAL_KEY) -> Option<NonZeroU16> {
+    match scan_code(vk) {
+        // accounting for weird shift layers...
+        None if matches!(vk.0, self::NP_0..=self::NP_9) => {
+            let unshifted = VIRTUAL_KEY(vk.0 - self::NP_0 + KeyboardAndMouse::VK_0.0);
+            scan_code(unshifted)
+        },
+        sc => sc,
+    }
+}
+/// XXX: unsure why `MAPVK_VK_TO_VSC_EX` doesn't mark keys as extended,
+/// so make some assumptions here (on wine at least?)
+pub fn scan_code_is_ext(vsc: u32, vk: Option<NonZeroU16>) -> bool {
+    let vk = vk.map(|vk| VIRTUAL_KEY(vk.get())).unwrap_or_default();
+    match vk {
+        #[cfg(todo)]
+        | KeyboardAndMouse::VK_RMENU
+        | KeyboardAndMouse::VK_RCONTROL
+        | KeyboardAndMouse::VK_INSERT
+        | KeyboardAndMouse::VK_DELETE
+        | KeyboardAndMouse::VK_HOME
+        | KeyboardAndMouse::VK_END
+        | KeyboardAndMouse::VK_NEXT
+        | KeyboardAndMouse::VK_PRIOR
+        | KeyboardAndMouse::VK_LEFT
+        | KeyboardAndMouse::VK_RIGHT
+        | KeyboardAndMouse::VK_UP
+        | KeyboardAndMouse::VK_DOWN => true,
+        #[cfg(todo)]
+        | KeyboardAndMouse::VK_LWIN | KeyboardAndMouse::VK_RWIN => true,
+        // break=ctrl+pause?
+        #[cfg(todo)]
+        KeyboardAndMouse::VK_PAUSE => true,
+        #[cfg(todo)]
+        idk::NUMPAD_ENTER | idk::NUMPAD_DIV => true,
+        // 0xe0 or 0xe1
+        _ if vsc & 0xffff_fe_00 == 0xe0_00 => true,
+        // shrug
+        _ => vsc & 0xffff_0000 != 0,
+    }
 }
 
 pub fn key_char(vk: VIRTUAL_KEY) -> Option<NonZeroU16> {
@@ -842,6 +919,8 @@ pub fn key_name(code: LPARAM) -> windows::core::Result<windows::core::HSTRING> {
     }
 }
 
+const NP_0: u16 = KeyboardAndMouse::VK_NUMPAD0.0;
+const NP_9: u16 = KeyboardAndMouse::VK_NUMPAD9.0;
 pub fn vk_name(vk: VIRTUAL_KEY) -> windows::core::Result<windows::core::HSTRING> {
     let char_fastpath = key_char(vk).map(|c| {
         let b = [c.get()];
@@ -852,23 +931,40 @@ pub fn vk_name(vk: VIRTUAL_KEY) -> windows::core::Result<windows::core::HSTRING>
     }
     // TODO: ToUnicodeEx exists for this too?
 
-    scan_code(vk)
-        .ok_or_else(|| {
-            windows::core::Error::new(
-                windows::Win32::Foundation::ERROR_KEY_DOES_NOT_EXIST.to_hresult(),
-                "scan code unknown",
-            )
-        })
-        .and_then(|sc| key_name(scan_code_param(sc)))
+    match scan_code(vk) {
+        None if matches!(vk.0, self::NP_0..=self::NP_9) => {
+            // shift state that has no scancode associated? bleh...
+            let num = vk.0 - self::NP_0;
+            let num = [b'N' as u16, b'p' as u16, b'0' as u16 + num];
+            Ok(windows::core::HSTRING::from_wide(&num))
+        },
+        None => Err(windows::core::Error::new(
+            windows::Win32::Foundation::ERROR_KEY_DOES_NOT_EXIST.to_hresult(),
+            "scan code unknown",
+        )),
+        #[cfg(todo)]
+        Some(mut sc) => {
+            let ext =
+                (sc.get() & 0xff00u16 == 0).then(|| scan_code_is_ext(sc.get() as _, NonZeroU16::new(vk.0)));
+            if let Some(true) = ext {
+                sc |= 0xe000;
+            }
+            key_name(scan_code_param(sc))
+        },
+        Some(sc) => key_name(scan_code_param(sc)),
+    }
 }
 
 pub fn scan_code_param(sc: NonZeroU16) -> LPARAM {
-    LPARAM((sc.get() as usize as isize) << 16)
+    let sc = sc.get() as usize as isize;
+    // 0xe1XX or 0xe0XX indicate extended VSCs
+    let l = (sc & 0xff) << 16 | (sc & 0x8000) >> 7;
+    LPARAM(l)
 }
 
 pub fn scan_code_key(vsc: NonZeroU16) -> Option<VIRTUAL_KEY> {
-    let vk =
-        unsafe { KeyboardAndMouse::MapVirtualKeyA(vsc.get().into(), KeyboardAndMouse::MAPVK_VSC_TO_VK) };
+    let sc = vsc.get() as u32;
+    let vk = unsafe { KeyboardAndMouse::MapVirtualKeyA(sc, KeyboardAndMouse::MAPVK_VSC_TO_VK) };
     NonZeroU16::new(vk as u16).map(|vk| vk.get()).map(VIRTUAL_KEY)
 }
 
