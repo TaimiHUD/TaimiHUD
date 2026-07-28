@@ -173,8 +173,11 @@ pub const fn addon_dir_fallback() -> &'static Path {
 
 pub(crate) static ADDON_DIR: RwLock<Option<&'static Path>> = RwLock::new(None);
 
+pub fn addon_dir_opt() -> Option<&'static Path> {
+    ADDON_DIR.read().ok().map(|p| *p).flatten()
+}
 pub fn addon_dir() -> &'static Path {
-    if let Ok(Some(path)) = ADDON_DIR.read().map(|p| *p) {
+    if let Some(path) = addon_dir_opt() {
         return path
     }
 

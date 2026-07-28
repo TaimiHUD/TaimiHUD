@@ -13,8 +13,8 @@ use {
         fmt,
         fs,
         io,
-        path::Path,
-        sync::LazyLock,
+        path::{Path, PathBuf},
+        sync::{LazyLock, OnceLock},
     },
     taimi_hoard::write_owned,
     taimi_sync::watched,
@@ -127,8 +127,18 @@ impl BootstrapState {
         }
     }
 
+    /// TODO: may differ across loaders, so track appropriately or pick an agnostic/universal location?
     pub fn file_path() -> &'static Path {
-        Path::new("addons/Taimi/boot.json")
+        static PATH: OnceLock<PathBuf> = OnceLock::new();
+        if let Some(path) = PATH.get() {
+            path.as_path()
+        } else if let Some(parent) = rt::addon_dir_opt() {
+            PATH.get_or_init(move || parent.join("boot.json"))
+        } else {
+            #[cfg(taimi_debug)]
+            log::debug!("boot.json static fallback used");
+            Path::new("addons/Taimi/boot.json")
+        }
     }
 
     pub fn installation() -> &'static Installation {
@@ -161,7 +171,9 @@ impl BootstrapState {
     }
     pub fn write_file((path, data): &(&Path, String)) -> anyhow::Result<()> {
         use std::io::Write;
-        let _ = fs::create_dir_all(rt::addon_dir_fallback());
+        if let Some(dir) = rt::addon_dir_opt() {
+            let _ = fs::create_dir_all(dir);
+        }
         let mut f = fs::File::create(path)?;
         f.write_all(data.as_bytes()).context("writing boot state")
     }
@@ -172,7 +184,9 @@ impl BootstrapState {
     }
     pub async fn save_to((path, data): &(&Path, String)) -> anyhow::Result<()> {
         use tokio::{fs, io::AsyncWriteExt};
-        let _ = fs::create_dir_all(rt::addon_dir_fallback()).await;
+        if let Some(dir) = rt::addon_dir_opt() {
+            let _ = fs::create_dir_all(dir).await;
+        }
         let mut f = fs::File::create(path).await?;
         f.write_all(data.as_bytes()).await.context("writing boot state")
     }
