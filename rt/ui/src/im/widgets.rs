@@ -699,7 +699,7 @@ impl<'i> BareWidget<'i> for ProgressBar {
 impl ProgressBar {
     #[inline(always)]
     pub const fn prepare_height(height: f32) -> ImSize2 {
-        ImSize2::new(f32::MIN, height)
+        ImSize2::new(-f32::MIN_POSITIVE, height)
     }
     #[inline(always)]
     pub const fn prepare_width(width: f32) -> ImSize2 {

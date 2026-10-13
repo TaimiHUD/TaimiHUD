@@ -176,7 +176,7 @@ impl imw::TreeNode {
     ));
 }
 impl imw::ProgressBar {
-    pub const IM180_DEFAULT_SIZE: ImSize2 = ImSize2::new(f32::MIN, 0.0);
+    pub const IM180_DEFAULT_SIZE: ImSize2 = ImSize2::new(-f32::MIN_POSITIVE, 0.0);
 }
 impl imw::InputPassword {
     pub const IM180_FLAGS_PRESET: sys::ImGuiInputTextFlags_ =
