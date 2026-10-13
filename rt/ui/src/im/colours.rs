@@ -22,7 +22,7 @@ pub enum ImColourIndex {
     Disabled = 1,
     Button = 21,
     ButtonHovered = 22,
-    PlotHistogram = 41,
+    PlotHistogram = 40,
     NavCursor = 49,
 }
 impl ImColourIndex {

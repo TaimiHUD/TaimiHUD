@@ -376,7 +376,7 @@ impl From<ImColourIndex> for StyleColor {
     #[inline]
     fn from(colour_id: ImColourIndex) -> StyleColor {
         let idx = match colour_id {
-            // 41(180) -> 43
+            // 40(180) -> 43
             ImColourIndex::PlotHistogram => sys::ImGuiCol_PlotHistogram as _,
             // 49(180) -> 56
             ImColourIndex::NavCursor => sys::ImGuiCol_NavCursor as _,
