@@ -149,7 +149,7 @@ in {
       nixpkgs = {
         # see https://github.com/arcnmx/nixexprs-rust/issues/10
         args.config.checkMetaRecursively = false;
-        version = "24.11";
+        version = "26.05";
       };
     };
     jobs = {
