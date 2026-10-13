@@ -147,6 +147,21 @@ impl FestivalFixup {
             Festival::DragonBash,
             FestivalWindow::with_timestamp(1780416000, 1782241200),
         ),
+        // Festival of the Four Winds 2026: 2026-08-11 — 2026-09-01
+        (
+            Festival::FourWinds,
+            FestivalWindow::with_timestamp(1786464000, 1788289200),
+        ),
+        // Shadow of the Mad King 2026: 2026-10-13 — 2026-11-03
+        (
+            Festival::Halloween,
+            FestivalWindow::with_timestamp(1791907200, 1793732400),
+        ),
+        // Wintersday 2026: 2026-12-08 — 2027-01-05 (provisional)
+        (
+            Festival::Wintersday,
+            FestivalWindow::with_timestamp(1796745600, 1799175600),
+        ),
     ];
 }
 
