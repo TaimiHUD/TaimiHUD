@@ -377,7 +377,13 @@ impl RenderState {
             Some(height) => ImSize2::splat(height),
             None => icon.im_size(),
         };
-        ui.image(icon, size);
+        if icon.id.is_some() {
+            ui.image(icon, size);
+        } else if size != ImSize2::ZERO {
+            ui.dummy(size);
+        } else {
+            return
+        }
         ui.same_line();
     }
 
@@ -408,7 +414,13 @@ impl RenderState {
             Some(height) => ImSize2::splat(height),
             None => icon.im_size(),
         };
-        ui.image(icon, size);
+        if icon.id.is_some() {
+            ui.image(icon, size);
+        } else if size != ImSize2::ZERO {
+            ui.dummy(size);
+        } else {
+            return
+        }
         ui.same_line();
     }
     pub fn draw_open_path_button<'ui, U, S>(ui: &mut U, text: S, path: &Path)

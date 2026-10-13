@@ -2381,7 +2381,7 @@ where
     fn draw_widget(self, _ui: &mut U) -> Self::Output {
         let (_, texture, flags) = self;
         let (_, size) = flags.into();
-        let tex_id = texture.im180_texture_id().unwrap_or(ptr::null_mut());
+        let Some(tex_id) = texture.im180_texture_id() else { return };
         let tint = texture.tint();
         let uv = texture.uv_bounds();
         // TODO?
