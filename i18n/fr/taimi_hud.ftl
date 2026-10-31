@@ -107,7 +107,7 @@ pathing-render-minimap-toggle = Basculer le cheminement de la mini-carte
 pathing-render-map-toggle = Basculer le cheminement de la carte
 primary-window-toggle-text = Afficher/Masquer la fenêtre principale de Taimi
 timer-key-trigger = Touche de déclenchement du minuteur { $id }
-timer-key-reset = Réinitialiser { timers }
+timer-key-reset = Réinitialiser les minuteurs
 
 ## Config
 
@@ -120,10 +120,10 @@ imgui-notice = Vous pouvez effectuer un Ctrl + Clic gauche sur un curseur (ou au
  N'oubliez pas d'appuyer sur Entrée pour confirmer la valeur.
 context-click-notice = Clic droit pour plus d'options
 dpi-scaling = Échelle DPI
-dpi-notice = Veiller à ce que ceci corresponde à la valeur "{dpi-scaling}" dans les options graphiques du jeu afin que les éléments de la carte s'affichent correctement.
+dpi-notice = Veiller à ce que ceci corresponde à la valeur « {dpi-scaling} » dans les options graphiques du jeu afin que les éléments de la carte s'affichent correctement.
 marker-trigger = Déclenchement des marqueurs
 marker-condition = Condition du déclenchement
-autoplace-warning = Si vous n'avez pas RTAPI d'installé, nous ne pourront pas vérifier si vous êtes lieutenant ou commandant.
+autoplace-warning = Si vous n'avez pas RTAPI d'installé, nous ne pourrons pas vérifier si vous êtes lieutenant ou commandant.
 nexus-quick-access = Icônes d'accès rapide
 icon-style = Style d'icônes
 icon-style-plain = Simple
@@ -135,7 +135,7 @@ update-revert-mainline-notice-nexus = Choisissez entre les versions stables et p
 update-nexus-notice = Les mises à jour en jeu nécessitent Nexus. La gestion des mises à jour automatiques peut être configurée dans les paramètres d'extension d'ArcDPS ou de Nexus.
 update-nexus-provider-notice = Vous pouvez gérer les mises à jour dans les options de configuration de l'extension dans Nexus, mais aussi désactiver « { preferred-updater } » pour un contrôle manuel.
 gh-api-token = Jeton API GitHub
-gh-api-token-notice = Il est possible d'éviter les erreurs liées à la limite de requêtes ("Rate Limit") lors de la mise à jour des sources de données en configurant un jeton personnalisé. Ne le faites que si vous comprenez les implications de cette action !
+gh-api-token-notice = Il est possible d'éviter les erreurs liées à la limite de requêtes (Rate Limit) lors de la mise à jour des sources de données en configurant un jeton personnalisé. Ne le faites que si vous comprenez les implications de cette action !
 language = Langue
 language-unsupported = Aucune traduction
 language-help = Vous parlez une langue que nous ne prenons pas encore en charge ?
@@ -214,7 +214,7 @@ check-for-updates-tooltip = Vérifie les mises à jour pour toutes les sources d
  Nous ne lançons pas cette vérification automatiquement, afin de vous laisser décider si des requêtes réseau peuvent être effectuées.
 checked-for-updates-last = Dernière vérification : { $time }
 reload-data-sources = Recharger les données
-reload-data-sources-tooltip = Recharge les éléments à partir des sources de données actuellement installées. Utile si vous les avez modifiés dans "sources.toml" !
+reload-data-sources-tooltip = Recharge les éléments à partir des sources de données actuellement installées. Utile si vous les avez modifiés dans « sources.toml » !
 
 remote = Contenu distant
 update-status = Statut
@@ -276,7 +276,7 @@ marker-set-edit = Modifier l'ensemble de marqueurs
 marker-set-delete = Supprimer l'ensemble de marqueurs
 scaling-factor = Facteur d'échelle
 current-scaling-factor = { scaling-factor } actuel : ({ $x }, { $y })
-current-scaling-factor-multiple = { scaling-factor } actuel en pieds par unité de coordonnée : ({ $x }, { $y })
+current-scaling-factor-multiple = { scaling-factor } actuel, en pieds par unité de coordonnée : ({ $x }, { $y })
 scaling-factor-reset = { reset } le facteur d'échelle détecté
 no-file-associated = Fichier associé introuvable
 markers-arg = { markers } : { $count }
@@ -333,7 +333,7 @@ select-a-timer = Veuillez sélectionner un minuteur à configurer !
 ## Fenêtre du minuteur
 
 no-phases-active = Aucune phase active, aucun minuteur en cours.
-reset-timers = { reset } { timers }
+reset-timers = Réinitialiser les minuteurs
 
 ## Cheminement
 
@@ -362,7 +362,7 @@ ignore-whitespace = Ignorer les espaces
 case-insensitive = Ignorer la casse
 toggle = Activer/Désactiver
 pathing-config = Options de cheminement
-pathing-config-enable = {space} Pathing
+pathing-config-enable = Cheminement {space}
 pathing-config-minimap = Paramètres de la mini-carte
 pathing-config-worldmap = Paramètres de la carte
 pathing-config-trail-alpha = Opacité
@@ -415,7 +415,7 @@ render-notice-gameplay = Chargez le jeu pour commencer
 render-notice-gameplay-initial = Choisissez un personnage pour commencer
 render-notice-error = Erreur ! Consultez le journal (.log) dans le dossier de Nexus ou Taimi pour plus de détails
 packs-empty = Aucun fichier n'a été chargé
-packs-empty-notice = Une fois installés depuis l'onglet { data-sources-tab } ou manuellement, le bouton "Recharger" devrait les détecter !
+packs-empty-notice = Une fois installés depuis l'onglet { data-sources-tab } ou manuellement, le bouton « Recharger » devrait les détecter !
 
 ## Festivals
 
